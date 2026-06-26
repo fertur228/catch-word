@@ -10,10 +10,10 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "supportsTablet": true,
-      "bundleIdentifier": "com.catchword.app"
+      "bundleIdentifier": "com.almazbukayev.catchword"
     },
     "android": {
-      "package": "com.catchword.app",
+      "package": "com.almazbukayev.catchword",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

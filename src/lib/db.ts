@@ -8,6 +8,10 @@
  *
  * Экраны работают не с этими функциями напрямую, а через хук `useCollection()`
  * (см. collection-context.tsx) — он держит карточки в состоянии React.
+ *
+ * Хранит два набора данных:
+ *  - `word_card`  — карточки слов (+ поля SRS интервального повторения);
+ *  - `key_value`  — пользовательские настройки (язык изучения/родной, онбординг).
  */
 import * as SQLite from 'expo-sqlite';
 
@@ -18,7 +22,17 @@ const DB_NAME = 'catchword.db';
 // База открывается один раз и переиспользуется (ленивая инициализация).
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
+/** Безопасно добавить колонку в существующую БД (если её ещё нет). */
+async function addColumnIfMissing(db: SQLite.SQLiteDatabase, sql: string) {
+  try {
+    await db.execAsync(sql);
+  } catch {
+    // Колонка уже существует — это ок (ALTER упадёт, мы это глотаем).
+  }
+}
+
 async function init(db: SQLite.SQLiteDatabase) {
+  // Свежая БД создаётся сразу со всеми колонками.
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS word_card (
@@ -32,9 +46,28 @@ async function init(db: SQLite.SQLiteDatabase) {
       category      TEXT,
       learning_lang TEXT NOT NULL,
       native_lang   TEXT NOT NULL,
-      created_at    INTEGER NOT NULL
+      created_at    INTEGER NOT NULL,
+      due_at        INTEGER,
+      interval      INTEGER,
+      ease          REAL,
+      reps          INTEGER,
+      mastery       INTEGER,
+      notes         TEXT
+    );
+    CREATE TABLE IF NOT EXISTS key_value (
+      key   TEXT PRIMARY KEY NOT NULL,
+      value TEXT
     );
   `);
+
+  // Миграция старой БД (без SRS-колонок): добавляем их по одной, не падая,
+  // если они уже есть. Так апдейт приложения не ломает существующую коллекцию.
+  await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN due_at INTEGER');
+  await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN interval INTEGER');
+  await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN ease REAL');
+  await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN reps INTEGER');
+  await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN mastery INTEGER');
+  await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN notes TEXT');
 }
 
 export function getDb(): Promise<SQLite.SQLiteDatabase> {
@@ -61,6 +94,12 @@ interface Row {
   learning_lang: string;
   native_lang: string;
   created_at: number;
+  due_at: number | null;
+  interval: number | null;
+  ease: number | null;
+  reps: number | null;
+  mastery: number | null;
+  notes: string | null;
 }
 
 /** Превратить строку БД в удобный объект `WordCard` (camelCase). */
@@ -77,6 +116,12 @@ function rowToCard(r: Row): WordCard {
     learningLang: r.learning_lang,
     nativeLang: r.native_lang,
     createdAt: r.created_at,
+    dueAt: r.due_at ?? undefined,
+    interval: r.interval ?? undefined,
+    ease: r.ease ?? undefined,
+    reps: r.reps ?? undefined,
+    mastery: r.mastery ?? undefined,
+    notes: r.notes ?? undefined,
   };
 }
 
@@ -96,8 +141,9 @@ export async function insertCard(c: WordCard): Promise<void> {
   const db = await getDb();
   await db.runAsync(
     `INSERT OR REPLACE INTO word_card
-       (id, emoji, image_uri, word, translation, ipa, examples, category, learning_lang, native_lang, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, emoji, image_uri, word, translation, ipa, examples, category,
+        learning_lang, native_lang, created_at, due_at, interval, ease, reps, mastery, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     c.id,
     c.emoji,
     c.imageUri ?? null,
@@ -109,6 +155,29 @@ export async function insertCard(c: WordCard): Promise<void> {
     c.learningLang,
     c.nativeLang,
     c.createdAt,
+    c.dueAt ?? null,
+    c.interval ?? null,
+    c.ease ?? null,
+    c.reps ?? null,
+    c.mastery ?? null,
+    c.notes ?? null,
+  );
+}
+
+/** Обновить только SRS-поля карточки (после повтора). */
+export async function updateCardSrs(
+  id: string,
+  srs: { dueAt: number; interval: number; ease: number; reps: number; mastery: number },
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE word_card SET due_at = ?, interval = ?, ease = ?, reps = ?, mastery = ? WHERE id = ?`,
+    srs.dueAt,
+    srs.interval,
+    srs.ease,
+    srs.reps,
+    srs.mastery,
+    id,
   );
 }
 
@@ -121,4 +190,22 @@ export async function countCards(): Promise<number> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM word_card');
   return row?.n ?? 0;
+}
+
+// --- Настройки (key_value): язык изучения/родной, флаг онбординга ---
+
+/** Прочитать значение настройки по ключу (или null, если нет). */
+export async function getPref(key: string): Promise<string | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ value: string | null }>(
+    'SELECT value FROM key_value WHERE key = ?',
+    key,
+  );
+  return row?.value ?? null;
+}
+
+/** Записать значение настройки по ключу. */
+export async function setPref(key: string, value: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('INSERT OR REPLACE INTO key_value (key, value) VALUES (?, ?)', key, value);
 }

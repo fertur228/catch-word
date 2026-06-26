@@ -2,11 +2,12 @@
  * Универсальная кнопка с вариантами оформления и опциональной SF-иконкой.
  */
 import { ActivityIndicator, Pressable, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import type { SFSymbol } from 'expo-symbols';
 
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
-import { Radius, Spacing } from '@/constants/theme';
+import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 type Variant = 'primary' | 'secondary' | 'danger' | 'ghost';
@@ -31,6 +32,9 @@ export function Button({
   style,
 }: ButtonProps) {
   const theme = useTheme();
+  // Лёгкая пружинная отдача при нажатии — приятная микро-интеракция.
+  const scale = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
   const bg: Record<Variant, string> = {
     primary: theme.primary,
@@ -50,20 +54,27 @@ export function Button({
     <Pressable
       onPress={onPress}
       disabled={disabled || loading}
-      style={({ pressed }) => [
-        styles.base,
-        { backgroundColor: bg[variant], borderColor, opacity: disabled ? 0.5 : pressed ? 0.85 : 1 },
-        style,
-      ]}>
-      {loading ? (
-        <ActivityIndicator color={fg[variant]} />
-      ) : (
-        <>
-          {icon ? <Icon name={icon} size={18} color={fg[variant]} /> : null}
-          <ThemedText type="default" style={[styles.label, { color: fg[variant] }]}>
-            {title}
-          </ThemedText>
-        </>
+      onPressIn={() => (scale.value = withSpring(Motion.scalePressed, Motion.spring.stiff))}
+      onPressOut={() => (scale.value = withSpring(1, Motion.spring.bouncy))}
+      style={style}>
+      {({ pressed }) => (
+        <Animated.View
+          style={[
+            styles.base,
+            { backgroundColor: bg[variant], borderColor, opacity: disabled ? 0.5 : pressed ? 0.9 : 1 },
+            animStyle,
+          ]}>
+          {loading ? (
+            <ActivityIndicator color={fg[variant]} />
+          ) : (
+            <>
+              {icon ? <Icon name={icon} size={18} color={fg[variant]} /> : null}
+              <ThemedText type="default" style={[styles.label, { color: fg[variant] }]}>
+                {title}
+              </ThemedText>
+            </>
+          )}
+        </Animated.View>
       )}
     </Pressable>
   );

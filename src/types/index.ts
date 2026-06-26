@@ -9,6 +9,9 @@
 /** Тарифы из спеки §8. */
 export type Tier = 'free' | 'basic' | 'premium';
 
+/** Оценка пользователя при повторе карточки (SRS, спека §5.6). */
+export type SrsRating = 'again' | 'good' | 'easy';
+
 /** Сохранённая карточка слова (одна запись в локальной БД). */
 export interface WordCard {
   id: string;
@@ -32,10 +35,58 @@ export interface WordCard {
   nativeLang: string;
   /** Время сохранения (Unix ms). */
   createdAt: number;
+
+  // --- Поля интервального повторения (SRS, спека §5.6). Опциональны: ---
+  // у «распознанных» слов и старых карточек их может не быть; контекст
+  // коллекции инициализирует их при добавлении (см. collection-context).
+  /** Когда карточку нужно повторить (Unix ms). dueAt<=now → пора. */
+  dueAt?: number;
+  /** Текущий интервал до следующего повтора, в минутах. */
+  interval?: number;
+  /** Лёгкость (SM-2): множитель роста интервала, ~1.3..3.0. */
+  ease?: number;
+  /** Сколько раз карточку успешно повторили подряд. */
+  reps?: number;
+  /** Уровень освоения 0..5 (для прогресса/звёзд в UI). */
+  mastery?: number;
+  /** Личная заметка пользователя (опционально). */
+  notes?: string;
 }
 
 /** «Распознаваемый» предмет — то, что бэкенд вернул бы по фото. */
 export type RecognizableWord = Omit<WordCard, 'id' | 'createdAt'>;
+
+/** Язык в списке выбора (онбординг/настройки). */
+export interface AppLanguage {
+  /** BCP-47 код, напр. 'en-US' — им же пользуется озвучка. */
+  code: string;
+  /** Человекочитаемое название, напр. 'English'. */
+  label: string;
+  /** Эмодзи-флаг, напр. '🇺🇸'. */
+  flag: string;
+}
+
+/** Пользовательские настройки (хранятся в key_value таблице БД). */
+export interface UserPrefs {
+  /** Язык изучения (BCP-47). */
+  learningLang: string;
+  /** Родной язык (BCP-47). */
+  nativeLang: string;
+  /** Прошёл ли пользователь онбординг. Пока false — показываем онбординг. */
+  onboarded: boolean;
+}
+
+/** Простая сводка по коллекции для дашборда/вкладок. */
+export interface CollectionStats {
+  /** Всего карточек. */
+  total: number;
+  /** Сколько освоено (mastery>=4). */
+  mastered: number;
+  /** Сколько карточек пора повторить сейчас (dueAt<=now). */
+  dueCount: number;
+  /** Текущая серия дней с активностью (мок-простая). */
+  streak: number;
+}
 
 /** Описание тарифа для экрана Пейволла. */
 export interface Plan {
