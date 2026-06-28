@@ -17,7 +17,8 @@
  * размонтировании; повторный переход защищён флагом-рефом.
  */
 import { useEffect, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
@@ -37,6 +38,10 @@ import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useCollection } from '@/lib/collection-context';
+import { getScanJob, updateScanJob, type ScanResult } from '@/lib/scan-job';
+import { cropToSticker, persistImage, recognizePhoto, toScanResult } from '@/lib/recognize';
+import { liftToPNG } from '@/lib/subject-lift';
 
 /** Размеры сканирующего «визира». */
 const FRAME = 240;
@@ -49,18 +54,25 @@ const RETICLE = 84;
 export function ScanningScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { word } = useLocalSearchParams<{ word?: string }>();
+  const { prefs } = useCollection();
+  const { jobId } = useLocalSearchParams<{ jobId?: string }>();
+  const { height } = useWindowDimensions();
+  // Реальный снятый кадр — показываем «обработку» именно его (а не абстрактный скрим).
+  const photoUri = getScanJob(jobId)?.photoUri;
 
   // Защита от двойного перехода (StrictMode/быстрый ремоунт).
   const navigated = useRef(false);
 
   // --- Зацикленные анимации (reanimated v4) ---
-  const enter = useSharedValue(0); // плавное проявление скрима
-  const scan = useSharedValue(0); // бегущая полоска сверху вниз
+  const enter = useSharedValue(0); // плавное проявление
+  const scan = useSharedValue(0); // сканирующий луч
   const pulse = useSharedValue(0); // «дыхание» визира-фокуса
   const spin = useSharedValue(0); // вращение кольца-спиннера
+  const ken = useSharedValue(0); // медленный зум кадра (ken burns)
 
-  // Старт анимаций + автопереход на Результат через ~1.1–1.4 c.
+  // Старт анимаций + реальное распознавание (Gemini) и вырезка стикера, затем
+  // переход на Результат. Минимальная задержка ~900мс, чтобы анимация всегда
+  // успела сыграть. Нет фото/бэкенда/ошибка — мягко уходим на мок.
   useEffect(() => {
     enter.value = withTiming(1, { duration: Motion.duration.base, easing: Easing.out(Easing.ease) });
     scan.value = withRepeat(
@@ -74,24 +86,66 @@ export function ScanningScreen() {
       true,
     );
     spin.value = withRepeat(withTiming(1, { duration: 1000, easing: Easing.linear }), -1, false);
+    ken.value = withRepeat(
+      withTiming(1, { duration: 4000, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true,
+    );
 
-    // Небольшой разброс длительности — ощущение «думает».
-    const delay = 1100 + Math.floor(Math.random() * 300);
-    const timer = setTimeout(() => {
-      if (navigated.current) return;
+    let active = true;
+    const goToResult = () => {
+      if (!active || navigated.current) return;
       navigated.current = true;
       // replace, чтобы кадр сканирования не оставался в стеке назад.
-      router.replace({ pathname: '/result', params: { word } });
-    }, delay);
+      router.replace({ pathname: '/result', params: { jobId } });
+    };
+
+    (async () => {
+      const started = Date.now();
+      const job = getScanJob(jobId);
+      const photoUri = job?.photoUri;
+      let result: ScanResult | undefined;
+      let cutoutUri: string | null = null;
+
+      if (photoUri) {
+        // Параллельно: облачное распознавание + нативная вырезка фона (iOS 17+).
+        const [reco, liftedUri] = await Promise.all([
+          recognizePhoto(photoUri, prefs.learningLang, prefs.nativeLang).catch(() => null),
+          liftToPNG(photoUri).catch(() => null),
+        ]);
+        const primary = reco && reco.objects.length > 0 ? reco.objects[0] : null;
+        if (primary) result = toScanResult(primary, prefs.learningLang);
+
+        if (liftedUri) {
+          // Настоящий вырез фона (Фаза 2) — лучший вариант.
+          cutoutUri = await persistImage(liftedUri).catch(() => null);
+        } else if (reco && primary && primary.bbox) {
+          // Запасной вариант — кроп по рамке (Фаза 1).
+          cutoutUri = await cropToSticker(
+            reco.prepared.uri,
+            reco.prepared.width,
+            reco.prepared.height,
+            primary.bbox,
+          );
+        }
+        // Гарантируем постоянную картинку, если ничего выше не сработало.
+        if (!cutoutUri) cutoutUri = await persistImage(photoUri).catch(() => null);
+      }
+
+      if (jobId) updateScanJob(jobId, { result, cutoutUri });
+      const wait = Math.max(0, 900 - (Date.now() - started));
+      setTimeout(goToResult, wait);
+    })();
 
     return () => {
-      clearTimeout(timer);
+      active = false;
       cancelAnimation(enter);
       cancelAnimation(scan);
       cancelAnimation(pulse);
       cancelAnimation(spin);
+      cancelAnimation(ken);
     };
-  }, [enter, scan, pulse, spin, router, word]);
+  }, [enter, scan, pulse, spin, ken, router, jobId, prefs.learningLang, prefs.nativeLang]);
 
   // Скрим: theme.background (морозная подложка) + theme.overlay (затемнение).
   const bgStyle = useAnimatedStyle(() => ({ opacity: enter.value * 0.82 }));
@@ -111,37 +165,63 @@ export function ScanningScreen() {
     transform: [{ rotate: `${interpolate(spin.value, [0, 1], [0, 360])}deg` }],
   }));
 
+  // Кадр медленно «дышит» зумом; луч сканирует по всей высоте экрана.
+  const kenStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: interpolate(ken.value, [0, 1], [1, 1.08]) }],
+  }));
+  const beamStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: interpolate(scan.value, [0, 1], [0, height]) }],
+    opacity: interpolate(scan.value, [0, 0.1, 0.9, 1], [0, 0.9, 0.9, 0]),
+  }));
+
   return (
     <View style={styles.flex}>
-      {/* Затемняющий скрим: камера снизу остаётся чуть видна (морозное стекло). */}
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { backgroundColor: theme.background }, bgStyle]}
-      />
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }, overlayStyle]}
-      />
+      {photoUri ? (
+        <>
+          {/* Реальный кадр с медленным зумом — «обрабатываем именно твоё фото». */}
+          <Animated.View style={[StyleSheet.absoluteFill, kenStyle]}>
+            <Image source={{ uri: photoUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          </Animated.View>
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }, overlayStyle]}
+          />
+          {/* Сканирующий луч по всей высоте кадра. */}
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.beam, { backgroundColor: theme.accent, shadowColor: theme.accent }, beamStyle]}
+          />
+        </>
+      ) : (
+        <>
+          {/* Фолбэк (симулятор/нет кадра): морозный скрим. */}
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: theme.background }, bgStyle]}
+          />
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }, overlayStyle]}
+          />
+        </>
+      )}
 
       {/* Контент: ловим тапы, чтобы во время скана нельзя было нажать на камеру. */}
       <SafeAreaView style={styles.center}>
         <Animated.View entering={FadeIn.duration(Motion.duration.base)} style={styles.frameWrap}>
-          {/* Сканирующая рамка-визир */}
-          <View style={[styles.frame, { borderColor: theme.border }]}>
-            {/* Яркие угловые скобки */}
+          {/* Рамка-визир с угловыми скобками + фокус. */}
+          <View style={[styles.frame, { borderColor: photoUri ? 'rgba(255,255,255,0.25)' : theme.border }]}>
             <View style={[styles.corner, styles.cornerTL, { borderColor: theme.accent }]} />
             <View style={[styles.corner, styles.cornerTR, { borderColor: theme.accent }]} />
             <View style={[styles.corner, styles.cornerBL, { borderColor: theme.accent }]} />
             <View style={[styles.corner, styles.cornerBR, { borderColor: theme.accent }]} />
 
-            {/* Бегущая полоска «сканирования» */}
-            <Animated.View
-              style={[
-                styles.scanLine,
-                { backgroundColor: theme.accent, shadowColor: theme.accent },
-                scanStyle,
-              ]}
-            />
+            {/* Локальная полоска — только в фолбэке (при фото луч идёт по всему экрану). */}
+            {!photoUri ? (
+              <Animated.View
+                style={[styles.scanLine, { backgroundColor: theme.accent, shadowColor: theme.accent }, scanStyle]}
+              />
+            ) : null}
 
             {/* Пульсирующий визир-фокус: кольцо-спиннер + центр */}
             <View style={styles.reticleWrap} pointerEvents="none">
@@ -149,7 +229,10 @@ export function ScanningScreen() {
                 <Animated.View
                   style={[
                     styles.spinner,
-                    { borderColor: theme.primarySoft, borderTopColor: theme.accent },
+                    {
+                      borderColor: photoUri ? 'rgba(255,255,255,0.3)' : theme.primarySoft,
+                      borderTopColor: theme.accent,
+                    },
                     spinStyle,
                   ]}
                 />
@@ -164,7 +247,7 @@ export function ScanningScreen() {
           <Animated.View
             entering={FadeInDown.duration(Motion.duration.base).delay(80)}
             style={styles.caption}>
-            <ThemedText type="smallBold" style={styles.captionText}>
+            <ThemedText type="smallBold" style={[styles.captionText, photoUri ? styles.captionOnPhoto : null]}>
               Распознаю предмет…
             </ThemedText>
             <View style={styles.dots}>
@@ -233,6 +316,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.9,
     shadowRadius: 8,
   },
+  // Полноэкранный сканирующий луч (когда показываем реальный кадр).
+  beam: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 3,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 12,
+  },
 
   // --- Пульсирующий визир-фокус по центру рамки ---
   reticleWrap: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
@@ -253,6 +347,7 @@ const styles = StyleSheet.create({
   // --- Подпись + точки ---
   caption: { alignItems: 'center', gap: Spacing.two },
   captionText: { fontSize: 16, letterSpacing: 0.2 },
+  captionOnPhoto: { color: '#FFFFFF' },
   dots: { flexDirection: 'row', gap: Spacing.one + 2 },
   dot: { width: 7, height: 7, borderRadius: 4 },
 });

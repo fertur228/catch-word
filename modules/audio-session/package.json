@@ -1,0 +1,6 @@
+{
+  "name": "audio-session",
+  "version": "1.0.0",
+  "description": "Configure the iOS audio session so speech plays even in silent mode.",
+  "platforms": ["apple"]
+}

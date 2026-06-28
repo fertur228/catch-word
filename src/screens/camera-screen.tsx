@@ -50,7 +50,7 @@ import { Reveal } from '@/components/reveal';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
-import { getRandomRecognizable } from '@/lib/mock-data';
+import { createScanJob } from '@/lib/scan-job';
 
 /** Цвета элементов поверх живого видео (не зависят от темы — лежат на кадре). */
 const ON_CAMERA = '#FFFFFF';
@@ -91,6 +91,8 @@ export function CameraScreen() {
 
   // Не даём списать скан дважды от быстрых тапов.
   const navigating = useRef(false);
+  // Ссылка на камеру — чтобы снять реальный кадр.
+  const cameraRef = useRef<CameraView>(null);
 
   // Зацикленные анимации крутим только пока вкладка в фокусе (экономия батареи).
   useEffect(() => {
@@ -141,7 +143,7 @@ export function CameraScreen() {
   const flashStyle = useAnimatedStyle(() => ({ opacity: flash.value }));
   const pressStyle = useAnimatedStyle(() => ({ transform: [{ scale: press.value }] }));
 
-  const onShutter = useCallback(() => {
+  const onShutter = useCallback(async () => {
     if (navigating.current) return;
     // Спека §5.2: перед съёмкой проверяем лимит; исчерпан → Пейволл.
     if (!tryScan()) {
@@ -154,9 +156,17 @@ export function CameraScreen() {
       withTiming(0.9, { duration: 70 }),
       withTiming(0, { duration: 240 }),
     );
+    // Снимаем реальный кадр. На симуляторе/при ошибке — без фото, поток продолжится.
+    let photoUri: string | undefined;
+    try {
+      const photo = await cameraRef.current?.takePictureAsync({ quality: 0.6 });
+      photoUri = photo?.uri;
+    } catch (e) {
+      console.warn('Съёмка не удалась:', e);
+    }
     // Сначала экран «Распознаю…» (scanning), он сам уйдёт на Результат.
-    const picked = getRandomRecognizable();
-    router.push({ pathname: '/scanning', params: { word: picked.word } });
+    const jobId = createScanJob(photoUri);
+    router.push({ pathname: '/scanning', params: { jobId } });
   }, [router, tryScan, flash]);
 
   // 1) Разрешение ещё загружается.
@@ -203,7 +213,7 @@ export function CameraScreen() {
   return (
     <View style={styles.flex}>
       {isFocused ? (
-        <CameraView style={StyleSheet.absoluteFill} facing="back" />
+        <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.cameraOff]} />
       )}

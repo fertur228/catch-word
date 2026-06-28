@@ -78,7 +78,7 @@ function masteryLabel(m: number): string {
 }
 
 /** Стикер «выпрыгивает» при открытии — приятный момент «вот оно, твоё слово». */
-function StickerHero({ emoji }: { emoji: string }) {
+function StickerHero({ emoji, imageUri }: { emoji: string; imageUri?: string | null }) {
   const scale = useSharedValue(0.7);
   const opacity = useSharedValue(0);
 
@@ -94,7 +94,7 @@ function StickerHero({ emoji }: { emoji: string }) {
 
   return (
     <Animated.View style={animStyle}>
-      <Sticker emoji={emoji} size={150} />
+      <Sticker emoji={emoji} imageUri={imageUri} size={150} />
     </Animated.View>
   );
 }
@@ -147,7 +147,7 @@ export function CardDetailScreen() {
       {/* Герой: стикер на тёплой подложке. */}
       <Reveal delay={0}>
         <View style={[styles.hero, { backgroundColor: theme.accentSoft }]}>
-          <StickerHero emoji={card.emoji} />
+          <StickerHero emoji={card.emoji} imageUri={card.imageUri} />
         </View>
       </Reveal>
 
@@ -162,7 +162,10 @@ export function CardDetailScreen() {
               /{card.ipa}/
             </ThemedText>
           </View>
-          <SpeakButton text={card.word} language={card.learningLang} size={52} />
+          <View style={styles.speakGroup}>
+            <SpeakButton text={card.word} language={card.learningLang} size={52} />
+            <SpeakButton text={card.word} language={card.learningLang} size={44} slow />
+          </View>
         </View>
       </Reveal>
 
@@ -271,6 +274,7 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   wordTexts: { flex: 1, gap: 2 },
+  speakGroup: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   word: { fontSize: 40, lineHeight: 44 },
   meta: { gap: Spacing.two },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, flexWrap: 'wrap' },

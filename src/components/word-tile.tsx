@@ -18,7 +18,7 @@ export function WordTile({ card, onPress }: { card: WordCard; onPress: () => voi
         styles.tile,
         { backgroundColor: theme.card, borderColor: theme.border, opacity: pressed ? 0.85 : 1 },
       ]}>
-      <Sticker emoji={card.emoji} size={84} />
+      <Sticker emoji={card.emoji} imageUri={card.imageUri} size={84} />
       <ThemedText type="default" style={styles.word} numberOfLines={1}>
         {card.word}
       </ThemedText>

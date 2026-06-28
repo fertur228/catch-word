@@ -40,7 +40,8 @@ import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
 import { lookupWord, suggestWords, type DictEntry } from '@/lib/dictionary';
-import { RECOGNIZABLE, getRandomRecognizable, getRecognizableByWord } from '@/lib/mock-data';
+import { RECOGNIZABLE, getRandomRecognizable } from '@/lib/mock-data';
+import { getScanJob } from '@/lib/scan-job';
 import { speakWord } from '@/lib/speech';
 import type { RecognizableWord, WordCard } from '@/types';
 
@@ -60,6 +61,8 @@ interface CardContent {
   category?: string;
   emoji: string;
   auto: boolean;
+  /** Реальный вырез/фото предмета (если есть). */
+  imageUri?: string | null;
 }
 
 /** Содержимое из «распознанного» предмета (готовый перевод считаем «авто»). */
@@ -71,7 +74,36 @@ function fromRecognized(r: RecognizableWord): CardContent {
     category: r.category ?? undefined, // в типе допустим null — приводим к undefined
     emoji: r.emoji,
     auto: true,
+    imageUri: r.imageUri ?? null,
   };
+}
+
+/**
+ * Распознанный предмет из текущего скана: реальный результат, если он есть
+ * (Фаза 1), иначе мок-слово — но с РЕАЛЬНЫМ фото/вырезом, если кадр сняли
+ * (Фаза 0). Так экран Результата осмыслен на любой стадии.
+ */
+function seedRecognized(
+  job: ReturnType<typeof getScanJob>,
+  prefs: { learningLang: string; nativeLang: string },
+): RecognizableWord {
+  const imageUri = job?.cutoutUri ?? job?.photoUri ?? null;
+  if (job?.result) {
+    const r = job.result;
+    return {
+      emoji: r.emoji,
+      imageUri,
+      word: r.word,
+      translation: r.translation,
+      ipa: r.ipa,
+      examples: r.examples ?? [],
+      category: r.category ?? null,
+      learningLang: prefs.learningLang,
+      nativeLang: prefs.nativeLang,
+    };
+  }
+  const mock = getRandomRecognizable();
+  return { ...mock, imageUri: imageUri ?? mock.imageUri ?? null };
 }
 
 /** Эмодзи по слову: берём из RECOGNIZABLE при точном совпадении, иначе заглушка. */
@@ -84,16 +116,16 @@ function emojiForWord(word: string): string {
 export function ResultScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { addCard } = useCollection();
-  const params = useLocalSearchParams<{ word?: string }>();
+  const { addCard, prefs } = useCollection();
+  const { jobId } = useLocalSearchParams<{ jobId?: string }>();
 
-  // «Распознанный» предмет держим в state — чтобы «Переснять» дал новое слово.
-  const [recognized, setRecognized] = useState(() => getRecognizableByWord(params.word));
-  // Текущее (возможно отредактированное) содержимое карточки. Синхронно с recognized
-  // на первом рендере; сбрасывается при «Переснять».
+  // Текущий скан (фото + результат распознавания + вырез). Читаем синхронно:
+  // к моменту перехода на Результат экран «Распознаю…» уже всё положил.
+  const job = getScanJob(jobId);
+  // «Распознанный» предмет: реальный результат или мок (с реальным фото, если есть).
+  const [recognized] = useState<RecognizableWord>(() => seedRecognized(job, prefs));
+  // Текущее (возможно отредактированное) содержимое карточки.
   const [content, setContent] = useState<CardContent>(() => fromRecognized(recognized));
-  // Ключ перезапускает анимации появления при «Переснять» (ремоунт блока).
-  const [revealKey, setRevealKey] = useState(0);
   // Маленький «успех» после сохранения (зелёная печать на стикере) перед закрытием.
   const [saved, setSaved] = useState(false);
   const backTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -119,7 +151,7 @@ export function ResultScreen() {
   useEffect(() => {
     const t = setTimeout(() => speakWord(recognized.word, recognized.learningLang), 420);
     return () => clearTimeout(t);
-  }, [recognized.word, recognized.learningLang, revealKey]);
+  }, [recognized.word, recognized.learningLang]);
 
   // Чистим таймер закрытия при размонтировании.
   useEffect(() => () => {
@@ -137,6 +169,7 @@ export function ResultScreen() {
       ipa: content.ipa,
       category: content.category ?? null,
       emoji: content.emoji,
+      imageUri: content.imageUri ?? null,
       // Примеры подходят только исходному слову — для изменённого их нет.
       examples: sameWord ? recognized.examples : [],
       id: `${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
@@ -148,13 +181,10 @@ export function ResultScreen() {
     backTimer.current = setTimeout(() => router.back(), 760);
   }, [saved, content, recognized, addCard, router]);
 
+  // «Переснять» — закрываем результат и возвращаемся к камере снять новый кадр.
   const onRetake = useCallback(() => {
-    const next = getRandomRecognizable();
-    setRecognized(next);
-    setContent(fromRecognized(next));
-    setEditing(false);
-    setRevealKey((k) => k + 1);
-  }, []);
+    router.back();
+  }, [router]);
 
   const onCancel = useCallback(() => router.back(), [router]);
 
@@ -225,14 +255,15 @@ export function ResultScreen() {
   // Подтвердить правку — переносим черновик в содержимое карточки.
   const confirmEdit = useCallback(() => {
     const word = draftWord.trim() || content.word; // пустое слово не сохраняем
-    setContent({
+    setContent((prev) => ({
       word,
       translation: draftTranslation.trim(),
       ipa: draftIpa.trim(),
       category: draftCategory,
       emoji: draftEmoji || FALLBACK_EMOJI,
       auto: draftAuto,
-    });
+      imageUri: prev.imageUri ?? null,
+    }));
     setEditing(false);
     setShowSuggestions(false);
     Keyboard.dismiss();
@@ -252,8 +283,8 @@ export function ResultScreen() {
 
   return (
     <Screen scroll>
-      {/* Группа появления: ремоунтится по revealKey, чтобы «Переснять» переиграл анимации. */}
-      <View key={revealKey} style={styles.reveal}>
+      {/* Группа появления. */}
+      <View style={styles.reveal}>
         {/* Бейдж «Поймал!» — тёплый акцент, ощущение пойманного слова. */}
         <FadeIn duration={Motion.duration.base}>
           <View style={styles.caughtRow}>
@@ -267,7 +298,7 @@ export function ResultScreen() {
         </FadeIn>
 
         {/* Стикер с пружинным «попом» + печать успеха после сохранения. */}
-        <StickerPop emoji={content.emoji} saved={saved} />
+        <StickerPop emoji={content.emoji} imageUri={content.imageUri} saved={saved} />
 
         {editing ? (
           /* --- Инлайн-редактор слова (фича 2) --- */
@@ -410,10 +441,12 @@ export function ResultScreen() {
                       /{content.ipa}/
                     </ThemedText>
                     <SpeakButton text={content.word} language={recognized.learningLang} size={44} />
+                    <SpeakButton text={content.word} language={recognized.learningLang} size={44} slow />
                   </View>
                 ) : (
                   <View style={styles.ipaRow}>
                     <SpeakButton text={content.word} language={recognized.learningLang} size={44} />
+                    <SpeakButton text={content.word} language={recognized.learningLang} size={44} slow />
                   </View>
                 )}
 
@@ -498,7 +531,15 @@ function AutoBadge() {
  * успеха, всплывающей после сохранения. Ремоунтится вместе с группой появления,
  * поэтому при «Переснять» «поп» проигрывается заново.
  */
-function StickerPop({ emoji, saved }: { emoji: string; saved: boolean }) {
+function StickerPop({
+  emoji,
+  imageUri,
+  saved,
+}: {
+  emoji: string;
+  imageUri?: string | null;
+  saved: boolean;
+}) {
   const theme = useTheme();
   const scale = useSharedValue(0.4);
   const opacity = useSharedValue(0);
@@ -518,7 +559,7 @@ function StickerPop({ emoji, saved }: { emoji: string; saved: boolean }) {
   return (
     <View style={styles.stickerWrap}>
       <Animated.View style={animStyle}>
-        <Sticker emoji={emoji} size={STICKER_SIZE} />
+        <Sticker emoji={emoji} imageUri={imageUri} size={STICKER_SIZE} />
       </Animated.View>
 
       {saved ? (

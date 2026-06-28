@@ -1,0 +1,6 @@
+{
+  "name": "subject-lift",
+  "version": "1.0.0",
+  "description": "On-device subject lift (background removal) via iOS Vision.",
+  "platforms": ["apple"]
+}
