@@ -13,6 +13,26 @@ import * as db from '@/lib/db';
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
+/**
+ * supabase-js падает прямо в createClient, если URL пустой/кривой или ключ
+ * пустой. Чтобы отсутствие env-переменных (напр. при первой сборке на Cloudflare)
+ * НЕ роняло весь билд — включая лендинг, которому Supabase не нужен, — при кривом
+ * URL/пустом ключе подставляем безопасные заглушки. Реальные значения приходят из
+ * EXPO_PUBLIC_* при сборке; isSupabaseConfigured() остаётся честным — UI знает,
+ * настроен ли бэкенд (без него вход/синк/распознавание просто недоступны).
+ */
+function isValidHttpUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+const CLIENT_URL = isValidHttpUrl(SUPABASE_URL) ? SUPABASE_URL : 'https://placeholder.supabase.co';
+const CLIENT_ANON = SUPABASE_ANON || 'placeholder-anon-key';
+
 /** Адаптер хранилища сессии поверх key_value (expo-sqlite). */
 const sqliteStorage = {
   getItem: (key: string) => db.getPref(key),
@@ -20,7 +40,7 @@ const sqliteStorage = {
   removeItem: (key: string) => db.deletePref(key).then(() => {}),
 };
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
+export const supabase = createClient(CLIENT_URL, CLIENT_ANON, {
   auth: {
     storage: sqliteStorage,
     autoRefreshToken: true,
@@ -32,7 +52,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
   },
 });
 
-/** Настроены ли URL и ключ Supabase. */
+/** Настроены ли URL и ключ Supabase (валидный URL + непустой ключ). */
 export function isSupabaseConfigured(): boolean {
-  return Boolean(SUPABASE_URL && SUPABASE_ANON);
+  return isValidHttpUrl(SUPABASE_URL) && Boolean(SUPABASE_ANON);
 }
