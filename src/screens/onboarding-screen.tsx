@@ -1,7 +1,8 @@
 /**
  * Онбординг (спека §5.1) — тёплое приветствие в стиле CapWords.
  *
- * 3 вступительных «слайда» + шаг выбора языков. Навигация по шагам — простой
+ * 5 вступительных «слайдов» (мир→словарь, лови, коллекция, освоение, привычка) +
+ * шаг выбора языков. Навигация по шагам — простой
  * индекс (без сторонних карусельных либ); контент при смене шага «въезжает»
  * через reanimated. На последнем шаге «Начать» сохраняет языки, отмечает
  * онбординг пройденным и уходит на вкладки (гейт в _layout пускает дальше).
@@ -41,11 +42,19 @@ const SLIDES = [
   },
   {
     title: 'Навёл →\nпоймал слово',
-    description: 'Наведи камеру на вещь — и поймай её слово, перевод и произношение.',
+    description: 'Наведи камеру на вещь — поймай слово, перевод и произношение.',
   },
   {
-    title: 'Копи\nи повторяй',
-    description: 'Слова копятся в коллекцию и вовремя всплывают на повторение.',
+    title: 'Собирай\nколлекцию',
+    description: 'Слова копятся стикерами. Листай их по датам или по темам.',
+  },
+  {
+    title: 'Учи и отмечай\nвыученные',
+    description: 'Слова вовремя всплывают на повторение. Освоил — горит золотой значок.',
+  },
+  {
+    title: 'Заходи\nкаждый день',
+    description: 'Квест дня и серия дней подряд не дают забросить.',
   },
 ] as const;
 
@@ -193,19 +202,19 @@ function Hero({ index }: { index: number }) {
     return (
       <View style={styles.hero}>
         <View style={[styles.orbitItem, { top: 6, left: 0 }]}>
-          <Sticker emoji="🍎" size={50} />
+          <Sticker category="Еда" size={50} />
         </View>
         <View style={[styles.orbitItem, { top: 28, right: 4 }]}>
-          <Sticker emoji="☕" size={50} />
+          <Sticker category="Напитки" size={50} />
         </View>
         <View style={[styles.orbitItem, { bottom: 22, left: 14 }]}>
-          <Sticker emoji="🌳" size={50} />
+          <Sticker category="Природа" size={50} />
         </View>
         <View style={[styles.orbitItem, { bottom: 2, right: 18 }]}>
-          <Sticker emoji="🚗" size={50} />
+          <Sticker category="Транспорт" size={50} />
         </View>
         <Animated.View style={floatStyle}>
-          <Sticker emoji="🌍" size={144} />
+          <Sticker symbol="globe" tone="primary" size={144} />
         </Animated.View>
       </View>
     );
@@ -218,7 +227,7 @@ function Hero({ index }: { index: number }) {
         <View style={styles.catchWrap}>
           <View style={[styles.frame, { borderColor: theme.primary }]}>
             <Animated.View style={floatStyle}>
-              <Sticker emoji="🍎" size={120} />
+              <Sticker category="Еда" size={120} />
             </Animated.View>
           </View>
           <View style={[styles.caught, { backgroundColor: theme.accent }]}>
@@ -232,14 +241,69 @@ function Hero({ index }: { index: number }) {
     );
   }
 
-  // Шаг 2: коллекция-сетка + бейдж серии (streak).
+  if (index === 2) {
+    // Шаг 2: коллекция-скрапбук + подсказка о двух сортировках (даты/темы).
+    return (
+      <View style={styles.hero}>
+        <Animated.View style={[styles.grid, floatStyle]}>
+          <Sticker category="Еда" size={72} />
+          <Sticker category="Напитки" size={72} />
+          <Sticker category="Животные" size={72} />
+          <Sticker category="Транспорт" size={72} />
+        </Animated.View>
+        <View style={[styles.cornerPill, styles.pillTopLeft, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
+          <Icon name="calendar" size={13} color={theme.primary} />
+          <ThemedText type="smallBold">По датам</ThemedText>
+        </View>
+        <View style={[styles.cornerPill, styles.pillBottomRight, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
+          <Icon name="square.grid.2x2.fill" size={13} color={theme.accent2} />
+          <ThemedText type="smallBold">По темам</ThemedText>
+        </View>
+      </View>
+    );
+  }
+
+  if (index === 3) {
+    // Шаг 3: освоение — стикер с золотым значком «выучено», звёзды и время повтора.
+    return (
+      <View style={styles.hero}>
+        <View style={styles.masteryWrap}>
+          <Animated.View style={[styles.stickerBadgeWrap, floatStyle]}>
+            <Sticker category="Еда" size={120} />
+            <View style={[styles.heroBadge, { backgroundColor: theme.card }]}>
+              <Icon name="checkmark.seal.fill" size={32} color={theme.gold} />
+            </View>
+          </Animated.View>
+          <View style={styles.stars}>
+            {[0, 1, 2, 3, 4].map((i) => (
+              <Icon key={i} name={i < 4 ? 'star.fill' : 'star'} size={20} color={i < 4 ? theme.gold : theme.border} />
+            ))}
+          </View>
+          <View style={[styles.infoPill, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Icon name="clock" size={13} color={theme.textSecondary} />
+            <ThemedText type="small" themeColor="textSecondary">
+              Повтор через 2 часа
+            </ThemedText>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  // Шаг 4: привычка — карточка квеста дня + бейдж серии (streak).
   return (
     <View style={styles.hero}>
-      <Animated.View style={[styles.grid, floatStyle]}>
-        <Sticker emoji="🍎" size={72} />
-        <Sticker emoji="☕" size={72} />
-        <Sticker emoji="🐈" size={72} />
-        <Sticker emoji="🚗" size={72} />
+      <Animated.View
+        style={[styles.questCard, floatStyle, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
+        <View style={[styles.questIcon, { backgroundColor: theme.accentSoft }]}>
+          <Icon name="target" size={26} color={theme.accent} />
+        </View>
+        <View style={styles.questText}>
+          <ThemedText type="small" themeColor="textSecondary">
+            Квест дня
+          </ThemedText>
+          <ThemedText type="smallBold">Найди дерево</ThemedText>
+        </View>
       </Animated.View>
       <View style={[styles.streak, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
         <Icon name="flame.fill" size={15} color={theme.gold} />
@@ -266,7 +330,7 @@ function LanguageStep({
   return (
     <ScrollView style={styles.stepFill} contentContainerStyle={styles.langContent} showsVerticalScrollIndicator={false}>
       <View style={styles.langHeader}>
-        <Sticker emoji="🗣️" size={84} />
+        <Sticker symbol="bubble.left.and.bubble.right.fill" tone="primary" size={84} />
         <ThemedText type="subtitle" style={styles.title}>
           Твои языки
         </ThemedText>
@@ -409,6 +473,53 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
   },
   grid: { width: 172, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: Spacing.two },
+  // Угловые пилюли-подсказки (слайд «коллекция»: По датам / По темам).
+  cornerPill: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: 6,
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  pillTopLeft: { top: 18, left: 0 },
+  pillBottomRight: { bottom: 12, right: 0 },
+  // Слайд «освоение»: стикер с золотым значком + звёзды + время повтора.
+  masteryWrap: { alignItems: 'center', gap: Spacing.three },
+  stickerBadgeWrap: { width: 120, height: 120 },
+  heroBadge: { position: 'absolute', top: -8, right: -8, borderRadius: Radius.pill, padding: 2 },
+  stars: { flexDirection: 'row', gap: Spacing.one },
+  infoPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one,
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+  },
+  // Слайд «привычка»: карточка квеста дня.
+  questCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    maxWidth: 260,
+    padding: Spacing.three,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 2,
+  },
+  questIcon: { width: 48, height: 48, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
+  questText: { gap: 2 },
   streak: {
     position: 'absolute',
     top: 18,

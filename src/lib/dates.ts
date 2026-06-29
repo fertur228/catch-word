@@ -3,7 +3,8 @@
  *
  * Чистые функции без React/БД: на вход — карточки, на выход — секции по дням
  * (как для SectionList), новые дни сверху, внутри дня — новые карточки сверху.
- * Заголовки на русском: «Сегодня» / «Вчера» / «26 июня 2026».
+ * Заголовки на русском — конкретная дата «число месяц»: «26 июня» (год — только
+ * если день не из текущего года: «26 июня 2025»).
  */
 import type { WordCard } from '@/types';
 
@@ -39,26 +40,15 @@ function dayKey(ms: number): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 
-/** Один ли это календарный день (по локальному времени). */
-function isSameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
-
-/** Заголовок дня: «Сегодня» / «Вчера» / «26 июня 2026». */
+/**
+ * Заголовок дня — всегда конкретная дата «число месяц» («26 июня»).
+ * Год добавляем, только если день не из текущего года («26 июня 2025»),
+ * чтобы заголовки за этот год оставались короткими.
+ */
 function titleForDay(ms: number, now: number): string {
   const d = new Date(ms);
-  const today = new Date(now);
-  if (isSameDay(d, today)) return 'Сегодня';
-
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (isSameDay(d, yesterday)) return 'Вчера';
-
-  return `${d.getDate()} ${MONTHS_RU[d.getMonth()]} ${d.getFullYear()}`;
+  const base = `${d.getDate()} ${MONTHS_RU[d.getMonth()]}`;
+  return d.getFullYear() === new Date(now).getFullYear() ? base : `${base} ${d.getFullYear()}`;
 }
 
 /**

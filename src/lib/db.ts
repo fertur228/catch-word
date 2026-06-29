@@ -52,7 +52,8 @@ async function init(db: SQLite.SQLiteDatabase) {
       ease          REAL,
       reps          INTEGER,
       mastery       INTEGER,
-      notes         TEXT
+      notes         TEXT,
+      distractors   TEXT             -- JSON-массив строк (AI-варианты для теста)
     );
     CREATE TABLE IF NOT EXISTS key_value (
       key   TEXT PRIMARY KEY NOT NULL,
@@ -68,6 +69,7 @@ async function init(db: SQLite.SQLiteDatabase) {
   await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN reps INTEGER');
   await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN mastery INTEGER');
   await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN notes TEXT');
+  await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN distractors TEXT');
 }
 
 export function getDb(): Promise<SQLite.SQLiteDatabase> {
@@ -100,13 +102,14 @@ interface Row {
   reps: number | null;
   mastery: number | null;
   notes: string | null;
+  distractors: string | null;
 }
 
 /** Превратить строку БД в удобный объект `WordCard` (camelCase). */
 function rowToCard(r: Row): WordCard {
   return {
     id: r.id,
-    emoji: r.emoji ?? '🏷️',
+    emoji: r.emoji ?? '',
     imageUri: r.image_uri,
     word: r.word,
     translation: r.translation,
@@ -122,6 +125,7 @@ function rowToCard(r: Row): WordCard {
     reps: r.reps ?? undefined,
     mastery: r.mastery ?? undefined,
     notes: r.notes ?? undefined,
+    distractors: r.distractors ? (JSON.parse(r.distractors) as string[]) : undefined,
   };
 }
 
@@ -142,8 +146,8 @@ export async function insertCard(c: WordCard): Promise<void> {
   await db.runAsync(
     `INSERT OR REPLACE INTO word_card
        (id, emoji, image_uri, word, translation, ipa, examples, category,
-        learning_lang, native_lang, created_at, due_at, interval, ease, reps, mastery, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        learning_lang, native_lang, created_at, due_at, interval, ease, reps, mastery, notes, distractors)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     c.id,
     c.emoji,
     c.imageUri ?? null,
@@ -161,6 +165,7 @@ export async function insertCard(c: WordCard): Promise<void> {
     c.reps ?? null,
     c.mastery ?? null,
     c.notes ?? null,
+    c.distractors ? JSON.stringify(c.distractors) : null,
   );
 }
 
@@ -186,6 +191,25 @@ export async function deleteCard(id: string): Promise<void> {
   await db.runAsync('DELETE FROM word_card WHERE id = ?', id);
 }
 
+/** Удалить все карточки (очистка коллекции). */
+export async function clearCards(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM word_card');
+}
+
+/**
+ * Удалить карточки только одной пары языков — очистка одного «курса».
+ * Слова других пар (другие курсы) остаются нетронутыми.
+ */
+export async function clearCardsForPair(learning: string, native: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    'DELETE FROM word_card WHERE learning_lang = ? AND native_lang = ?',
+    learning,
+    native,
+  );
+}
+
 export async function countCards(): Promise<number> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM word_card');
@@ -208,4 +232,10 @@ export async function getPref(key: string): Promise<string | null> {
 export async function setPref(key: string, value: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('INSERT OR REPLACE INTO key_value (key, value) VALUES (?, ?)', key, value);
+}
+
+/** Удалить настройку по ключу (нужно для хранилища сессии Supabase). */
+export async function deletePref(key: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM key_value WHERE key = ?', key);
 }

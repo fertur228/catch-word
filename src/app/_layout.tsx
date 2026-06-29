@@ -10,12 +10,14 @@
  * Экраны result/paywall/onboarding открываются как модалки поверх вкладок.
  */
 import { useEffect } from 'react';
-import { useColorScheme } from 'react-native';
-import { DarkTheme, DefaultTheme, Redirect, Stack, ThemeProvider } from 'expo-router';
+import { Platform, useColorScheme } from 'react-native';
+import { DarkTheme, DefaultTheme, Redirect, Stack, ThemeProvider, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 
+import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { CollectionProvider, useCollection } from '@/lib/collection-context';
+import { useGuest } from '@/lib/web-guest';
 
 // Держим сплеш на экране, пока не загрузим коллекцию/настройки.
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -24,20 +26,38 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 function RootNavigator() {
   const scheme = useColorScheme();
   const { loading, prefs } = useCollection();
+  const { session, loading: authLoading } = useAuth();
+  const guest = useGuest();
+  const segments = useSegments();
+  const isWeb = Platform.OS === 'web';
+  // Публичные (маркетинговые) маршруты и возврат OAuth — без гейтов.
+  const first = segments[0] as string | undefined;
+  const onPublic = first === '(marketing)' || first === 'auth-callback';
 
   // Прячем сплеш, как только данные готовы.
   useEffect(() => {
     if (!loading) SplashScreen.hideAsync().catch(() => {});
   }, [loading]);
 
-  // Пока грузимся — ничего не рисуем (под нами виден нативный сплеш).
-  if (loading) return null;
+  // Пока грузимся (на вебе ещё и сессия) — ничего не рисуем.
+  if (loading || (isWeb && authLoading)) return null;
+
+  // Веб-гейт: аноним (не вошёл и не гость) на приватном маршруте → на лендинг.
+  if (isWeb && !onPublic && !session && !guest) {
+    return <Redirect href="/welcome" />;
+  }
+
+  // Нужно ли показать онбординг: после входа/гостя (на нативе — всегда),
+  // и только не на публичных страницах.
+  const needOnboarding = !onPublic && !prefs.onboarded && (!isWeb || session != null || guest);
 
   return (
     <ThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
       {/* Общая «гладкая» анимация переходов по умолчанию (push-экраны). */}
       <Stack screenOptions={{ animation: 'slide_from_right' }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="(marketing)" options={{ headerShown: false }} />
+        <Stack.Screen name="auth-callback" options={{ headerShown: false }} />
         <Stack.Screen name="result" options={{ presentation: 'modal', title: 'Результат' }} />
         <Stack.Screen name="card/[id]" options={{ title: 'Карточка' }} />
         <Stack.Screen name="paywall" options={{ presentation: 'modal', title: 'CatchWord Premium' }} />
@@ -60,7 +80,7 @@ function RootNavigator() {
       </Stack>
 
       {/* Гейт: не прошёл онбординг → на экран выбора языка (спека §5.1). */}
-      {!prefs.onboarded ? <Redirect href="/onboarding" /> : null}
+      {needOnboarding ? <Redirect href="/onboarding" /> : null}
 
       <StatusBar style="auto" />
     </ThemeProvider>
@@ -69,8 +89,10 @@ function RootNavigator() {
 
 export default function RootLayout() {
   return (
-    <CollectionProvider>
-      <RootNavigator />
-    </CollectionProvider>
+    <AuthProvider>
+      <CollectionProvider>
+        <RootNavigator />
+      </CollectionProvider>
+    </AuthProvider>
   );
 }

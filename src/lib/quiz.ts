@@ -1,45 +1,87 @@
 /**
  * Генератор тестов (множественный выбор) для режима «Тест» во вкладке Повторение.
  *
- * Чистые функции без React/БД: на вход — карточки коллекции, на выход — список
- * вопросов с 4 вариантами (ровно один правильный, варианты перемешаны).
- * Дистракторы (неправильные варианты) берём из других карточек, чтобы тест
- * выглядел «настоящим». Если карточек мало — добиваем варианты запасными
- * заглушками, чтобы их всегда было 4.
+ * Форматы вопросов — разные, как в Duolingo:
+ *  - wordToTranslation   — слово → выбрать перевод (текст);
+ *  - translationToWord   — перевод → выбрать слово (текст);
+ *  - imageToWord         — фото/стикер → выбрать слово (текст);
+ *  - imageToTranslation  — фото/стикер → выбрать перевод (текст);
+ *  - audioToWord         — ЧИСТО АУДИО → выбрать слово (текст);
+ *  - audioToTranslation  — аудио → выбрать перевод (текст);
+ *  - translationToImage  — перевод → выбрать КАРТИНКУ (варианты-картинки);
+ *  - clozeExample        — пример с пропуском «____» → выбрать слово.
  *
- * Math.random разрешён (это мок-данные, детерминированность не требуется).
+ * Чистые функции без React/БД. Math.random разрешён (мок-данные).
  */
 import type { WordCard } from '@/types';
 
-/** Виды вопросов: слово→перевод, перевод→слово, стикер(эмодзи)→слово. */
-export type QuizKind = 'wordToTranslation' | 'translationToWord' | 'stickerToWord';
+/** Виды вопросов. */
+export type QuizKind =
+  | 'wordToTranslation'
+  | 'translationToWord'
+  | 'imageToWord'
+  | 'imageToTranslation'
+  | 'audioToWord'
+  | 'audioToTranslation'
+  | 'translationToImage'
+  | 'clozeExample';
+
+/** Как показываем сам вопрос. */
+export type PromptMode = 'text' | 'image' | 'audio' | 'cloze';
+/** Как показываем варианты ответа. */
+export type OptionMode = 'text' | 'image';
+
+/** Один вариант ответа. */
+export interface QuizOption {
+  correct: boolean;
+  /** Текст варианта (слово/перевод); для картинок — слово (подпись/озвучка). */
+  text: string;
+  /** Карточка для варианта-картинки (рисуем её стикер/фото). */
+  card?: WordCard;
+}
 
 /** Один вопрос теста. */
 export interface QuizQuestion {
-  /** Уникальный id вопроса (для key в списках). */
   id: string;
-  /** Какого вида вопрос. */
   kind: QuizKind;
-  /** Карточка, по которой задан вопрос (для озвучки/деталей в UI). */
+  /** Карточка, по которой задан вопрос (для озвучки/деталей). */
   card: WordCard;
-  /** Что показываем как вопрос: слово / перевод / эмодзи-стикер. */
+  /** Подпись-вопрос («Как переводится?» и т.п.). */
+  label: string;
+  /** Как показываем вопрос. */
+  promptMode: PromptMode;
+  /** Текст вопроса (для text/cloze); для image/audio — пустая строка. */
   prompt: string;
-  /** 4 варианта, ровно один correct:true, уже перемешаны. */
-  options: { text: string; correct: boolean }[];
+  /** Как показываем варианты. */
+  optionMode: OptionMode;
+  /** Варианты: ровно один correct, уже перемешаны. */
+  options: QuizOption[];
 }
 
-/** Все виды вопросов — для равномерного чередования по индексу. */
-const KINDS: QuizKind[] = ['wordToTranslation', 'translationToWord', 'stickerToWord'];
-
-/** Сколько вопросов в тесте по умолчанию. */
+/** Сколько вопросов по умолчанию и сколько всего вариантов. */
 const DEFAULT_COUNT = 10;
-/** Сколько всего вариантов в каждом вопросе. */
 const OPTION_COUNT = 4;
 
-/**
- * Запасные заглушки, если карточек слишком мало для 3 уникальных дистракторов.
- * Раздельно для вариантов-слов (изучаемый язык) и вариантов-переводов (родной).
- */
+/** Виды, где правильный ответ — это ПЕРЕВОД (иначе — слово). */
+const TRANSLATION_ANSWER = new Set<QuizKind>([
+  'wordToTranslation',
+  'imageToTranslation',
+  'audioToTranslation',
+]);
+
+/** Порядок чередования форматов (берём первый подходящий для карточки). */
+const ROTATION: QuizKind[] = [
+  'wordToTranslation',
+  'audioToWord',
+  'imageToTranslation',
+  'clozeExample',
+  'translationToWord',
+  'audioToTranslation',
+  'translationToImage',
+  'imageToWord',
+];
+
+/** Запасные заглушки, если карточек мало (раздельно: слова / переводы). */
 const WORD_FILLERS = ['thing', 'object', 'item', 'word', 'place'];
 const TRANSLATION_FILLERS = ['предмет', 'вещь', 'слово', 'объект', 'место'];
 
@@ -52,81 +94,177 @@ function shuffle<T>(arr: T[]): T[] {
   return arr;
 }
 
-/** Какое поле карточки служит «текстом варианта» для данного вида вопроса. */
+/** Поле-«ответ» для вида вопроса: перевод или слово. */
 function answerOf(card: WordCard, kind: QuizKind): string {
-  // Для wordToTranslation отвечаем переводом, иначе — словом.
-  return kind === 'wordToTranslation' ? card.translation : card.word;
+  return TRANSLATION_ANSWER.has(kind) ? card.translation : card.word;
 }
 
-/** Что показываем как сам вопрос (подсказку). */
-function promptOf(card: WordCard, kind: QuizKind): string {
+/** Подпись-вопрос. */
+function labelOf(kind: QuizKind): string {
+  switch (kind) {
+    case 'wordToTranslation':
+    case 'imageToTranslation':
+      return 'Как переводится?';
+    case 'audioToTranslation':
+      return 'Услышал слово — как переводится?';
+    case 'translationToWord':
+      return 'Какое это слово?';
+    case 'imageToWord':
+      return 'Что на картинке?';
+    case 'audioToWord':
+      return 'Что ты услышал?';
+    case 'translationToImage':
+      return 'Выбери картинку';
+    case 'clozeExample':
+      return 'Вставь пропущенное слово';
+  }
+}
+
+/** Как показываем вопрос для данного вида. */
+function promptModeOf(kind: QuizKind): PromptMode {
+  if (kind === 'imageToWord' || kind === 'imageToTranslation') return 'image';
+  if (kind === 'audioToWord' || kind === 'audioToTranslation') return 'audio';
+  if (kind === 'clozeExample') return 'cloze';
+  return 'text';
+}
+
+/** Текст вопроса (для text/cloze). */
+function promptTextOf(card: WordCard, kind: QuizKind): string {
   if (kind === 'wordToTranslation') return card.word;
-  if (kind === 'translationToWord') return card.translation;
-  return card.emoji; // stickerToWord — показываем эмодзи-стикер
+  if (kind === 'translationToWord' || kind === 'translationToImage') return card.translation;
+  if (kind === 'clozeExample') return clozeSentence(card) ?? '';
+  return '';
+}
+
+/** Экранировать спецсимволы для RegExp. */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Первый пример с заменой слова на «____», или null если подходящего нет. */
+function clozeSentence(card: WordCard): string | null {
+  const w = card.word.trim();
+  if (!w) return null;
+  const re = new RegExp(`\\b${escapeRe(w)}\\b`, 'i');
+  for (const ex of card.examples ?? []) {
+    if (re.test(ex)) return ex.replace(re, '____');
+  }
+  return null;
+}
+
+/** «Визуальный ключ» карточки — чтобы варианты-картинки были различимы. */
+function visualKey(c: WordCard): string {
+  return c.imageUri ? `img:${c.imageUri}` : `cat:${c.category ?? '—'}`;
+}
+
+/** Текстовые варианты: правильный + 3 дистрактора (AI → тема → пул → заглушки). */
+function buildTextOptions(card: WordCard, pool: WordCard[], kind: QuizKind): QuizOption[] {
+  const correct = answerOf(card, kind);
+  const seen = new Set<string>([correct]);
+  const distractors: string[] = [];
+  const full = () => distractors.length >= OPTION_COUNT - 1;
+  const add = (text?: string) => {
+    const t = (text ?? '').trim();
+    if (!t || seen.has(t) || full()) return;
+    seen.add(t);
+    distractors.push(t);
+  };
+
+  if (TRANSLATION_ANSWER.has(kind) && card.distractors) {
+    for (const d of shuffle([...card.distractors])) add(d);
+  }
+  if (card.category && !full()) {
+    const sameCat = shuffle(pool.filter((o) => o.id !== card.id && o.category === card.category));
+    for (const other of sameCat) add(answerOf(other, kind));
+  }
+  if (!full()) {
+    for (const other of shuffle([...pool])) {
+      if (other.id !== card.id) add(answerOf(other, kind));
+    }
+  }
+  const fillers = TRANSLATION_ANSWER.has(kind) ? TRANSLATION_FILLERS : WORD_FILLERS;
+  for (const f of fillers) add(f);
+
+  return shuffle([
+    { correct: true, text: correct },
+    ...distractors.map((text) => ({ correct: false, text })),
+  ]);
 }
 
 /**
- * Собрать варианты ответа: правильный + 3 уникальных дистрактора, перемешанные.
- * Дистракторы берём из тех же полей других карточек; при нехватке — из заглушек.
+ * Варианты-картинки (translationToImage): правильная карточка + 3 ВИЗУАЛЬНО
+ * различимые. null, если в пуле не набирается 4 различимых картинки.
  */
-function buildOptions(
-  card: WordCard,
-  pool: WordCard[],
-  kind: QuizKind,
-): { text: string; correct: boolean }[] {
-  const correct = answerOf(card, kind);
-
-  // Кандидаты-дистракторы из других карточек (уникальные, не равные правильному).
-  const seen = new Set<string>([correct]);
-  const distractors: string[] = [];
+function buildImageOptions(card: WordCard, pool: WordCard[]): QuizOption[] | null {
+  const seen = new Set<string>([visualKey(card)]);
+  const picks: WordCard[] = [];
   for (const other of shuffle([...pool])) {
+    if (picks.length >= OPTION_COUNT - 1) break;
     if (other.id === card.id) continue;
-    const text = answerOf(other, kind);
-    if (!text || seen.has(text)) continue;
-    seen.add(text);
-    distractors.push(text);
-    if (distractors.length >= OPTION_COUNT - 1) break;
+    const key = visualKey(other);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    picks.push(other);
   }
+  if (picks.length < OPTION_COUNT - 1) return null;
+  return shuffle([
+    { correct: true, text: card.word, card },
+    ...picks.map((c) => ({ correct: false, text: c.word, card: c })),
+  ]);
+}
 
-  // Если карточек мало — добиваем запасными заглушками подходящего «языка».
-  const fillers = kind === 'wordToTranslation' ? TRANSLATION_FILLERS : WORD_FILLERS;
-  for (const f of fillers) {
-    if (distractors.length >= OPTION_COUNT - 1) break;
-    if (seen.has(f)) continue;
-    seen.add(f);
-    distractors.push(f);
-  }
+/** Подходит ли формат данной карточке/пулу. */
+function isValid(card: WordCard, pool: WordCard[], kind: QuizKind): boolean {
+  if (kind === 'clozeExample') return clozeSentence(card) != null;
+  if (kind === 'translationToImage') return buildImageOptions(card, pool) != null;
+  return true;
+}
 
-  const options = [
-    { text: correct, correct: true },
-    ...distractors.map((text) => ({ text, correct: false })),
-  ];
-  return shuffle(options);
+/** Собрать один вопрос выбранного вида. */
+function makeQuestion(card: WordCard, pool: WordCard[], kind: QuizKind, i: number): QuizQuestion {
+  const optionMode: OptionMode = kind === 'translationToImage' ? 'image' : 'text';
+  const options =
+    optionMode === 'image'
+      ? (buildImageOptions(card, pool) ?? buildTextOptions(card, pool, 'translationToWord'))
+      : buildTextOptions(card, pool, kind);
+  return {
+    id: `${card.id}-${kind}-${i}`,
+    kind,
+    card,
+    label: labelOf(kind),
+    promptMode: promptModeOf(kind),
+    prompt: promptTextOf(card, kind),
+    optionMode,
+    options,
+  };
 }
 
 /**
  * Построить тест из карточек коллекции.
- * @param cards карточки пользователя (источник вопросов и дистракторов)
- * @param count сколько вопросов нужно (по умолчанию 10; ограничено числом карточек)
+ * @param cards карточки под вопросы
+ * @param count сколько вопросов (по умолчанию 10; не больше числа карточек)
+ * @param pool  пул для дистракторов/картинок (по умолчанию — те же карточки)
  *
- * Виды вопросов чередуем по индексу — получается ровный микс трёх типов.
- * При крошечном пуле дистракторы добиваются заглушками, так что вариантов
- * всегда 4.
+ * Формат вопроса выбираем по «вращению» ROTATION, беря первый подходящий для
+ * карточки (например, «вставь слово» — только если есть пример с этим словом).
  */
-export function buildQuiz(cards: WordCard[], count: number = DEFAULT_COUNT): QuizQuestion[] {
+export function buildQuiz(
+  cards: WordCard[],
+  count: number = DEFAULT_COUNT,
+  pool: WordCard[] = cards,
+): QuizQuestion[] {
   if (cards.length === 0) return [];
-
-  // Берём случайные карточки под вопросы (не больше, чем есть и чем просили).
   const chosen = shuffle([...cards]).slice(0, Math.max(1, Math.min(count, cards.length)));
 
   return chosen.map((card, i) => {
-    const kind = KINDS[i % KINDS.length];
-    return {
-      id: `${card.id}-${kind}-${i}`,
-      kind,
-      card,
-      prompt: promptOf(card, kind),
-      options: buildOptions(card, cards, kind),
-    };
+    let kind: QuizKind = 'wordToTranslation';
+    for (let k = 0; k < ROTATION.length; k += 1) {
+      const cand = ROTATION[(i + k) % ROTATION.length];
+      if (isValid(card, pool, cand)) {
+        kind = cand;
+        break;
+      }
+    }
+    return makeQuestion(card, pool, kind, i);
   });
 }

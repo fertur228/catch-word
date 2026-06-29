@@ -9,8 +9,14 @@
 //   RECOGNIZE_MODEL    — модель (дефолт google/gemini-2.5-flash-lite)
 //   RECOGNIZE_API_KEY  — ключ провайдера (секрет функции)
 //
-// Запрос  (POST JSON): { image: "<base64 jpeg>", learningLang: "en-US", nativeLang: "ru-RU" }
-// Ответ           : { objects: [ { word, translation, ipa, category, emoji, bbox, confidence } ] }
+// Запрос  (POST JSON): { image, learningLang, nativeLang, maxObjects? }
+// Ответ           : { objects: [ { word, translation, ipa, category, emoji, bbox,
+//                     confidence, examples[], note, distractors[] } ] }
+//
+// examples/note/distractors — «живой» учебный контент в том же вызове (почти
+// бесплатно): 2 примера с этим словом, короткая заметка-мнемоника и правдоподобные
+// неправильные варианты перевода (для умного теста). maxObjects управляет режимом
+// «поймай всю сцену» (до 8 предметов вместо 3).
 // ─────────────────────────────────────────────────────────────────────────
 
 // Провайдеро-нейтрально (OpenAI-совместимо). По умолчанию — OpenRouter: работает
@@ -44,7 +50,10 @@ const SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['word', 'translation', 'ipa', 'category', 'emoji', 'bbox', 'confidence'],
+        required: [
+          'word', 'translation', 'ipa', 'category', 'emoji', 'bbox', 'confidence',
+          'examples', 'note', 'distractors',
+        ],
         properties: {
           word: { type: 'string' },
           translation: { type: 'string' },
@@ -53,16 +62,20 @@ const SCHEMA = {
           emoji: { type: 'string' },
           bbox: { type: 'array', items: { type: 'number' } },
           confidence: { type: 'number' },
+          examples: { type: 'array', items: { type: 'string' } },
+          note: { type: 'string' },
+          distractors: { type: 'array', items: { type: 'string' } },
         },
       },
     },
   },
 };
 
-function buildPrompt(learningLang: string, nativeLang: string): string {
+function buildPrompt(learningLang: string, nativeLang: string, maxObjects: number): string {
+  const more = Math.max(0, maxObjects - 1);
   return [
     'You identify physical objects in a photo to help someone learn a language.',
-    'Identify the MOST PROMINENT foreground object, then up to 2 more notable objects.',
+    `Identify the MOST PROMINENT foreground object, then up to ${more} more notable objects.`,
     'For each object return:',
     `- word: the object's common name in ${learningLang} (a single, lowercase noun).`,
     `- translation: that word translated into ${nativeLang}.`,
@@ -71,7 +84,10 @@ function buildPrompt(learningLang: string, nativeLang: string): string {
     '- emoji: one emoji that best represents the object.',
     '- bbox: bounding box as [x, y, width, height], each 0..1 relative to image size.',
     '- confidence: 0..1.',
-    'Order objects by prominence (main subject first). If nothing recognizable, return an empty list.',
+    `- examples: array of 2 SHORT, natural example sentences in ${learningLang} that use the word, at a beginner (A1-A2) level.`,
+    `- note: a SHORT memory hint in ${nativeLang} (a mnemonic, a false-friend warning, or a usage tip), at most ~12 words. Empty string "" if there is nothing useful.`,
+    `- distractors: array of 3 plausible but INCORRECT ${nativeLang} translations — single words a learner might confuse with the correct translation (never equal to the correct translation).`,
+    `Order objects by prominence (main subject first). Return at most ${maxObjects} objects. If nothing recognizable, return an empty list.`,
     'Respond with ONLY a JSON object matching the schema — no prose, no markdown.',
   ].join('\n');
 }
@@ -85,7 +101,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ error: 'server_misconfigured', message: 'RECOGNIZE_API_KEY is not set' }, 500);
   }
 
-  let body: { image?: string; learningLang?: string; nativeLang?: string };
+  let body: { image?: string; learningLang?: string; nativeLang?: string; maxObjects?: number };
   try {
     body = await req.json();
   } catch {
@@ -98,6 +114,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
   const learningLang = body.learningLang ?? 'en-US';
   const nativeLang = body.nativeLang ?? 'ru-RU';
+  // Сколько предметов максимум: 1 предмет (single) … до 8 («поймай всю сцену»).
+  const maxObjects = Math.max(1, Math.min(8, Math.round(Number(body.maxObjects) || 3)));
   const dataUrl = image.startsWith('data:') ? image : `data:image/jpeg;base64,${image}`;
 
   let resp: Response;
@@ -113,12 +131,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 700,
+        // Больше предметов и учебного контента → больше места под ответ.
+        max_tokens: Math.min(2400, 500 + maxObjects * 240),
         messages: [
           {
             role: 'user',
             content: [
-              { type: 'text', text: buildPrompt(learningLang, nativeLang) },
+              { type: 'text', text: buildPrompt(learningLang, nativeLang, maxObjects) },
               { type: 'image_url', image_url: { url: dataUrl } },
             ],
           },
@@ -150,6 +169,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   // Валидация/нормализация в коде (json-schema не покрывает длину bbox и диапазоны).
+  // Привести значение к массиву коротких непустых строк (examples/distractors).
+  const strList = (v: unknown, cap: number): string[] =>
+    Array.isArray(v)
+      ? v.map((s) => String(s ?? '').trim()).filter((s) => s.length > 0).slice(0, cap)
+      : [];
+
   const rawObjects = Array.isArray(parsed.objects) ? parsed.objects : [];
   const objects = rawObjects
     // deno-lint-ignore no-explicit-any
@@ -165,8 +190,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
           : null,
       confidence:
         typeof o?.confidence === 'number' ? Math.max(0, Math.min(1, o.confidence)) : null,
+      examples: strList(o?.examples, 3),
+      note: String(o?.note ?? '').trim(),
+      distractors: strList(o?.distractors, 3),
     }))
-    .filter((o: { word: string }) => o.word.length > 0);
+    .filter((o: { word: string }) => o.word.length > 0)
+    .slice(0, maxObjects);
 
   return json({ objects, model: MODEL });
 });

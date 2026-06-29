@@ -41,13 +41,13 @@ import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
 import { lookupWord, suggestWords, type DictEntry } from '@/lib/dictionary';
 import { RECOGNIZABLE, getRandomRecognizable } from '@/lib/mock-data';
-import { getScanJob } from '@/lib/scan-job';
+import { getScanJob, type SceneItem } from '@/lib/scan-job';
 import { speakWord } from '@/lib/speech';
 import type { RecognizableWord, WordCard } from '@/types';
 
 const STICKER_SIZE = 160;
 /** Эмодзи-заглушка, когда у слова нет «узнаваемого» стикера (нет в RECOGNIZABLE). */
-const FALLBACK_EMOJI = '🔤';
+const FALLBACK_EMOJI = '';
 
 /**
  * Текущее содержимое карточки на экране — то, что реально сохранится.
@@ -98,6 +98,8 @@ function seedRecognized(
       ipa: r.ipa,
       examples: r.examples ?? [],
       category: r.category ?? null,
+      notes: r.note || undefined,
+      distractors: r.distractors ?? [],
       learningLang: prefs.learningLang,
       nativeLang: prefs.nativeLang,
     };
@@ -116,7 +118,7 @@ function emojiForWord(word: string): string {
 export function ResultScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { addCard, prefs } = useCollection();
+  const { addCard, prefs, completeQuestForWord, cards } = useCollection();
   const { jobId } = useLocalSearchParams<{ jobId?: string }>();
 
   // Текущий скан (фото + результат распознавания + вырез). Читаем синхронно:
@@ -128,6 +130,10 @@ export function ResultScreen() {
   const [content, setContent] = useState<CardContent>(() => fromRecognized(recognized));
   // Маленький «успех» после сохранения (зелёная печать на стикере) перед закрытием.
   const [saved, setSaved] = useState(false);
+  // Сегодняшний квест выполнен этим сохранением — показываем поздравление.
+  const [questCompleted, setQuestCompleted] = useState(false);
+  // Слово уже было в коллекции — не плодим дубликат.
+  const [alreadyHave, setAlreadyHave] = useState(false);
   const backTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- Состояние инлайн-редактора слова (фича 2) ---
@@ -160,6 +166,20 @@ export function ResultScreen() {
 
   const onSave = useCallback(async () => {
     if (saved) return; // защита от двойного нажатия
+    // Дубликат: слово уже в коллекции — копию не создаём, но квест засчитываем.
+    const dup = cards.find(
+      (c) =>
+        c.word.trim().toLowerCase() === content.word.trim().toLowerCase() &&
+        c.learningLang === recognized.learningLang,
+    );
+    if (dup) {
+      setAlreadyHave(true);
+      setSaved(true);
+      const q = await completeQuestForWord(content.word);
+      if (q) setQuestCompleted(true);
+      backTimer.current = setTimeout(() => router.back(), q ? 1900 : 1100);
+      return;
+    }
     const sameWord = content.word === recognized.word;
     const card: WordCard = {
       ...recognized,
@@ -170,16 +190,21 @@ export function ResultScreen() {
       category: content.category ?? null,
       emoji: content.emoji,
       imageUri: content.imageUri ?? null,
-      // Примеры подходят только исходному слову — для изменённого их нет.
+      // Примеры/заметка/варианты подходят только исходному слову — для изменённого их нет.
       examples: sameWord ? recognized.examples : [],
+      notes: sameWord ? recognized.notes : undefined,
+      distractors: sameWord ? recognized.distractors : undefined,
       id: `${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
       createdAt: Date.now(),
     };
     await addCard(card);
     setSaved(true);
-    // Даём увидеть «печать» успеха, затем закрываем модалку.
-    backTimer.current = setTimeout(() => router.back(), 760);
-  }, [saved, content, recognized, addCard, router]);
+    // Квест дня: если поймали целевой предмет — засчитываем и показываем дольше.
+    const questDone = await completeQuestForWord(card.word);
+    if (questDone) setQuestCompleted(true);
+    // Даём увидеть «печать» успеха (и квест), затем закрываем модалку.
+    backTimer.current = setTimeout(() => router.back(), questDone ? 1900 : 760);
+  }, [saved, content, recognized, addCard, router, completeQuestForWord, cards]);
 
   // «Переснять» — закрываем результат и возвращаемся к камере снять новый кадр.
   const onRetake = useCallback(() => {
@@ -276,15 +301,42 @@ export function ResultScreen() {
     Keyboard.dismiss();
   }, []);
 
-  // Пример показываем только для исходного слова (для своего слова примеров нет).
-  const example = content.word === recognized.word ? recognized.examples[0] : undefined;
+  // Примеры/заметку показываем только для исходного слова (своё слово — без них).
+  const sameWord = content.word === recognized.word;
+  const examples = sameWord ? recognized.examples.slice(0, 3) : [];
+  const note = sameWord ? recognized.notes : undefined;
   // Честная подсказка в редакторе: слово введено, но автоперевода нет.
   const showBackendHint = !draftAuto && draftWord.trim().length > 0;
+
+  // Режим «поймай всю сцену»: несколько предметов → мульти-выбор (отдельный поток).
+  if (job?.mode === 'scene' && job.items && job.items.length > 1) {
+    return <SceneCatch items={job.items} prefs={prefs} />;
+  }
 
   return (
     <Screen scroll>
       {/* Группа появления. */}
       <View style={styles.reveal}>
+        {questCompleted ? (
+          <Animated.View
+            entering={ZoomIn.springify().damping(13).stiffness(180)}
+            style={[styles.questDone, { backgroundColor: theme.accentSoft }]}>
+            <Icon name="sparkles" size={15} color={theme.accent} />
+            <ThemedText type="smallBold" style={{ color: theme.accent }}>
+              Квест дня выполнен!
+            </ThemedText>
+          </Animated.View>
+        ) : null}
+        {alreadyHave ? (
+          <Animated.View
+            entering={ZoomIn.springify().damping(13).stiffness(180)}
+            style={[styles.questDone, { backgroundColor: theme.accent2Soft }]}>
+            <Icon name="checkmark.circle.fill" size={15} color={theme.accent2} />
+            <ThemedText type="smallBold" style={{ color: theme.accent2 }}>
+              Уже в коллекции
+            </ThemedText>
+          </Animated.View>
+        ) : null}
         {/* Бейдж «Поймал!» — тёплый акцент, ощущение пойманного слова. */}
         <FadeIn duration={Motion.duration.base}>
           <View style={styles.caughtRow}>
@@ -298,7 +350,7 @@ export function ResultScreen() {
         </FadeIn>
 
         {/* Стикер с пружинным «попом» + печать успеха после сохранения. */}
-        <StickerPop emoji={content.emoji} imageUri={content.imageUri} saved={saved} />
+        <StickerPop category={content.category} imageUri={content.imageUri} saved={saved} />
 
         {editing ? (
           /* --- Инлайн-редактор слова (фича 2) --- */
@@ -468,18 +520,38 @@ export function ResultScreen() {
               </Reveal>
             ) : null}
 
-            {/* Спека §5.3: Free/Basic — один пример. */}
-            {example ? (
+            {/* Примеры употребления (AI, 2–3 предложения с этим словом). */}
+            {examples.length > 0 ? (
               <Reveal delay={300}>
                 <View
                   style={[styles.exampleCard, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
                   <View style={styles.exampleHeader}>
                     <Icon name="text.bubble.fill" size={15} color={theme.accent2} />
                     <ThemedText type="smallBold" themeColor="textSecondary">
-                      Пример
+                      {examples.length > 1 ? 'Примеры' : 'Пример'}
                     </ThemedText>
                   </View>
-                  <ThemedText style={styles.exampleText}>{example}</ThemedText>
+                  {examples.map((ex, i) => (
+                    <ThemedText key={i} style={styles.exampleText}>
+                      {ex}
+                    </ThemedText>
+                  ))}
+                </View>
+              </Reveal>
+            ) : null}
+
+            {/* Заметка-мнемоника (AI) — «как запомнить». */}
+            {note ? (
+              <Reveal delay={340}>
+                <View
+                  style={[styles.exampleCard, { backgroundColor: theme.goldSoft, borderColor: theme.border, shadowColor: theme.shadow }]}>
+                  <View style={styles.exampleHeader}>
+                    <Icon name="lightbulb.fill" size={15} color={theme.gold} />
+                    <ThemedText type="smallBold" style={{ color: theme.gold }}>
+                      Запомни
+                    </ThemedText>
+                  </View>
+                  <ThemedText style={styles.exampleText}>{note}</ThemedText>
                 </View>
               </Reveal>
             ) : null}
@@ -532,11 +604,11 @@ function AutoBadge() {
  * поэтому при «Переснять» «поп» проигрывается заново.
  */
 function StickerPop({
-  emoji,
+  category,
   imageUri,
   saved,
 }: {
-  emoji: string;
+  category?: string | null;
   imageUri?: string | null;
   saved: boolean;
 }) {
@@ -559,7 +631,7 @@ function StickerPop({
   return (
     <View style={styles.stickerWrap}>
       <Animated.View style={animStyle}>
-        <Sticker emoji={emoji} imageUri={imageUri} size={STICKER_SIZE} />
+        <Sticker category={category} imageUri={imageUri} size={STICKER_SIZE} />
       </Animated.View>
 
       {saved ? (
@@ -576,8 +648,149 @@ function StickerPop({
   );
 }
 
+/** Склонение «предмет» по числу (1 предмет / 2 предмета / 5 предметов). */
+function pluralObjects(n: number): string {
+  const a = n % 100;
+  const b = n % 10;
+  if (a > 10 && a < 20) return 'предметов';
+  if (b === 1) return 'предмет';
+  if (b > 1 && b < 5) return 'предмета';
+  return 'предметов';
+}
+
+/**
+ * «Поймай всю сцену»: список распознанных предметов с выбором — добавить все
+ * отмеченные в коллекцию одним нажатием. Быстрый поток без инлайн-редактора.
+ */
+function SceneCatch({
+  items,
+  prefs,
+}: {
+  items: SceneItem[];
+  prefs: { learningLang: string; nativeLang: string };
+}) {
+  const router = useRouter();
+  const theme = useTheme();
+  const { addCard, cards } = useCollection();
+  const [selected, setSelected] = useState<Set<number>>(() => new Set(items.map((_, i) => i)));
+  const [saving, setSaving] = useState(false);
+
+  const toggle = (i: number) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+
+  const onSave = useCallback(async () => {
+    if (saving) return;
+    setSaving(true);
+    // Не плодим дубликаты уже пойманных слов (по слову + языку изучения).
+    const have = new Set(cards.map((c) => `${c.word.trim().toLowerCase()}|${c.learningLang}`));
+    for (let i = 0; i < items.length; i += 1) {
+      if (!selected.has(i)) continue;
+      const r = items[i].result;
+      const key = `${r.word.trim().toLowerCase()}|${prefs.learningLang}`;
+      if (have.has(key)) continue;
+      have.add(key);
+      const card: WordCard = {
+        id: `${Date.now()}-${i}-${Math.floor(Math.random() * 1e6)}`,
+        word: r.word,
+        translation: r.translation,
+        ipa: r.ipa,
+        category: r.category ?? null,
+        emoji: r.emoji,
+        imageUri: items[i].cutoutUri ?? null,
+        examples: r.examples ?? [],
+        notes: r.note,
+        distractors: r.distractors,
+        learningLang: prefs.learningLang,
+        nativeLang: prefs.nativeLang,
+        createdAt: Date.now() + i,
+      };
+      await addCard(card);
+    }
+    router.back();
+  }, [saving, cards, items, selected, prefs, addCard, router]);
+
+  return (
+    <Screen scroll>
+      <Reveal delay={0}>
+        <View style={styles.sceneHeader}>
+          <Icon name="square.grid.2x2.fill" size={22} color={theme.primary} />
+          <ThemedText type="subtitle" style={styles.textCenter}>
+            Поймал {items.length} {pluralObjects(items.length)}
+          </ThemedText>
+          <ThemedText type="default" themeColor="textSecondary" style={styles.textCenter}>
+            Выбери, что добавить в коллекцию.
+          </ThemedText>
+        </View>
+      </Reveal>
+
+      <View style={styles.sceneList}>
+        {items.map((it, i) => {
+          const on = selected.has(i);
+          const r = it.result;
+          return (
+            <Reveal key={i} delay={60 + Math.min(i, 8) * 40}>
+              <Pressable
+                onPress={() => toggle(i)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                style={[
+                  styles.sceneRow,
+                  {
+                    backgroundColor: theme.card,
+                    borderColor: on ? theme.primary : theme.border,
+                    borderWidth: on ? 2 : 1,
+                  },
+                ]}>
+                <Sticker category={r.category} imageUri={it.cutoutUri} size={56} />
+                <View style={styles.sceneRowText}>
+                  <ThemedText type="default" style={styles.sceneWord} numberOfLines={1}>
+                    {r.word}
+                  </ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                    {r.translation}
+                  </ThemedText>
+                </View>
+                <Icon
+                  name={on ? 'checkmark.circle.fill' : 'circle'}
+                  size={24}
+                  color={on ? theme.primary : theme.border}
+                />
+              </Pressable>
+            </Reveal>
+          );
+        })}
+      </View>
+
+      <Reveal delay={140} style={styles.actions}>
+        <Button
+          title={`Добавить (${selected.size})`}
+          icon="checkmark"
+          onPress={onSave}
+          loading={saving}
+          disabled={selected.size === 0}
+        />
+        <Button title="Отмена" icon="xmark" variant="ghost" onPress={() => router.back()} disabled={saving} />
+      </Reveal>
+    </Screen>
+  );
+}
+
 const styles = StyleSheet.create({
   reveal: { gap: Spacing.three },
+  questDone: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one + 2,
+    borderRadius: Radius.pill,
+  },
   caughtRow: { alignItems: 'center' },
   caughtBadge: {
     flexDirection: 'row',
@@ -687,4 +900,17 @@ const styles = StyleSheet.create({
   actions: { gap: Spacing.two, marginTop: Spacing.two },
   actionRow: { flexDirection: 'row', gap: Spacing.two },
   flex: { flex: 1 },
+  // --- «Поймай всю сцену» ---
+  textCenter: { textAlign: 'center' },
+  sceneHeader: { alignItems: 'center', gap: Spacing.two, marginBottom: Spacing.two },
+  sceneList: { gap: Spacing.two },
+  sceneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    padding: Spacing.two,
+    borderRadius: Radius.lg,
+  },
+  sceneRowText: { flex: 1, gap: 1 },
+  sceneWord: { fontWeight: '700' },
 });

@@ -1,0 +1,203 @@
+/**
+ * Веб-вариант распознавания. ТЕ ЖЕ экспорты, что у recognize.ts, но ресайз/кроп
+ * через <canvas> (вместо expo-image-manipulator), запрос — на ту же edge-функцию
+ * /recognize. «Сохранение» (persistImage) — no-op: на вебе картинка живёт как
+ * data URL и грузится в Storage при входе (см. sticker-upload.web.ts).
+ */
+import { lookupWord } from '@/lib/dictionary';
+import type { ScanResult } from '@/lib/scan-job';
+
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+const RECOGNIZE_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/recognize` : '';
+
+const MAX_EDGE = 1024;
+const TIMEOUT_MS = 15000;
+
+/** Один распознанный предмет (что вернёт /recognize). Совпадает с recognize.ts. */
+export interface RecognizedObject {
+  word: string;
+  translation: string;
+  ipa: string;
+  category: string | null;
+  emoji: string;
+  bbox: number[] | null;
+  confidence: number | null;
+  examples?: string[];
+  note?: string;
+  distractors?: string[];
+}
+
+export function isRecognitionConfigured(): boolean {
+  return Boolean(RECOGNIZE_URL && SUPABASE_ANON);
+}
+
+function loadImage(uri: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('image load failed'));
+    img.src = uri;
+  });
+}
+
+/** Нарисовать картинку в canvas с ресайзом до maxEdge по длинной стороне. */
+function drawResized(img: HTMLImageElement, maxEdge = MAX_EDGE) {
+  const w0 = img.naturalWidth || img.width;
+  const h0 = img.naturalHeight || img.height;
+  const scale = Math.min(1, maxEdge / Math.max(w0, h0, 1));
+  const w = Math.max(1, Math.round(w0 * scale));
+  const h = Math.max(1, Math.round(h0 * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
+  return { canvas, width: w, height: h };
+}
+
+async function prepare(uri: string) {
+  try {
+    const img = await loadImage(uri);
+    const { canvas, width, height } = drawResized(img);
+    return { dataUrl: canvas.toDataURL('image/jpeg', 0.6), width, height };
+  } catch {
+    return null;
+  }
+}
+
+export async function recognizePhoto(
+  photoUri: string,
+  learningLang: string,
+  nativeLang: string,
+  maxObjects = 1,
+): Promise<{
+  objects: RecognizedObject[];
+  prepared: { uri: string; width: number; height: number };
+} | null> {
+  if (!isRecognitionConfigured()) return null;
+  const prepared = await prepare(photoUri);
+  if (!prepared) return null;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(RECOGNIZE_URL, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_ANON,
+        Authorization: `Bearer ${SUPABASE_ANON}`,
+      },
+      body: JSON.stringify({ image: prepared.dataUrl, learningLang, nativeLang, maxObjects }),
+    });
+    if (!res.ok) {
+      console.warn('recognize HTTP', res.status, (await res.text()).slice(0, 200));
+      return null;
+    }
+    const data = (await res.json()) as { objects?: RecognizedObject[] };
+    return {
+      objects: Array.isArray(data.objects) ? data.objects : [],
+      prepared: { uri: prepared.dataUrl, width: prepared.width, height: prepared.height },
+    };
+  } catch (e) {
+    console.warn('recognize failed:', e);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Вырезать предмет по bbox (доли 0..1) из подготовленного фото → data URL. */
+export async function cropToSticker(
+  preparedUri: string,
+  width: number,
+  height: number,
+  bbox: number[] | null,
+): Promise<string | null> {
+  try {
+    if (!bbox || bbox.length !== 4 || width <= 0 || height <= 0) return preparedUri;
+    const img = await loadImage(preparedUri);
+    const pad = 0.06; // лёгкий запас вокруг предмета
+    const bx = Math.max(0, bbox[0] - bbox[2] * pad);
+    const by = Math.max(0, bbox[1] - bbox[3] * pad);
+    const bw = Math.min(1 - bx, bbox[2] * (1 + 2 * pad));
+    const bh = Math.min(1 - by, bbox[3] * (1 + 2 * pad));
+    const sx = Math.round(bx * width);
+    const sy = Math.round(by * height);
+    const sw = Math.max(1, Math.round(bw * width));
+    const sh = Math.max(1, Math.round(bh * height));
+    const canvas = document.createElement('canvas');
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return preparedUri;
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    return canvas.toDataURL('image/jpeg', 0.85);
+  } catch (e) {
+    console.warn('cropToSticker web failed:', e);
+    return null;
+  }
+}
+
+/**
+ * Кроп по «визиру»: центральный квадрат, соответствующий рамке наведения.
+ * Сторона рамки (pt) переводится в пиксели фото через cover-масштаб превью.
+ */
+export async function cropToFrame(
+  uri: string,
+  screenW: number,
+  screenH: number,
+  frameSidePt: number,
+): Promise<{ uri: string; width: number; height: number } | null> {
+  try {
+    const img = await loadImage(uri);
+    const pw = img.naturalWidth || img.width;
+    const ph = img.naturalHeight || img.height;
+    if (!pw || !ph || screenW <= 0 || screenH <= 0) return { uri, width: pw, height: ph };
+    const scale = Math.max(screenW / pw, screenH / ph);
+    const side = Math.max(1, Math.min(pw, ph, Math.round(frameSidePt / scale)));
+    const sx = Math.max(0, Math.round((pw - side) / 2));
+    const sy = Math.max(0, Math.round((ph - side) / 2));
+    const canvas = document.createElement('canvas');
+    canvas.width = side;
+    canvas.height = side;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return { uri, width: pw, height: ph };
+    ctx.drawImage(img, sx, sy, side, side, 0, 0, side, side);
+    return { uri: canvas.toDataURL('image/jpeg', 0.9), width: side, height: side };
+  } catch (e) {
+    console.warn('cropToFrame web failed:', e);
+    return null;
+  }
+}
+
+/** На вебе «постоянная папка» не нужна — data URL самодостаточен. */
+export async function persistImage(srcUri: string): Promise<string> {
+  return srcUri;
+}
+
+/** Собрать ScanResult из объекта (для EN уточняем IPA/перевод словарём). */
+export function toScanResult(obj: RecognizedObject, learningLang: string): ScanResult {
+  let ipa = obj.ipa;
+  let translation = obj.translation;
+  if (learningLang.toLowerCase().startsWith('en')) {
+    const hit = lookupWord(obj.word);
+    if (hit) {
+      if (hit.ipa) ipa = hit.ipa;
+      if (!translation && hit.translation) translation = hit.translation;
+    }
+  }
+  return {
+    word: obj.word,
+    translation,
+    ipa,
+    category: obj.category,
+    emoji: obj.emoji,
+    examples: obj.examples ?? [],
+    note: obj.note || undefined,
+    distractors: obj.distractors ?? [],
+    auto: true,
+  };
+}

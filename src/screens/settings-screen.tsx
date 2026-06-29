@@ -10,7 +10,7 @@
  * Только моки: реальных покупок и аккаунтов нет (подключим слоями, §11).
  */
 import { Children, Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, Modal, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import Animated, { SlideInDown, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
@@ -24,8 +24,12 @@ import { Screen } from '@/components/screen';
 import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing, type ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
+import { alertAsync, confirmAsync } from '@/lib/dialog';
 import { LANGUAGES, getLanguage } from '@/lib/mock-data';
+import { pluralWords } from '@/lib/plural';
+import { MANAGE_SUBSCRIPTION_URL, PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from '@/constants/links';
 
 // --- Палитра «цветных кружков» под иконку строки (мягкий фон + насыщенная иконка) ---
 type Tone = 'primary' | 'accent' | 'accent2' | 'success' | 'warning' | 'gold' | 'danger' | 'neutral';
@@ -163,7 +167,8 @@ export function SettingsScreen() {
   const router = useRouter();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { prefs, setLanguages } = useCollection();
+  const { prefs, setLanguages, cards, clearCollection } = useCollection();
+  const { user, signInWithGoogle, signOut } = useAuth();
 
   const learning = getLanguage(prefs.learningLang);
   const native = getLanguage(prefs.nativeLang);
@@ -220,7 +225,47 @@ export function SettingsScreen() {
     }
   };
 
-  const stub = (title: string) => Alert.alert(title, 'Заглушка для MVP — подключим позже.');
+  const stub = (title: string) => {
+    void alertAsync(title, 'Заглушка для MVP — подключим позже.');
+  };
+
+  // Экспорт коллекции через системный share-sheet (заявлено в Premium).
+  const onExport = () => {
+    if (cards.length === 0) {
+      void alertAsync('Коллекция пуста', 'Сначала поймай несколько слов камерой.');
+      return;
+    }
+    const list = cards.map((c) => `${c.word} — ${c.translation}`).join('\n');
+    Share.share({ message: `Мои слова из CatchWord (${cards.length}):\n\n${list}` }).catch(() => {});
+  };
+
+  // Очистить коллекцию ТЕКУЩЕГО курса (с подтверждением). Слова других пар не трогаем.
+  const onClear = async () => {
+    const ok = await confirmAsync(
+      'Очистить коллекцию?',
+      `Все слова пары ${learning.flag} ${learning.label} → ${native.label} ${native.flag} будут удалены без возможности восстановить. Слова других пар останутся.`,
+      'Очистить',
+      true,
+    );
+    if (ok) clearCollection();
+  };
+
+  const onSignIn = async () => {
+    try {
+      await signInWithGoogle();
+    } catch {
+      void alertAsync('Не удалось войти', 'Попробуй ещё раз.');
+    }
+  };
+  const onSignOut = async () => {
+    const ok = await confirmAsync(
+      'Выйти из аккаунта?',
+      'Локальная коллекция останется на устройстве.',
+      'Выйти',
+      true,
+    );
+    if (ok) signOut();
+  };
 
   // Выбор языка из листа.
   const chooseLanguage = (code: string) => {
@@ -252,14 +297,49 @@ export function SettingsScreen() {
           </View>
         </Reveal>
 
-        {/* ЯЗЫК */}
+        {/* АККАУНТ */}
+        <Reveal delay={40}>
+          <Section label="АККАУНТ">
+            <Group>
+              {user
+                ? [
+                    <SettingRow
+                      key="account"
+                      icon="person.crop.circle.fill"
+                      tone="primary"
+                      label={user.email ?? 'Аккаунт Google'}
+                      sublabel="Прогресс и фото синхронизируются"
+                    />,
+                    <SettingRow
+                      key="signout"
+                      icon="rectangle.portrait.and.arrow.right"
+                      tone="danger"
+                      label="Выйти"
+                      onPress={onSignOut}
+                    />,
+                  ]
+                : (
+                    <SettingRow
+                      icon="person.crop.circle.badge.plus"
+                      tone="primary"
+                      label="Войти через Google"
+                      sublabel="Сохрани прогресс и фото в облаке"
+                      onPress={onSignIn}
+                    />
+                  )}
+            </Group>
+          </Section>
+        </Reveal>
+
+        {/* ПАРА ЯЗЫКОВ (КУРС) */}
         <Reveal delay={60}>
-          <Section label="ЯЗЫК">
+          <Section label="ПАРА ЯЗЫКОВ · КУРС">
             <Group>
               <SettingRow
                 icon="globe"
                 tone="primary"
                 label="Изучаю"
+                sublabel="Слова этого языка ловлю в коллекцию"
                 value={`${learning.label} ${learning.flag}`}
                 onPress={() => setPicker('learning')}
               />
@@ -267,10 +347,15 @@ export function SettingsScreen() {
                 icon="text.bubble.fill"
                 tone="accent"
                 label="Родной"
+                sublabel="На него показывается перевод"
                 value={`${native.label} ${native.flag}`}
                 onPress={() => setPicker('native')}
               />
             </Group>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
+              У каждой пары — своя коллекция. Сменишь пару — откроется её коллекция.
+              Сейчас в паре {learning.flag} → {native.flag}: {cards.length} {pluralWords(cards.length)}.
+            </ThemedText>
           </Section>
         </Reveal>
 
@@ -334,6 +419,33 @@ export function SettingsScreen() {
                 label="Восстановить покупки"
                 onPress={() => stub('Восстановление покупок')}
               />
+              <SettingRow
+                icon="creditcard.fill"
+                tone="primary"
+                label="Управление подпиской"
+                onPress={() => Linking.openURL(MANAGE_SUBSCRIPTION_URL)}
+              />
+            </Group>
+          </Section>
+        </Reveal>
+
+        {/* ДАННЫЕ */}
+        <Reveal delay={210}>
+          <Section label="ДАННЫЕ">
+            <Group>
+              <SettingRow
+                icon="square.and.arrow.up"
+                tone="accent2"
+                label="Экспортировать коллекцию"
+                onPress={onExport}
+              />
+              <SettingRow
+                icon="trash.fill"
+                tone="danger"
+                label="Очистить коллекцию"
+                sublabel="Только текущую пару языков"
+                onPress={onClear}
+              />
             </Group>
           </Section>
         </Reveal>
@@ -346,13 +458,19 @@ export function SettingsScreen() {
                 icon="lock.fill"
                 tone="neutral"
                 label="Политика конфиденциальности"
-                onPress={() => stub('Privacy Policy')}
+                onPress={() => Linking.openURL(PRIVACY_URL)}
               />
               <SettingRow
                 icon="doc.text.fill"
                 tone="neutral"
                 label="Условия использования"
-                onPress={() => stub('Terms of Use')}
+                onPress={() => Linking.openURL(TERMS_URL)}
+              />
+              <SettingRow
+                icon="envelope.fill"
+                tone="neutral"
+                label="Связаться с нами"
+                onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=CatchWord`)}
               />
               <SettingRow icon="info.circle.fill" tone="neutral" label="Версия" value={version} />
             </Group>
@@ -366,7 +484,7 @@ export function SettingsScreen() {
               See it. Catch it. Speak it.
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary" style={styles.footerSub}>
-              CatchWord · сделано с ♥ в Казахстане
+              CatchWord · сделано с любовью в Казахстане
             </ThemedText>
           </View>
         </Reveal>

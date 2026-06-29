@@ -8,7 +8,7 @@
  * с честной экономией, подсветка Premium и мягкая reanimated-анимация.
  */
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -25,6 +25,8 @@ import { ThemedText } from '@/components/themed-text';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { Plan } from '@/types';
+import { PRIVACY_URL, TERMS_URL } from '@/constants/links';
+import { alertAsync } from '@/lib/dialog';
 
 /** Период оплаты для переключателя «Месяц / Год». */
 type Period = 'monthly' | 'yearly';
@@ -86,28 +88,32 @@ export function PaywallScreen() {
 
   const plans = useMemo(() => buildPlans(period), [period]);
 
-  // Заглушка покупки тарифа: реальные платежи — через RevenueCat (§11, слой 2).
+  // Заглушка покупки тарифа: на нативе — RevenueCat (§11, слой 2), на вебе — Stripe позже.
   const onSelectPlan = (plan: Plan) => {
     if (plan.tier === 'free') {
-      Alert.alert('Free', 'Это бесплатный тариф — он уже активен.');
+      void alertAsync('Free', 'Это бесплатный тариф — он уже активен.');
       return;
     }
-    Alert.alert(
+    void alertAsync(
       `Покупка «${plan.name}»`,
-      'Оплата подключается через RevenueCat — это слой 2 плана сборки (§11). Сейчас это заглушка.',
+      Platform.OS === 'web'
+        ? 'Веб-оплата скоро. Пока оформить подписку можно в мобильном приложении CatchWord.'
+        : 'Оплата подключается через RevenueCat — это слой 2 плана сборки (§11). Сейчас это заглушка.',
     );
   };
 
   // Lifetime $79.99 — разовая покупка Premium навсегда (спека §8).
   const onLifetime = () => {
-    Alert.alert(
+    void alertAsync(
       'Lifetime — $79.99',
-      'Разовая покупка Premium навсегда. Подключим через RevenueCat — слой 2 (§11).',
+      Platform.OS === 'web'
+        ? 'Веб-оплата скоро. Пока доступно в мобильном приложении CatchWord.'
+        : 'Разовая покупка Premium навсегда. Подключим через RevenueCat — слой 2 (§11).',
     );
   };
 
   const onRestore = () => {
-    Alert.alert('Восстановление покупок', 'Заглушка: подключим вместе с RevenueCat — слой 2 (§11).');
+    void alertAsync('Восстановление покупок', 'Заглушка: подключим вместе с RevenueCat — слой 2 (§11).');
   };
 
   // Честная подпись под переключателем (без обмана про экономию — спека §2/§8).
@@ -120,7 +126,7 @@ export function PaywallScreen() {
     <Screen scroll contentStyle={{ paddingBottom: insets.bottom + Spacing.six }}>
       {/* Герой: большой стикер + обещание + честные «таблетки». */}
       <Reveal delay={0} distance={16} style={styles.hero}>
-        <Sticker emoji="🚀" size={104} />
+        <Sticker symbol="sparkles" tone="primary" size={104} />
         <ThemedText type="title" style={styles.heroTitle}>
           Учи быстрее с Premium
         </ThemedText>
@@ -194,9 +200,25 @@ export function PaywallScreen() {
           </ThemedText>
         </Pressable>
         <ThemedText type="small" themeColor="textSecondary" style={styles.legal}>
-          Подписка продлевается автоматически, пока её не отменить в настройках Apple ID. Цены указаны
-          для App Store (US).
+          Подписка с автопродлением. Оплата спишется с Apple ID при подтверждении. Продлевается
+          автоматически, пока не отменить минимум за 24 часа до конца периода — в настройках Apple ID.
+          Цены для App Store (US).
         </ThemedText>
+        <View style={styles.legalLinks}>
+          <Pressable onPress={() => Linking.openURL(TERMS_URL)} hitSlop={8}>
+            <ThemedText type="small" themeColor="primary" style={styles.legalLink}>
+              Условия (EULA)
+            </ThemedText>
+          </Pressable>
+          <ThemedText type="small" themeColor="textSecondary">
+            ·
+          </ThemedText>
+          <Pressable onPress={() => Linking.openURL(PRIVACY_URL)} hitSlop={8}>
+            <ThemedText type="small" themeColor="primary" style={styles.legalLink}>
+              Конфиденциальность
+            </ThemedText>
+          </Pressable>
+        </View>
       </FadeIn>
     </Screen>
   );
@@ -234,4 +256,6 @@ const styles = StyleSheet.create({
   footer: { alignItems: 'center', gap: Spacing.two, marginTop: Spacing.two },
   restore: { textDecorationLine: 'underline', paddingVertical: Spacing.two },
   legal: { textAlign: 'center', maxWidth: 340 },
+  legalLinks: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  legalLink: { textDecorationLine: 'underline' },
 });

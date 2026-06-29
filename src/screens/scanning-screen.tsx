@@ -16,8 +16,8 @@
  * на уровне роута, чтобы скан нельзя было прервать жестом. Таймер чистим при
  * размонтировании; повторный переход защищён флагом-рефом.
  */
-import { useEffect, useRef } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Dimensions, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -34,13 +34,22 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { Button } from '@/components/button';
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing } from '@/constants/theme';
+import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
-import { getScanJob, updateScanJob, type ScanResult } from '@/lib/scan-job';
-import { cropToSticker, persistImage, recognizePhoto, toScanResult } from '@/lib/recognize';
+import { getScanJob, SCAN_FRAME, updateScanJob, type ScanResult, type SceneItem } from '@/lib/scan-job';
+import {
+  cropToFrame,
+  cropToSticker,
+  isRecognitionConfigured,
+  persistImage,
+  recognizePhoto,
+  toScanResult,
+} from '@/lib/recognize';
 import { liftToPNG } from '@/lib/subject-lift';
 
 /** Размеры сканирующего «визира». */
@@ -54,9 +63,12 @@ const RETICLE = 84;
 export function ScanningScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { prefs } = useCollection();
+  const { prefs, refundScan } = useCollection();
   const { jobId } = useLocalSearchParams<{ jobId?: string }>();
   const { height } = useWindowDimensions();
+  const reduceMotion = useReduceMotion();
+  // Ошибка распознавания (нет сети / не понял) — показываем вместо результата.
+  const [error, setError] = useState<{ title: string; message: string } | null>(null);
   // Реальный снятый кадр — показываем «обработку» именно его (а не абстрактный скрим).
   const photoUri = getScanJob(jobId)?.photoUri;
 
@@ -70,70 +82,115 @@ export function ScanningScreen() {
   const spin = useSharedValue(0); // вращение кольца-спиннера
   const ken = useSharedValue(0); // медленный зум кадра (ken burns)
 
-  // Старт анимаций + реальное распознавание (Gemini) и вырезка стикера, затем
-  // переход на Результат. Минимальная задержка ~900мс, чтобы анимация всегда
-  // успела сыграть. Нет фото/бэкенда/ошибка — мягко уходим на мок.
+  // Старт анимаций + реальное распознавание и вырезка стикера, затем переход на
+  // Результат. Reduce Motion → без зацикленных анимаций. Реальная ошибка
+  // распознавания (нет сети / не понял) → показываем ошибку и возвращаем скан.
   useEffect(() => {
-    enter.value = withTiming(1, { duration: Motion.duration.base, easing: Easing.out(Easing.ease) });
-    scan.value = withRepeat(
-      withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true,
-    );
-    pulse.value = withRepeat(
-      withTiming(1, { duration: Motion.duration.lazy, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true,
-    );
-    spin.value = withRepeat(withTiming(1, { duration: 1000, easing: Easing.linear }), -1, false);
-    ken.value = withRepeat(
-      withTiming(1, { duration: 4000, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true,
-    );
+    if (reduceMotion) {
+      enter.value = 1;
+    } else {
+      enter.value = withTiming(1, { duration: Motion.duration.base, easing: Easing.out(Easing.ease) });
+      scan.value = withRepeat(withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.ease) }), -1, true);
+      pulse.value = withRepeat(withTiming(1, { duration: Motion.duration.lazy, easing: Easing.inOut(Easing.ease) }), -1, true);
+      spin.value = withRepeat(withTiming(1, { duration: 1000, easing: Easing.linear }), -1, false);
+      ken.value = withRepeat(withTiming(1, { duration: 4000, easing: Easing.inOut(Easing.ease) }), -1, true);
+    }
 
     let active = true;
     const goToResult = () => {
       if (!active || navigated.current) return;
       navigated.current = true;
-      // replace, чтобы кадр сканирования не оставался в стеке назад.
       router.replace({ pathname: '/result', params: { jobId } });
+    };
+    const fail = (title: string, message: string) => {
+      if (!active) return;
+      refundScan();
+      setError({ title, message });
     };
 
     (async () => {
       const started = Date.now();
       const job = getScanJob(jobId);
-      const photoUri = job?.photoUri;
+      const mode = job?.mode ?? 'single';
       let result: ScanResult | undefined;
       let cutoutUri: string | null = null;
+      let items: SceneItem[] | undefined;
 
-      if (photoUri) {
-        // Параллельно: облачное распознавание + нативная вырезка фона (iOS 17+).
-        const [reco, liftedUri] = await Promise.all([
-          recognizePhoto(photoUri, prefs.learningLang, prefs.nativeLang).catch(() => null),
-          liftToPNG(photoUri).catch(() => null),
-        ]);
-        const primary = reco && reco.objects.length > 0 ? reco.objects[0] : null;
-        if (primary) result = toScanResult(primary, prefs.learningLang);
-
-        if (liftedUri) {
-          // Настоящий вырез фона (Фаза 2) — лучший вариант.
-          cutoutUri = await persistImage(liftedUri).catch(() => null);
-        } else if (reco && primary && primary.bbox) {
-          // Запасной вариант — кроп по рамке (Фаза 1).
-          cutoutUri = await cropToSticker(
-            reco.prepared.uri,
-            reco.prepared.width,
-            reco.prepared.height,
-            primary.bbox,
-          );
-        }
-        // Гарантируем постоянную картинку, если ничего выше не сработало.
-        if (!cutoutUri) cutoutUri = await persistImage(photoUri).catch(() => null);
+      // single: кропаем по «визиру» (только то, что в рамке). scene: берём весь
+      // кадр — там должно быть несколько предметов.
+      let photoUri = job?.photoUri;
+      if (photoUri && mode === 'single') {
+        const { width: winW, height: winH } = Dimensions.get('window');
+        const framed = await cropToFrame(photoUri, winW, winH, SCAN_FRAME).catch(() => null);
+        if (framed?.uri) photoUri = framed.uri;
       }
 
-      if (jobId) updateScanJob(jobId, { result, cutoutUri });
-      const wait = Math.max(0, 900 - (Date.now() - started));
+      if (photoUri) {
+        const configured = isRecognitionConfigured();
+
+        if (mode === 'scene') {
+          // «Поймай всю сцену»: до 8 предметов, у каждого — свой вырез по bbox.
+          const reco = await recognizePhoto(
+            photoUri, prefs.learningLang, prefs.nativeLang, 8,
+          ).catch(() => null);
+          if (!active) return;
+          if (configured && !reco) {
+            fail('Не получилось распознать', 'Проверь интернет и попробуй ещё раз. Скан не списан.');
+            return;
+          }
+          if (configured && reco && reco.objects.length === 0) {
+            fail('Не понял, что тут', 'Наведи на сцену с предметами и попробуй снова. Скан не списан.');
+            return;
+          }
+          if (reco && reco.objects.length > 0) {
+            items = [];
+            for (const obj of reco.objects) {
+              const cut = obj.bbox
+                ? await cropToSticker(reco.prepared.uri, reco.prepared.width, reco.prepared.height, obj.bbox)
+                : null;
+              items.push({ result: toScanResult(obj, prefs.learningLang), cutoutUri: cut });
+            }
+            result = items[0]?.result; // «основной» — на случай экрана без сцены
+            cutoutUri = items[0]?.cutoutUri ?? null;
+          } else {
+            cutoutUri = await persistImage(photoUri).catch(() => null);
+          }
+        } else {
+          // single: распознавание (1 предмет) + нативная вырезка фона (iOS 17+).
+          const [reco, liftedUri] = await Promise.all([
+            recognizePhoto(photoUri, prefs.learningLang, prefs.nativeLang, 1).catch(() => null),
+            liftToPNG(photoUri).catch(() => null),
+          ]);
+          if (!active) return;
+
+          if (configured && !reco) {
+            fail('Не получилось распознать', 'Проверь интернет и попробуй ещё раз. Скан не списан.');
+            return;
+          }
+          if (configured && reco && reco.objects.length === 0) {
+            fail('Не понял, что это', 'Наведи ближе на один предмет и попробуй снова. Скан не списан.');
+            return;
+          }
+
+          const primary = reco && reco.objects.length > 0 ? reco.objects[0] : null;
+          if (primary) result = toScanResult(primary, prefs.learningLang);
+
+          if (liftedUri) {
+            cutoutUri = await persistImage(liftedUri).catch(() => null);
+          } else if (reco && primary && primary.bbox) {
+            cutoutUri = await cropToSticker(
+              reco.prepared.uri,
+              reco.prepared.width,
+              reco.prepared.height,
+              primary.bbox,
+            );
+          }
+          if (!cutoutUri) cutoutUri = await persistImage(photoUri).catch(() => null);
+        }
+      }
+
+      if (jobId) updateScanJob(jobId, { result, cutoutUri, items });
+      const wait = Math.max(0, (reduceMotion ? 300 : 900) - (Date.now() - started));
       setTimeout(goToResult, wait);
     })();
 
@@ -145,7 +202,7 @@ export function ScanningScreen() {
       cancelAnimation(spin);
       cancelAnimation(ken);
     };
-  }, [enter, scan, pulse, spin, ken, router, jobId, prefs.learningLang, prefs.nativeLang]);
+  }, [enter, scan, pulse, spin, ken, router, jobId, prefs.learningLang, prefs.nativeLang, reduceMotion, refundScan]);
 
   // Скрим: theme.background (морозная подложка) + theme.overlay (затемнение).
   const bgStyle = useAnimatedStyle(() => ({ opacity: enter.value * 0.82 }));
@@ -207,6 +264,23 @@ export function ScanningScreen() {
       )}
 
       {/* Контент: ловим тапы, чтобы во время скана нельзя было нажать на камеру. */}
+      {error ? (
+        <SafeAreaView style={styles.center}>
+          <View
+            style={[styles.errorCard, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
+            <View style={[styles.errorIcon, { backgroundColor: theme.warningSoft }]}>
+              <Icon name="exclamationmark.triangle.fill" size={26} color={theme.warning} />
+            </View>
+            <ThemedText type="subtitle" style={styles.errorTitle}>
+              {error.title}
+            </ThemedText>
+            <ThemedText type="default" themeColor="textSecondary" style={styles.errorMsg}>
+              {error.message}
+            </ThemedText>
+            <Button title="Назад к камере" icon="camera.fill" onPress={() => router.back()} style={styles.errorBtn} />
+          </View>
+        </SafeAreaView>
+      ) : (
       <SafeAreaView style={styles.center}>
         <Animated.View entering={FadeIn.duration(Motion.duration.base)} style={styles.frameWrap}>
           {/* Рамка-визир с угловыми скобками + фокус. */}
@@ -251,22 +325,24 @@ export function ScanningScreen() {
               Распознаю предмет…
             </ThemedText>
             <View style={styles.dots}>
-              <Dot delay={0} color={theme.accent} />
-              <Dot delay={160} color={theme.accent} />
-              <Dot delay={320} color={theme.accent} />
+              <Dot delay={0} color={theme.accent} reduce={reduceMotion} />
+              <Dot delay={160} color={theme.accent} reduce={reduceMotion} />
+              <Dot delay={320} color={theme.accent} reduce={reduceMotion} />
             </View>
           </Animated.View>
         </Animated.View>
       </SafeAreaView>
+      )}
     </View>
   );
 }
 
 /** Одна «думающая» точка: мягко пульсирует масштабом и прозрачностью. */
-function Dot({ delay, color }: { delay: number; color: string }) {
-  const v = useSharedValue(0);
+function Dot({ delay, color, reduce }: { delay: number; color: string; reduce?: boolean }) {
+  const v = useSharedValue(reduce ? 1 : 0);
 
   useEffect(() => {
+    if (reduce) return;
     v.value = withDelay(
       delay,
       withRepeat(
@@ -276,7 +352,7 @@ function Dot({ delay, color }: { delay: number; color: string }) {
       ),
     );
     return () => cancelAnimation(v);
-  }, [v, delay]);
+  }, [v, delay, reduce]);
 
   const style = useAnimatedStyle(() => ({
     opacity: interpolate(v.value, [0, 1], [0.3, 1]),
@@ -348,6 +424,24 @@ const styles = StyleSheet.create({
   caption: { alignItems: 'center', gap: Spacing.two },
   captionText: { fontSize: 16, letterSpacing: 0.2 },
   captionOnPhoto: { color: '#FFFFFF' },
+
+  // --- Ошибка распознавания ---
+  errorCard: {
+    alignItems: 'center',
+    gap: Spacing.two,
+    marginHorizontal: Spacing.four,
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.five,
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+  },
+  errorIcon: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
+  errorTitle: { textAlign: 'center' },
+  errorMsg: { textAlign: 'center' },
+  errorBtn: { alignSelf: 'stretch', marginTop: Spacing.two },
   dots: { flexDirection: 'row', gap: Spacing.one + 2 },
   dot: { width: 7, height: 7, borderRadius: 4 },
 });

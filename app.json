@@ -10,7 +10,10 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "supportsTablet": true,
-      "bundleIdentifier": "com.almazbukayev.catchword"
+      "bundleIdentifier": "com.almazbukayev.catchword",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.almazbukayev.catchword",
@@ -44,7 +47,8 @@
           "cameraPermission": "CatchWord uses the camera to recognize objects and turn them into vocabulary cards."
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true,

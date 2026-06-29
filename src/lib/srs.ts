@@ -109,3 +109,11 @@ export function freshSrs(now: number = Date.now()): SrsUpdate {
 export function isDue(card: Pick<WordCard, 'dueAt'>, now: number = Date.now()): boolean {
   return (card.dueAt ?? 0) <= now;
 }
+
+/** Порог освоения: с этого уровня mastery слово считается «выученным». */
+export const MASTERY_LEARNED = 4;
+
+/** Выучено ли слово (mastery достиг порога освоения). */
+export function isMastered(card: Pick<WordCard, 'mastery'>): boolean {
+  return (card.mastery ?? 0) >= MASTERY_LEARNED;
+}
