@@ -35,6 +35,12 @@ export interface RecognizedObject {
   /** [x, y, w, h] в долях 0..1 (или null). */
   bbox: number[] | null;
   confidence: number | null;
+  /** 2–3 примера предложения с этим словом (могут отсутствовать). */
+  examples?: string[];
+  /** Короткая заметка-мнемоника на родном языке (может быть пустой). */
+  note?: string;
+  /** Правдоподобные неправильные переводы — для умного теста. */
+  distractors?: string[];
 }
 
 /** Готов ли бэкенд распознавания (есть URL и ключ). */
@@ -78,6 +84,7 @@ export async function recognizePhoto(
   photoUri: string,
   learningLang: string,
   nativeLang: string,
+  maxObjects = 1,
 ): Promise<{
   objects: RecognizedObject[];
   prepared: { uri: string; width: number; height: number };
@@ -104,7 +111,7 @@ export async function recognizePhoto(
         apikey: SUPABASE_ANON,
         Authorization: `Bearer ${SUPABASE_ANON}`,
       },
-      body: JSON.stringify({ image: prepared.base64, learningLang, nativeLang }),
+      body: JSON.stringify({ image: prepared.base64, learningLang, nativeLang, maxObjects }),
     });
     if (!res.ok) {
       console.warn('recognize HTTP', res.status, (await res.text()).slice(0, 200));
@@ -160,6 +167,42 @@ export async function cropToSticker(
   }
 }
 
+/**
+ * Кроп по «визиру»: вырезает центральный квадрат фото, соответствующий рамке
+ * наведения на экране. Превью камеры масштабируется в режиме cover (заполняет
+ * экран, лишнее обрезается), поэтому сторону рамки (в pt) переводим в пиксели
+ * фото через тот же cover-масштаб и берём центральный квадрат — ровно то, что
+ * пользователь видел в рамке. Возвращает { uri, width, height } или null.
+ */
+export async function cropToFrame(
+  uri: string,
+  screenW: number,
+  screenH: number,
+  frameSidePt: number,
+): Promise<{ uri: string; width: number; height: number } | null> {
+  try {
+    // Пустой список действий нормализует EXIF-ориентацию и даёт реальные пиксели.
+    const base = await manipulateAsync(uri, [], { compress: 1, format: SaveFormat.JPEG });
+    const pw = base.width;
+    const ph = base.height;
+    if (!pw || !ph || screenW <= 0 || screenH <= 0) return base;
+    // cover-масштаб превью → сторона квадрата в пикселях фото.
+    const scale = Math.max(screenW / pw, screenH / ph);
+    const side = Math.max(1, Math.min(pw, ph, Math.round(frameSidePt / scale)));
+    const originX = Math.max(0, Math.round((pw - side) / 2));
+    const originY = Math.max(0, Math.round((ph - side) / 2));
+    const out = await manipulateAsync(
+      base.uri,
+      [{ crop: { originX, originY, width: side, height: side } }],
+      { compress: 0.9, format: SaveFormat.JPEG },
+    );
+    return { uri: out.uri, width: out.width, height: out.height };
+  } catch (e) {
+    console.warn('Не удалось вырезать по рамке:', e);
+    return null;
+  }
+}
+
 /** Скопировать картинку из кеша в постоянную папку (чтобы стикер не пропал). */
 export async function persistImage(srcUri: string): Promise<string> {
   const dir = `${FileSystem.documentDirectory}stickers/`;
@@ -196,7 +239,9 @@ export function toScanResult(obj: RecognizedObject, learningLang: string): ScanR
     ipa,
     category: obj.category,
     emoji: obj.emoji,
-    examples: [],
+    examples: obj.examples ?? [],
+    note: obj.note || undefined,
+    distractors: obj.distractors ?? [],
     auto: true,
   };
 }

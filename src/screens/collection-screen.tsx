@@ -1,21 +1,21 @@
 /**
  * Экран Коллекции / Скрапбук (спека §5.5).
  *
- * CapWords-style витрина слов: шапка со статистикой (поймано / выучено / серия)
- * + полоса освоения, поиск по слову/переводу, горизонтальные чипы-категории и
- * сетка стикеров 2×N. Всё читается из useCollection() (локальная БД). Тап по
- * плитке → карточка слова. Лёгкое «появление» через <Reveal>.
+ * CapWords-style витрина пойманных слов: шапка со статистикой (поймано / выучено /
+ * серия) + полоса освоения, поиск по слову/переводу, горизонтальные чипы-темы и
+ * сетка стикеров. Тап по плитке → карточка слова. Лёгкое «появление» через <Reveal>.
  *
- * Переключатель вида «Сетка» | «По датам» (фича 1): в режиме «По датам» те же
- * (отфильтрованные) карточки показываются лентой-SectionList, сгруппированной по
- * дню добавления (groupCardsByDay): заголовок дня + счётчик, компактные строки
- * (стикер + слово + перевод). Поиск и категории работают в обоих режимах.
+ * Ровно две сортировки (как у CapWords/Drops — больше вариантов вредит):
+ *  - «По датам»  — лента, сгруппированная по дню добавления (визуальный дневник);
+ *  - «По темам»  — секции по категории предмета; в заголовке темы виден прогресс
+ *                  освоения «8/12 выучено» + мини-полоса (Pokédex-эффект «собери набор»).
+ * В обоих режимах карточки рисуются сеткой 2×N; выученные слова (mastery≥4) помечены
+ * золотым бейджем на плитке. Поиск и фильтр по теме работают в обоих режимах.
  */
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
-  Pressable,
+  Alert,
   ScrollView,
   SectionList,
   StyleSheet,
@@ -25,97 +25,110 @@ import {
 import { useRouter } from 'expo-router';
 
 import { Chip } from '@/components/chip';
+import { DailyQuestCard } from '@/components/daily-quest-card';
 import { EmptyState } from '@/components/empty-state';
-import { Icon } from '@/components/icon';
 import { ProgressBar } from '@/components/progress-bar';
 import { Reveal } from '@/components/reveal';
 import { Screen } from '@/components/screen';
 import { SearchBar } from '@/components/search-bar';
-import { SectionHeader } from '@/components/section-header';
 import { SegmentedControl } from '@/components/segmented-control';
 import { StatCard } from '@/components/stat-card';
-import { Sticker } from '@/components/sticker';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { WordTile } from '@/components/word-tile';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
-import { groupCardsByDay, type DaySection } from '@/lib/dates';
+import { groupCardsByDay } from '@/lib/dates';
 import { CATEGORIES } from '@/lib/mock-data';
+import { pluralWords } from '@/lib/plural';
+import { isMastered } from '@/lib/srs';
 import type { WordCard } from '@/types';
 
-/** Фильтр «все категории». */
+/** Фильтр «все темы». */
 const ALL = 'Все';
 
-/** Режим отображения коллекции. */
-type ViewMode = 'grid' | 'dates';
+/** Тема для карточек без категории (показываем последней секцией). */
+const NO_THEME = 'Без темы';
 
-/** Опции переключателя вида. */
-const VIEW_OPTIONS: { label: string; value: ViewMode }[] = [
-  { label: 'Сетка', value: 'grid' },
+/** Режим сортировки коллекции. */
+type SortMode = 'dates' | 'themes';
+
+/** Опции переключателя сортировки. */
+const SORT_OPTIONS: { label: string; value: SortMode }[] = [
   { label: 'По датам', value: 'dates' },
+  { label: 'По темам', value: 'themes' },
 ];
 
-/** Пустая ячейка-распорка — добивает сетку до чётной длины (ровные колонки). */
-type Spacer = { id: string; spacer: true };
-type GridItem = WordCard | Spacer;
-
-/** Русское склонение слова «слово» по числу (1 слово / 2 слова / 5 слов). */
-function pluralWords(n: number): string {
-  const m10 = n % 10;
-  const m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return 'слово';
-  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'слова';
-  return 'слов';
+/** Одна строка сетки — до двух карточек рядом. */
+interface TileRow {
+  key: string;
+  cards: WordCard[];
 }
 
-/**
- * Компактная строка слова для режима «По датам»: стикер + слово + перевод,
- * тап → карточка. Лёгкая «лесенка» появления через <Reveal> (как в сетке).
- */
-function DateRow({ card, index, onPress }: { card: WordCard; index: number; onPress: () => void }) {
-  const theme = useTheme();
-  return (
-    <Reveal delay={Math.min(index, 8) * 35}>
-      <Pressable
-        onPress={onPress}
-        accessibilityRole="button"
-        style={({ pressed }) => [
-          styles.row,
-          { backgroundColor: theme.card, borderColor: theme.border, opacity: pressed ? 0.85 : 1 },
-        ]}>
-        <Sticker emoji={card.emoji} size={44} />
-        <View style={styles.rowText}>
-          <ThemedText type="default" style={styles.rowWord} numberOfLines={1}>
-            {card.word}
-          </ThemedText>
-          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-            {card.translation}
-          </ThemedText>
-        </View>
-        <Icon name="chevron.right" size={14} color={theme.textSecondary} />
-      </Pressable>
-    </Reveal>
-  );
+/** Секция списка (день или тема) с уже разбитыми на пары карточками. */
+interface GridSection {
+  key: string;
+  title: string;
+  /** Всего карточек в секции. */
+  total: number;
+  /** Сколько из них выучено — задано только для секций-тем (включает мини-прогресс). */
+  learned?: number;
+  data: TileRow[];
+}
+
+/** Разбить карточки на строки по 2 для сетки (ключ строки — id первой карточки). */
+function toRows(cards: WordCard[]): TileRow[] {
+  const rows: TileRow[] = [];
+  for (let i = 0; i < cards.length; i += 2) {
+    rows.push({ key: cards[i].id, cards: cards.slice(i, i + 2) });
+  }
+  return rows;
+}
+
+/** Сгруппировать карточки по теме (категории) в порядке CATEGORIES, «Без темы» — в конец. */
+function groupCardsByTheme(cards: WordCard[]): GridSection[] {
+  const byCat = new Map<string, WordCard[]>();
+  for (const c of cards) {
+    const cat = c.category ?? NO_THEME;
+    const bucket = byCat.get(cat);
+    if (bucket) bucket.push(c);
+    else byCat.set(cat, [c]);
+  }
+  // Порядок тем: как в CATEGORIES, затем всё остальное, «Без темы» — последней.
+  const ordered = [
+    ...CATEGORIES.filter((c) => byCat.has(c)),
+    ...[...byCat.keys()].filter((c) => c !== NO_THEME && !CATEGORIES.includes(c)),
+    ...(byCat.has(NO_THEME) ? [NO_THEME] : []),
+  ];
+  return ordered.map((cat) => {
+    const list = byCat.get(cat) ?? [];
+    return {
+      key: cat,
+      title: cat,
+      total: list.length,
+      learned: list.filter(isMastered).length,
+      data: toRows(list),
+    };
+  });
 }
 
 export function CollectionScreen() {
   const router = useRouter();
   const theme = useTheme();
-  const { cards, loading, stats } = useCollection();
+  const { cards, loading, stats, removeCard } = useCollection();
 
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string>(ALL);
-  const [mode, setMode] = useState<ViewMode>('grid');
+  const [mode, setMode] = useState<SortMode>('dates');
 
-  // Категории, реально присутствующие в коллекции (в порядке CATEGORIES) + «Все».
+  // Темы, реально присутствующие в коллекции (в порядке CATEGORIES) + «Все».
   const categories = useMemo(() => {
     const present = new Set(cards.map((c) => c.category).filter((c): c is string => !!c));
     return [ALL, ...CATEGORIES.filter((c) => present.has(c))];
   }, [cards]);
 
-  // Отфильтрованные карточки: категория + поиск по слову/переводу.
+  // Отфильтрованные карточки: тема + поиск по слову/переводу.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return cards.filter((c) => {
@@ -125,14 +138,16 @@ export function CollectionScreen() {
     });
   }, [cards, query, category]);
 
-  // Добиваем до чётной длины пустой ячейкой — иначе одинокая плитка тянется на всю ширину.
-  const gridData = useMemo<GridItem[]>(() => {
-    if (filtered.length % 2 === 0) return filtered;
-    return [...filtered, { id: '__spacer__', spacer: true }];
-  }, [filtered]);
-
-  // Те же отфильтрованные карточки, но сгруппированные по дню добавления.
-  const sections = useMemo<DaySection[]>(() => groupCardsByDay(filtered), [filtered]);
+  // Секции под выбранную сортировку: по дню добавления или по теме.
+  const sections = useMemo<GridSection[]>(() => {
+    if (mode === 'themes') return groupCardsByTheme(filtered);
+    return groupCardsByDay(filtered).map((s) => ({
+      key: s.key,
+      title: s.title,
+      total: s.data.length,
+      data: toRows(s.data),
+    }));
+  }, [filtered, mode]);
 
   const masteryProgress = stats.total > 0 ? stats.mastered / stats.total : 0;
 
@@ -141,6 +156,17 @@ export function CollectionScreen() {
     setQuery('');
     setCategory(ALL);
   };
+
+  // Удаление слова из коллекции: долгое нажатие на плитку → подтверждение.
+  const confirmDelete = useCallback(
+    (card: WordCard) => {
+      Alert.alert('Удалить слово?', `«${card.word}» исчезнет из коллекции.`, [
+        { text: 'Отмена', style: 'cancel' },
+        { text: 'Удалить', style: 'destructive', onPress: () => removeCard(card.id) },
+      ]);
+    },
+    [removeCard],
+  );
 
   // Загрузка из БД.
   if (loading) {
@@ -166,10 +192,8 @@ export function CollectionScreen() {
     );
   }
 
-  // Шапка списка: статистика + прогресс + поиск + чипы + переключатель вида.
+  // Шапка списка: статистика + прогресс + поиск + чипы-темы + переключатель сортировки.
   // Передаём элементом (не функцией-компонентом), чтобы поле поиска не теряло фокус.
-  // В режиме «Сетка» добавляем заголовок «Мои слова»; в «По датам» его роль
-  // выполняют заголовки дней, поэтому там его не показываем.
   const listHeader = (
     <View style={styles.header}>
       {/* Статистика коллекции */}
@@ -179,6 +203,11 @@ export function CollectionScreen() {
           <StatCard icon="graduationcap.fill" tone="success" value={stats.mastered} label="Выучено" />
           <StatCard icon="flame.fill" tone="gold" value={stats.streak} label="Серия" />
         </View>
+      </Reveal>
+
+      {/* Ежедневный квест: что сфотографировать сегодня + таймер */}
+      <Reveal delay={45}>
+        <DailyQuestCard />
       </Reveal>
 
       {/* Полоса освоения коллекции */}
@@ -199,7 +228,7 @@ export function CollectionScreen() {
         <SearchBar value={query} onChangeText={setQuery} placeholder="Поиск слова или перевода" />
       </Reveal>
 
-      {/* Чипы-категории (горизонтальная прокрутка, с выходом за поля) */}
+      {/* Чипы-темы (горизонтальная прокрутка, с выходом за поля) */}
       <Reveal delay={120}>
         <ScrollView
           horizontal
@@ -217,88 +246,71 @@ export function CollectionScreen() {
         </ScrollView>
       </Reveal>
 
-      {/* Переключатель вида: «Сетка» | «По датам» */}
+      {/* Сортировка: «По датам» | «По темам» */}
       <Reveal delay={150}>
-        <SegmentedControl options={VIEW_OPTIONS} value={mode} onChange={setMode} />
+        <SegmentedControl options={SORT_OPTIONS} value={mode} onChange={setMode} />
       </Reveal>
-
-      {/* Заголовок сетки со счётчиком — только в режиме «Сетка» */}
-      {mode === 'grid' ? (
-        <Reveal delay={180}>
-          <SectionHeader
-            icon="square.grid.2x2.fill"
-            title="Мои слова"
-            subtitle={`${filtered.length} ${pluralWords(filtered.length)}`}
-          />
-        </Reveal>
-      ) : null}
     </View>
   );
 
-  // Общий пустой стейт (поиск/категория ничего не нашли) — для обоих режимов.
+  // Общий пустой стейт (поиск/тема ничего не нашли).
   const emptyComponent = (
     <EmptyState
       icon="magnifyingglass"
       title="Ничего не нашлось"
-      message="Попробуй другой запрос или категорию."
+      message="Попробуй другой запрос или тему."
       actionLabel="Сбросить фильтры"
       onAction={resetFilters}
     />
   );
 
-  // Режим «По датам»: лента, сгруппированная по дню добавления.
-  if (mode === 'dates') {
-    return (
-      <Screen padded={false}>
-        <SectionList<WordCard, DaySection>
-          sections={sections}
-          keyExtractor={(item) => item.id}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          stickySectionHeadersEnabled
-          contentContainerStyle={styles.dateContent}
-          ListHeaderComponent={listHeader}
-          ListEmptyComponent={emptyComponent}
-          renderSectionHeader={({ section }: { section: SectionListData<WordCard, DaySection> }) => (
-            <View style={[styles.dayHeader, { backgroundColor: theme.background }]}>
-              <ThemedText type="smallBold">{section.title}</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                {section.data.length} {pluralWords(section.data.length)}
-              </ThemedText>
-            </View>
-          )}
-          renderItem={({ item, index }) => (
-            <DateRow card={item} index={index} onPress={() => openCard(item.id)} />
-          )}
-        />
-      </Screen>
-    );
-  }
-
-  // Режим «Сетка» (как и раньше): 2 колонки стикеров.
   return (
     <Screen padded={false}>
-      <FlatList<GridItem>
-        data={gridData}
-        keyExtractor={(item) => item.id}
-        numColumns={2}
+      <SectionList<TileRow, GridSection>
+        sections={sections}
+        keyExtractor={(item) => item.key}
         showsVerticalScrollIndicator={false}
-        removeClippedSubviews={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
+        stickySectionHeadersEnabled={false}
         contentContainerStyle={styles.content}
-        columnWrapperStyle={styles.column}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={emptyComponent}
-        renderItem={({ item, index }) => {
-          if ('spacer' in item) return <View style={styles.cell} />;
-          return (
-            <Reveal style={styles.cell} delay={Math.min(index, 8) * 45}>
-              <WordTile card={item} onPress={() => openCard(item.id)} />
-            </Reveal>
-          );
-        }}
+        renderSectionHeader={({ section }: { section: SectionListData<TileRow, GridSection> }) => (
+          <View style={[styles.sectionHeader, { backgroundColor: theme.background }]}>
+            <View style={styles.sectionHeaderTop}>
+              <ThemedText type="smallBold">{section.title}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                {section.learned != null
+                  ? `${section.learned}/${section.total} выучено`
+                  : `${section.total} ${pluralWords(section.total)}`}
+              </ThemedText>
+            </View>
+            {/* В режиме «По темам» — мини-полоса прогресса освоения набора. */}
+            {section.learned != null ? (
+              <ProgressBar
+                progress={section.total > 0 ? section.learned / section.total : 0}
+                tone="success"
+                height={6}
+              />
+            ) : null}
+          </View>
+        )}
+        renderItem={({ item, index }) => (
+          <Reveal delay={Math.min(index, 8) * 35} style={styles.gridRow}>
+            {item.cards.map((card) => (
+              <View key={card.id} style={styles.cell}>
+                <WordTile
+                  card={card}
+                  onPress={() => openCard(card.id)}
+                  onLongPress={() => confirmDelete(card)}
+                />
+              </View>
+            ))}
+            {/* Одинокая карточка в строке — добиваем распоркой, чтобы не растягивалась. */}
+            {item.cards.length === 1 ? <View style={styles.cell} /> : null}
+          </Reveal>
+        )}
       />
     </Screen>
   );
@@ -310,17 +322,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.four,
     paddingTop: Spacing.two,
     paddingBottom: Spacing.six,
-    gap: Spacing.three,
     flexGrow: 1,
   },
-  // Лента «По датам»: без межстрочного gap — отступы задают строки/заголовки.
-  dateContent: {
-    paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.two,
-    paddingBottom: Spacing.six,
-    flexGrow: 1,
-  },
-  header: { gap: Spacing.three },
+  header: { gap: Spacing.three, marginBottom: Spacing.one },
   stats: { flexDirection: 'row', gap: Spacing.two },
   progressCard: {
     gap: Spacing.two,
@@ -332,25 +336,18 @@ const styles = StyleSheet.create({
   // Чипы выходят за горизонтальные поля экрана и прокручиваются «под край».
   chipsScroll: { marginHorizontal: -Spacing.four },
   chips: { gap: Spacing.two, paddingHorizontal: Spacing.four },
-  column: { gap: Spacing.three },
-  cell: { flex: 1 },
-  // --- Режим «По датам» ---
-  dayHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  // Заголовок секции (день или тема).
+  sectionHeader: {
+    gap: Spacing.two,
     paddingTop: Spacing.three,
     paddingBottom: Spacing.two,
   },
-  row: {
+  sectionHeaderTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.three,
-    padding: Spacing.two,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    marginBottom: Spacing.two,
+    justifyContent: 'space-between',
   },
-  rowText: { flex: 1, gap: 1 },
-  rowWord: { fontWeight: '700' },
+  // Строка сетки: две плитки рядом, отступ снизу — между строками.
+  gridRow: { flexDirection: 'row', gap: Spacing.three, marginBottom: Spacing.three },
+  cell: { flex: 1 },
 });

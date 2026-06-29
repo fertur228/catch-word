@@ -10,8 +10,7 @@
  *      • верх  — остаток сканов (тап → Пейволл) и шестерёнка настроек;
  *      • центр — «сканирующая» рамка-визир с мягким пульсом и бегущей
  *                полоской + подсказка «Наведи на предмет»;
- *      • низ   — большая кнопка съёмки с пружинным нажатием и «дышащим»
- *                кольцом, плюс заметка про симулятор.
+ *      • низ   — большая кнопка съёмки с пружинным нажатием и «дышащим» кольцом.
  *  - по нажатию (мок): списываем скан и уходим на экран «Распознаю…»
  *    (scanning) со случайным «распознанным» словом; он сам перейдёт на
  *    Результат. Лимит исчерпан → Пейволл.
@@ -47,18 +46,19 @@ import { Sticker } from '@/components/sticker';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Reveal } from '@/components/reveal';
+import { QuestBanner } from '@/components/quest-banner';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
-import { createScanJob } from '@/lib/scan-job';
+import { createScanJob, SCAN_FRAME, type ScanMode } from '@/lib/scan-job';
 
 /** Цвета элементов поверх живого видео (не зависят от темы — лежат на кадре). */
 const ON_CAMERA = '#FFFFFF';
 const FRAME_LINE = 'rgba(255,255,255,0.28)';
 const FRAME_GLASS = 'rgba(255,255,255,0.12)';
 
-/** Размеры «визира» (сканирующей рамки). */
-const FRAME = 264;
+/** Размеры «визира» (сканирующей рамки). FRAME — единый с кропом (см. SCAN_FRAME). */
+const FRAME = SCAN_FRAME;
 const CORNER = 34;
 const THICK = 4;
 const RAD = 18;
@@ -80,7 +80,10 @@ export function CameraScreen() {
   const router = useRouter();
   const isFocused = useIsFocused();
   const { scansLeft, scanLimit, tryScan } = useCollection();
+  const locked = scansLeft <= 0;
   const [permission, requestPermission] = useCameraPermissions();
+  // Режим съёмки: один предмет (по рамке) или вся сцена (несколько предметов).
+  const [mode, setMode] = useState<ScanMode>('single');
 
   // --- Анимации оверлея (reanimated v4) ---
   const pulse = useSharedValue(0); // мягкое «дыхание» рамки
@@ -165,9 +168,9 @@ export function CameraScreen() {
       console.warn('Съёмка не удалась:', e);
     }
     // Сначала экран «Распознаю…» (scanning), он сам уйдёт на Результат.
-    const jobId = createScanJob(photoUri);
+    const jobId = createScanJob(photoUri, mode);
     router.push({ pathname: '/scanning', params: { jobId } });
-  }, [router, tryScan, flash]);
+  }, [router, tryScan, flash, mode]);
 
   // 1) Разрешение ещё загружается.
   if (!permission) {
@@ -184,7 +187,7 @@ export function CameraScreen() {
       <ThemedView style={styles.center}>
         <SafeAreaView style={styles.permission}>
           <Reveal delay={0} distance={16}>
-            <Sticker emoji="📸" size={132} />
+            <Sticker symbol="camera.fill" tone="primary" size={132} />
           </Reveal>
           <Reveal delay={80}>
             <ThemedText type="subtitle" style={styles.textCenter}>
@@ -225,6 +228,7 @@ export function CameraScreen() {
       />
 
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
+        <View style={styles.topGroup} pointerEvents="box-none">
         {/* Верх: счётчик сканов + настройки */}
         <View style={styles.topRow} pointerEvents="box-none">
           <Pill
@@ -241,6 +245,9 @@ export function CameraScreen() {
             style={({ pressed }) => [styles.gear, { opacity: pressed ? 0.7 : 1 }]}>
             <Icon name="gearshape.fill" size={20} color={ON_CAMERA} />
           </Pressable>
+        </View>
+        {/* Квест дня */}
+        <QuestBanner />
         </View>
 
         {/* Центр: сканирующий визир + подсказка */}
@@ -260,29 +267,50 @@ export function CameraScreen() {
           </Animated.View>
 
           <View style={styles.hintWrap}>
-            <Pill label="Наведи на предмет" icon="viewfinder" tone="overlay" />
+            <Pill
+              label={mode === 'scene' ? 'Наведи на комнату или полку' : 'Наведи на предмет'}
+              icon="viewfinder"
+              tone="overlay"
+            />
           </View>
         </View>
 
-        {/* Низ: заметка про симулятор + большая кнопка съёмки */}
+        {/* Низ: переключатель режима + заметка про симулятор + кнопка съёмки */}
         <View style={styles.bottomRow} pointerEvents="box-none">
-          <ThemedText type="small" style={styles.simNote}>
-            На симуляторе превью чёрное — это нормально
-          </ThemedText>
+          <View style={styles.modeToggle} pointerEvents="auto">
+            <Pill
+              label="Предмет"
+              icon="viewfinder"
+              tone={mode === 'single' ? 'primary' : 'overlay'}
+              onPress={() => setMode('single')}
+            />
+            <Pill
+              label="Вся сцена"
+              icon="square.grid.2x2"
+              tone={mode === 'scene' ? 'primary' : 'overlay'}
+              onPress={() => setMode('scene')}
+            />
+          </View>
 
           <View style={styles.shutterWrap}>
-            <Animated.View
-              pointerEvents="none"
-              style={[styles.breathRing, { borderColor: theme.accent }, breathStyle]}
-            />
+            {!locked ? (
+              <Animated.View
+                pointerEvents="none"
+                style={[styles.breathRing, { borderColor: theme.accent }, breathStyle]}
+              />
+            ) : null}
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Снять кадр"
+              accessibilityLabel={locked ? 'Сканы кончились — открыть тарифы' : 'Снять кадр'}
               onPress={onShutter}
               onPressIn={() => (press.value = withSpring(Motion.scalePressed, Motion.spring.stiff))}
               onPressOut={() => (press.value = withSpring(1, Motion.spring.bouncy))}>
-              <Animated.View style={[styles.shutterOuter, pressStyle]}>
-                <View style={styles.shutterInner} />
+              <Animated.View style={[styles.shutterOuter, pressStyle, locked && styles.shutterLocked]}>
+                {locked ? (
+                  <Icon name="lock.fill" size={26} color={ON_CAMERA} />
+                ) : (
+                  <View style={styles.shutterInner} />
+                )}
               </Animated.View>
             </Pressable>
           </View>
@@ -310,6 +338,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  topGroup: {
+    gap: Spacing.two,
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.two,
   },
@@ -361,16 +392,7 @@ const styles = StyleSheet.create({
 
   // --- Низ: заметка + кнопка съёмки ---
   bottomRow: { alignItems: 'center', gap: Spacing.three, paddingBottom: Spacing.five },
-  simNote: {
-    color: ON_CAMERA,
-    opacity: 0.65,
-    textAlign: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.half,
-    borderRadius: Radius.pill,
-    overflow: 'hidden',
-  },
+  modeToggle: { flexDirection: 'row', gap: Spacing.two, justifyContent: 'center' },
   shutterWrap: { width: 110, height: 90, alignItems: 'center', justifyContent: 'center' },
   breathRing: {
     position: 'absolute',
@@ -390,4 +412,5 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.22)',
   },
   shutterInner: { width: 60, height: 60, borderRadius: 30, backgroundColor: ON_CAMERA },
+  shutterLocked: { opacity: 0.55, backgroundColor: 'rgba(0,0,0,0.35)' },
 });

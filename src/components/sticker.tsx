@@ -1,27 +1,48 @@
 /**
- * «Стикер» предмета. Если задан `imageUri` (вырезанное фото предмета —
- * спека §5.3) — показываем его; иначе эмодзи-заглушку (MVP). Скруглённая
- * плашка с мягкой тенью.
+ * «Стикер» предмета — скруглённая плашка с мягкой тенью. Содержимое по приоритету:
+ *  1. `imageUri` — реальное фото/вырез предмета (спека §5.3);
+ *  2. `category` — минималистичная иконка темы на мягком цветном фоне
+ *                  (см. category-icon.ts) — пока фото нет;
+ *  3. `symbol`   — произвольная иконка SF Symbols (для декоративных мест).
+ * Эмодзи больше не используются — единый чистый стиль на белом фоне.
  */
-import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
+import type { SFSymbol } from 'expo-symbols';
 
+import { Icon } from '@/components/icon';
+import type { ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { categoryIcon } from '@/lib/category-icon';
 
 export function Sticker({
-  emoji,
   imageUri,
+  category,
+  symbol,
+  tone,
   size = 120,
   style,
 }: {
-  emoji: string;
-  /** Реальный вырез/фото предмета. Если задан — показываем его вместо эмодзи. */
+  /** Реальный вырез/фото предмета. Если задан — показываем его. */
   imageUri?: string | null;
+  /** Тема предмета — выбирает иконку и цвет (когда фото нет). */
+  category?: string | null;
+  /** Явная иконка (для декоративных мест, например онбординга). */
+  symbol?: SFSymbol;
+  /** Цвет иконки для режима `symbol` (ключ темы). По умолчанию — вторичный текст. */
+  tone?: ThemeColor;
   size?: number;
   style?: StyleProp<ViewStyle>;
 }) {
   const theme = useTheme();
   const radius = size * 0.28;
+
+  // Определяем иконку и цвета фона/иконки, когда нет реального фото.
+  const ci = categoryIcon(category);
+  const iconSymbol = symbol ?? ci.symbol;
+  const bg = symbol ? theme.backgroundElement : theme[ci.soft];
+  const fg = symbol ? theme[tone ?? 'textSecondary'] : theme[ci.strong];
+
   return (
     <View
       style={[
@@ -30,7 +51,7 @@ export function Sticker({
           width: size,
           height: size,
           borderRadius: radius,
-          backgroundColor: theme.backgroundElement,
+          backgroundColor: imageUri ? theme.backgroundElement : bg,
           borderColor: theme.border,
           shadowColor: theme.shadow,
         },
@@ -44,7 +65,7 @@ export function Sticker({
           transition={150}
         />
       ) : (
-        <Text style={{ fontSize: size * 0.5 }}>{emoji}</Text>
+        <Icon name={iconSymbol} size={size * 0.42} color={fg} />
       )}
     </View>
   );

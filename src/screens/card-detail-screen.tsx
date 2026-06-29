@@ -10,7 +10,7 @@
  * Данные только моковые (см. useCollection / mock-data).
  */
 import { useEffect } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { Alert, Share, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, {
   useAnimatedStyle,
@@ -78,7 +78,7 @@ function masteryLabel(m: number): string {
 }
 
 /** Стикер «выпрыгивает» при открытии — приятный момент «вот оно, твоё слово». */
-function StickerHero({ emoji, imageUri }: { emoji: string; imageUri?: string | null }) {
+function StickerHero({ category, imageUri }: { category?: string | null; imageUri?: string | null }) {
   const scale = useSharedValue(0.7);
   const opacity = useSharedValue(0);
 
@@ -94,7 +94,7 @@ function StickerHero({ emoji, imageUri }: { emoji: string; imageUri?: string | n
 
   return (
     <Animated.View style={animStyle}>
-      <Sticker emoji={emoji} imageUri={imageUri} size={150} />
+      <Sticker category={category} imageUri={imageUri} size={150} />
     </Animated.View>
   );
 }
@@ -128,6 +128,13 @@ export function CardDetailScreen() {
   // Повтор: пока просто ведём на вкладку «Повторение» (спека — держим просто).
   const onReview = () => router.push('/review');
 
+  const onShare = () => {
+    const ipa = card.ipa ? ` /${card.ipa}/` : '';
+    Share.share({
+      message: `${card.word}${ipa} — ${card.translation}\nПоймал в CatchWord`,
+    }).catch(() => {});
+  };
+
   const onDelete = () => {
     Alert.alert('Удалить карточку?', `«${card.word}» исчезнет из коллекции.`, [
       { text: 'Отмена', style: 'cancel' },
@@ -147,7 +154,7 @@ export function CardDetailScreen() {
       {/* Герой: стикер на тёплой подложке. */}
       <Reveal delay={0}>
         <View style={[styles.hero, { backgroundColor: theme.accentSoft }]}>
-          <StickerHero emoji={card.emoji} imageUri={card.imageUri} />
+          <StickerHero category={card.category} imageUri={card.imageUri} />
         </View>
       </Reveal>
 
@@ -253,6 +260,7 @@ export function CardDetailScreen() {
       <Reveal delay={420}>
         <View style={styles.actions}>
           <Button title="Повторить сейчас" icon="graduationcap.fill" onPress={onReview} />
+          <Button title="Поделиться" icon="square.and.arrow.up" variant="secondary" onPress={onShare} />
           <Button title="Удалить" icon="trash" variant="ghost" onPress={onDelete} />
         </View>
       </Reveal>
