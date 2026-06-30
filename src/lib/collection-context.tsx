@@ -31,8 +31,8 @@ import { LEARNING_LANG, NATIVE_LANG, getSeedCards } from '@/lib/mock-data';
 import { computeNextReview, freshSrs, isDue, isMastered } from '@/lib/srs';
 import type { CollectionStats, SrsRating, UserPrefs, WordCard } from '@/types';
 
-/** Спека §8: на тарифе Free — 15 сканов всего. Здесь это мок-счётчик. */
-const FREE_SCAN_LIMIT = 15;
+/** Спека §8: на тарифе Free — 10 сканов всего. Здесь это мок-счётчик. */
+const FREE_SCAN_LIMIT = 10;
 
 /** Ключи настроек в таблице key_value. */
 const PREF_LEARNING = 'learning_lang';

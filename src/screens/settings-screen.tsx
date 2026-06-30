@@ -10,7 +10,7 @@
  * Только моки: реальных покупок и аккаунтов нет (подключим слоями, §11).
  */
 import { Children, Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Linking, Modal, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { Image, Linking, Modal, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import Animated, { SlideInDown, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
@@ -167,7 +167,7 @@ export function SettingsScreen() {
   const router = useRouter();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { prefs, setLanguages, cards, clearCollection } = useCollection();
+  const { prefs, setLanguages, cards, clearCollection, scansLeft, scanLimit } = useCollection();
   const { user, signInWithGoogle, signOut } = useAuth();
 
   const learning = getLanguage(prefs.learningLang);
@@ -279,19 +279,39 @@ export function SettingsScreen() {
   return (
     <>
       <Screen scroll>
-        {/* Профиль-герой: краткая сводка о языковой паре и тарифе */}
+        {/* Профиль-герой */}
         <Reveal delay={0}>
           <View style={[styles.hero, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <View style={[styles.avatar, { backgroundColor: theme.primarySoft }]}>
-              <Icon name="graduationcap.fill" size={26} color={theme.primary} />
+              {user?.user_metadata?.avatar_url ? (
+                <Image
+                  source={{ uri: user.user_metadata.avatar_url as string }}
+                  style={styles.avatarImage}
+                />
+              ) : (
+                <Icon name={user ? 'person.crop.circle.fill' : 'graduationcap.fill'} size={26} color={theme.primary} />
+              )}
             </View>
             <View style={styles.heroText}>
-              <ThemedText style={styles.heroTitle} numberOfLines={1}>
-                Учу {learning.label} {learning.flag}
-              </ThemedText>
-              <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                Родной — {native.label} {native.flag}
-              </ThemedText>
+              {user ? (
+                <>
+                  <ThemedText style={styles.heroTitle} numberOfLines={1}>
+                    {(user.user_metadata?.full_name as string | undefined) ?? user.email ?? 'Профиль'}
+                  </ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                    {user.email}
+                  </ThemedText>
+                </>
+              ) : (
+                <>
+                  <ThemedText style={styles.heroTitle} numberOfLines={1}>
+                    Учу {learning.label} {learning.flag}
+                  </ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                    Родной — {native.label} {native.flag}
+                  </ThemedText>
+                </>
+              )}
             </View>
             <Tag text="Free" tone="gold" />
           </View>
@@ -301,10 +321,26 @@ export function SettingsScreen() {
         <Reveal delay={40}>
           <Section label="АККАУНТ">
             <Group>
+              <SettingRow
+                icon="bolt.fill"
+                tone="warning"
+                label="Сканы"
+                sublabel={scansLeft === 0 ? 'Лимит исчерпан — перейди на Premium' : undefined}
+                accessory={
+                  <View style={styles.scansAccessory}>
+                    <ThemedText type="smallBold" style={{ color: scansLeft === 0 ? theme.danger : theme.warning }}>
+                      {scansLeft}
+                    </ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      /{scanLimit}
+                    </ThemedText>
+                  </View>
+                }
+              />
               {user
                 ? [
                     <SettingRow
-                      key="account"
+                      key="account-info"
                       icon="person.crop.circle.fill"
                       tone="primary"
                       label={user.email ?? 'Аккаунт Google'}
@@ -633,9 +669,12 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
+  avatarImage: { width: 52, height: 52, borderRadius: Radius.lg },
   heroText: { flex: 1, gap: 2 },
   heroTitle: { fontSize: 17, lineHeight: 22, fontWeight: '700' },
+  scansAccessory: { flexDirection: 'row', alignItems: 'baseline', gap: 1 },
 
   // Секции и группы
   section: { gap: Spacing.two },
