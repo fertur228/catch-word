@@ -1,28 +1,26 @@
 /**
  * Polar (polar.sh) — веб-оплата (только Platform.OS === 'web').
  *
- * Настройка:
- *  1. Зарегистрируйся на polar.sh и создай организацию
- *  2. Products → создай 5 продуктов:
- *       Basic Monthly, Basic Yearly, Premium Monthly, Premium Yearly, Lifetime
- *  3. Для каждого продукта → Checkout Links → создай ссылку
- *     URL вида: https://buy.polar.sh/polar_cl_xxxxxxxxxxxx
- *  4. В настройках каждой ссылки добавь Success URL: https://catch-words.com/payment-success
- *  5. Вставь ссылки в .env и в Cloudflare Pages → Settings → Environment Variables:
+ * Три продукта в Polar:
+ *   Premium Weekly  — $4.99/нед
+ *   Premium Monthly — $6.99/мес
+ *   Premium Yearly  — $39.99/год (7-дневный триал)
  *
- *     EXPO_PUBLIC_POLAR_LINK_BASIC_MONTHLY=https://buy.polar.sh/polar_cl_...
- *     EXPO_PUBLIC_POLAR_LINK_BASIC_YEARLY=https://buy.polar.sh/polar_cl_...
+ * Настройка:
+ *  1. Для каждого продукта → Checkout Links → создай ссылку
+ *     URL вида: https://buy.polar.sh/polar_cl_xxxxxxxxxxxx
+ *  2. В настройках ссылки: Success URL = https://catch-words.com/payment-success
+ *  3. Вставь ссылки в .env и Cloudflare Pages → Settings → Environment Variables:
+ *
+ *     EXPO_PUBLIC_POLAR_LINK_PREMIUM_WEEKLY=https://buy.polar.sh/polar_cl_...
  *     EXPO_PUBLIC_POLAR_LINK_PREMIUM_MONTHLY=https://buy.polar.sh/polar_cl_...
  *     EXPO_PUBLIC_POLAR_LINK_PREMIUM_YEARLY=https://buy.polar.sh/polar_cl_...
- *     EXPO_PUBLIC_POLAR_LINK_LIFETIME=https://buy.polar.sh/polar_cl_...
  */
 
 const LINKS = {
-  basic_monthly:   process.env.EXPO_PUBLIC_POLAR_LINK_BASIC_MONTHLY   ?? '',
-  basic_yearly:    process.env.EXPO_PUBLIC_POLAR_LINK_BASIC_YEARLY    ?? '',
+  premium_weekly:  process.env.EXPO_PUBLIC_POLAR_LINK_PREMIUM_WEEKLY  ?? '',
   premium_monthly: process.env.EXPO_PUBLIC_POLAR_LINK_PREMIUM_MONTHLY ?? '',
   premium_yearly:  process.env.EXPO_PUBLIC_POLAR_LINK_PREMIUM_YEARLY  ?? '',
-  lifetime:        process.env.EXPO_PUBLIC_POLAR_LINK_LIFETIME         ?? '',
 } as const;
 
 export type PolarProduct = keyof typeof LINKS;

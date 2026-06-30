@@ -1,48 +1,103 @@
-/**
- * Страница успешной оплаты — DodoPayments редиректит сюда после оплаты.
- * URL: /payment-success?payment_id=...&subscription_id=...
- *
- * Реальная активация подписки происходит через webhook (Supabase Edge Function)
- * — эта страница только показывает подтверждение пользователю.
- */
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { Button } from '@/components/button';
+import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { Icon } from '@/components/icon';
+import { useSubscription } from '@/lib/subscription';
+
+// Polar отправляет ?checkout_id=... в Success URL.
+// Опрашиваем статус подписки до 6 раз с шагом 2с (12с суммарно) — вебхук
+// обычно приходит быстро, но иногда чуть запаздывает.
+const MAX_ATTEMPTS = 6;
+const RETRY_MS = 2000;
 
 export default function PaymentSuccess() {
   const theme = useTheme();
   const router = useRouter();
-  const { subscription_id, payment_id } = useLocalSearchParams<{
-    subscription_id?: string;
-    payment_id?: string;
-  }>();
+  const { checkout_id } = useLocalSearchParams<{ checkout_id?: string }>();
+  const { isPremium, refresh } = useSubscription();
 
-  const id = subscription_id ?? payment_id;
+  const [checking, setChecking] = useState(true);
+  const attemptsRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Запускаем опрос: refresh() → если не premium → ещё раз через 2с.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function attempt() {
+      await refresh();
+      if (cancelled) return;
+      attemptsRef.current += 1;
+      if (attemptsRef.current < MAX_ATTEMPTS) {
+        timerRef.current = setTimeout(attempt, RETRY_MS);
+      } else {
+        setChecking(false);
+      }
+    }
+
+    void attempt();
+    return () => {
+      cancelled = true;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  // refresh стабилен (useCallback) — зависимость безопасна
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Как только isPremium стал true — сразу останавливаем опрос.
+  useEffect(() => {
+    if (isPremium) {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      setChecking(false);
+    }
+  }, [isPremium]);
 
   return (
     <ThemedView style={styles.root}>
       <View style={styles.card}>
-        <View style={[styles.icon, { backgroundColor: theme.successSoft }]}>
-          <Icon name="checkmark.circle.fill" size={48} color={theme.success} />
-        </View>
+        {checking ? (
+          <>
+            <View style={[styles.icon, { backgroundColor: theme.backgroundElement }]}>
+              <Icon name="clock.fill" size={48} color={theme.textSecondary} />
+            </View>
+            <ThemedText style={styles.title}>Проверяем оплату…</ThemedText>
+            <ThemedText type="default" themeColor="textSecondary" style={styles.sub}>
+              Подождите несколько секунд, мы активируем Premium.
+            </ThemedText>
+          </>
+        ) : isPremium ? (
+          <>
+            <View style={[styles.icon, { backgroundColor: theme.successSoft }]}>
+              <Icon name="checkmark.circle.fill" size={48} color={theme.success} />
+            </View>
+            <ThemedText style={styles.title}>Premium активирован!</ThemedText>
+            <ThemedText type="default" themeColor="textSecondary" style={styles.sub}>
+              Безлимитное сканирование и все функции открыты. Добро пожаловать!
+            </ThemedText>
+          </>
+        ) : (
+          <>
+            <View style={[styles.icon, { backgroundColor: theme.backgroundElement }]}>
+              <Icon name="clock.badge.checkmark.fill" size={48} color={theme.textSecondary} />
+            </View>
+            <ThemedText style={styles.title}>Оплата прошла!</ThemedText>
+            <ThemedText type="default" themeColor="textSecondary" style={styles.sub}>
+              Подписка активируется в течение нескольких секунд — попробуй открыть приложение чуть позже.
+            </ThemedText>
+          </>
+        )}
 
-        <ThemedText style={styles.title}>Оплата прошла!</ThemedText>
-        <ThemedText type="default" themeColor="textSecondary" style={styles.sub}>
-          Подписка активируется в течение нескольких секунд.{'\n'}
-          Если что-то пошло не так — напиши нам.
-        </ThemedText>
-
-        {id ? (
+        {checkout_id ? (
           <View style={[styles.idRow, { backgroundColor: theme.backgroundElement }]}>
             <ThemedText type="small" themeColor="textSecondary">ID: </ThemedText>
             <ThemedText type="smallBold" themeColor="textSecondary" numberOfLines={1}>
-              {id}
+              {checkout_id}
             </ThemedText>
           </View>
         ) : null}
@@ -69,12 +124,7 @@ export default function PaymentSuccess() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.four },
-  card: {
-    width: '100%',
-    maxWidth: 400,
-    alignItems: 'center',
-    gap: Spacing.three,
-  },
+  card: { width: '100%', maxWidth: 400, alignItems: 'center', gap: Spacing.three },
   icon: {
     width: 88,
     height: 88,

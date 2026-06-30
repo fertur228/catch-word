@@ -1,12 +1,3 @@
-/**
- * Экран Пейволла (спека §5.7 + тарифы §8).
- *
- * ВАЖНО: все цифры и фичи взяты ровно из спеки §8 (Free / Basic / Premium /
- * Lifetime, 7-дневный триал, годовой Premium — «Best Value»). Реальной оплаты
- * тут нет — кнопки-заглушки. Покупки подключим через RevenueCat следующим
- * слоем (§11, слой 2). Дизайн «CapWords-grade»: герой, переключатель периода
- * с честной экономией, подсветка Premium и мягкая reanimated-анимация.
- */
 import { useMemo, useState } from 'react';
 import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -30,16 +21,24 @@ import { PRIVACY_URL, TERMS_URL } from '@/constants/links';
 import { alertAsync } from '@/lib/dialog';
 import { isPolarConfigured, redirectToPolar, type PolarProduct } from '@/lib/polar';
 
-/** Период оплаты для переключателя «Месяц / Год». */
-type Period = 'monthly' | 'yearly';
+type Period = 'weekly' | 'monthly' | 'yearly';
 
-/**
- * Собираем карточки тарифов под выбранный период. Цены — ровно из спеки §8:
- * Free $0; Basic $4.99/мес или $24.99/год; Premium $9.99/мес или $39.99/год.
- * Premium всегда подсвечен; годовой Premium несёт бейдж «Best Value».
- */
 function buildPlans(period: Period): Plan[] {
-  const yearly = period === 'yearly';
+  const priceMap: Record<Period, string> = {
+    weekly:  '$4.99 / нед',
+    monthly: '$6.99 / мес',
+    yearly:  '$39.99 / год',
+  };
+  const noteMap: Record<Period, string> = {
+    weekly:  'Попробуй одну неделю',
+    monthly: 'Отменить можно в любой момент',
+    yearly:  'Лучшая цена · 7 дней бесплатно',
+  };
+  const ctaMap: Record<Period, string> = {
+    weekly:  'Попробовать Premium',
+    monthly: 'Попробовать Premium',
+    yearly:  'Начать 7 дней бесплатно',
+  };
   return [
     {
       tier: 'free',
@@ -47,7 +46,7 @@ function buildPlans(period: Period): Plan[] {
       price: '$0',
       priceNote: 'Бесплатно навсегда',
       features: [
-        '15 сканов всего (или 3/день, 5 дней)',
+        '10 сканов всего',
         '1 язык',
         'Хорошая выдача, 1 пример',
         'Коллекция и просмотр — бесплатно',
@@ -55,28 +54,20 @@ function buildPlans(period: Period): Plan[] {
       ctaLabel: 'Текущий тариф',
     },
     {
-      tier: 'basic',
-      name: 'Basic',
-      price: yearly ? '$24.99 / год' : '$4.99 / мес',
-      priceNote: yearly ? 'Экономия ~58% против помесячной' : 'Якорный тариф',
-      features: ['150 сканов в месяц (хард-кап)', '1–2 языка', '+ произношение', '1 пример на слово'],
-      ctaLabel: 'Выбрать Basic',
-    },
-    {
       tier: 'premium',
       name: 'Premium',
-      price: yearly ? '$39.99 / год' : '$9.99 / мес',
-      priceNote: yearly ? 'Лучшая цена · 7 дней бесплатно' : '7 дней бесплатно, потом $9.99/мес',
-      badge: yearly ? 'Best Value' : undefined,
+      price: priceMap[period],
+      priceNote: noteMap[period],
+      badge: period === 'yearly' ? 'Best Value' : undefined,
       highlighted: true,
       features: [
-        'Безлимит сканов (мягкий лимит ~1000/мес)',
+        'Безлимит сканов',
         'Все языки',
-        'Топ-модель: 2–3 примера + грамматика',
+        '2–3 примера + грамматика',
         'Офлайн и экспорт',
-        '7-дневный триал с честным напоминанием',
+        '7-дневный триал (тариф Год)',
       ],
-      ctaLabel: yearly ? 'Начать 7 дней бесплатно' : 'Попробовать Premium',
+      ctaLabel: ctaMap[period],
     },
   ];
 }
@@ -86,7 +77,6 @@ export function PaywallScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  // По спеке §8 гоним в годовую подписку → она и выбрана по умолчанию.
   const [period, setPeriod] = useState<Period>('yearly');
 
   const plans = useMemo(() => buildPlans(period), [period]);
@@ -100,34 +90,25 @@ export function PaywallScreen() {
     }
 
     if (isWeb) {
-      const product = `${plan.tier}_${period}` as PolarProduct;
+      // premium_weekly / premium_monthly / premium_yearly
+      const product: PolarProduct = `premium_${period}`;
       if (redirectToPolar(product, user?.email ?? undefined, user?.id ?? undefined)) return;
       void alertAsync('Скоро', 'Оплата подключается — зайди немного позже.');
       return;
     }
 
-    // Нативные платформы: RevenueCat (слой 2).
     void alertAsync(`Покупка «${plan.name}»`, 'Оплата подключается через RevenueCat.');
-  };
-
-  const onLifetime = () => {
-    if (isWeb) {
-      if (redirectToPolar('lifetime', user?.email ?? undefined, user?.id ?? undefined)) return;
-      void alertAsync('Скоро', 'Оплата подключается — зайди немного позже.');
-      return;
-    }
-    void alertAsync('Lifetime — $79.99', 'Разовая покупка Premium навсегда. Подключим через RevenueCat.');
   };
 
   const onRestore = () => {
     void alertAsync('Восстановление покупок', 'Заглушка: подключим вместе с RevenueCat — слой 2 (§11).');
   };
 
-  // Честная подпись под переключателем (без обмана про экономию — спека §2/§8).
-  const periodNote =
-    period === 'yearly'
-      ? 'Год дешевле почти 5 месяцев помесячной оплаты.'
-      : 'Перейти на годовую можно в любой момент.';
+  const periodNote: Record<Period, string> = {
+    weekly:  'Короткий sprint — попробуй и реши.',
+    monthly: 'Перейти на годовую можно в любой момент.',
+    yearly:  'Год дешевле почти 8 недель помесячной оплаты.',
+  };
 
   return (
     <Screen scroll contentStyle={{ paddingBottom: insets.bottom + Spacing.six }}>
@@ -152,12 +133,13 @@ export function PaywallScreen() {
           value={period}
           onChange={setPeriod}
           options={[
+            { label: 'Неделя', value: 'weekly' },
             { label: 'Месяц', value: 'monthly' },
-            { label: 'Год — выгоднее', value: 'yearly' },
+            { label: 'Год', value: 'yearly' },
           ]}
         />
         <ThemedText type="small" themeColor="textSecondary" style={styles.billingNote}>
-          {periodNote}
+          {periodNote[period]}
         </ThemedText>
       </Reveal>
 
@@ -171,27 +153,6 @@ export function PaywallScreen() {
           <PlanCard plan={plan} onPress={() => onSelectPlan(plan)} />
         </Reveal>
       ))}
-
-      {/* Lifetime — разовая покупка (спека §8). Отдельная «золотая» плашка. */}
-      <Reveal delay={380}>
-        <View style={[styles.lifetime, { backgroundColor: theme.goldSoft, borderColor: theme.gold }]}>
-          <View style={styles.lifetimeHead}>
-            <Icon name="infinity" size={22} color={theme.gold} />
-            <View style={styles.lifetimeTitles}>
-              <ThemedText type="smallBold">Lifetime · $79.99</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                Один раз — Premium навсегда, без подписки
-              </ThemedText>
-            </View>
-          </View>
-          <Button
-            title={dodoReady ? 'Купить навсегда' : 'Скоро'}
-            variant="secondary"
-            icon={dodoReady ? 'star.fill' : 'clock.fill'}
-            onPress={onLifetime}
-          />
-        </View>
-      </Reveal>
 
       {/* Честная строка: напоминание ДО списания (наша отстройка, спека §2/§5.7). */}
       <Reveal delay={440}>
@@ -251,10 +212,6 @@ const styles = StyleSheet.create({
 
   billing: { gap: Spacing.two },
   billingNote: { textAlign: 'center' },
-
-  lifetime: { borderRadius: Radius.xl, borderWidth: 1, padding: Spacing.four, gap: Spacing.three },
-  lifetimeHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
-  lifetimeTitles: { flex: 1, gap: 1 },
 
   honest: {
     flexDirection: 'row',
