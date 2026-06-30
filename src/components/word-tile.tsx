@@ -1,8 +1,11 @@
 /**
  * Плитка карточки в сетке Коллекции: стикер + слово + перевод.
- * На выученных словах (mastery≥4) в углу стикера — золотой бейдж «выучено».
+ * Когда есть вырезка (imageUri) — фото занимает всю ширину тайла (высота 128).
+ * Когда фото нет — компактный квадрат-иконка 80×80.
+ * На выученных словах — золотой бейдж «выучено».
  */
 import { Pressable, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
 
 import { Icon } from '@/components/icon';
 import { Sticker } from '@/components/sticker';
@@ -12,8 +15,8 @@ import { useTheme } from '@/hooks/use-theme';
 import { isMastered } from '@/lib/srs';
 import type { WordCard } from '@/types';
 
-/** Размер стикера на плитке. */
-const STICKER = 84;
+const ICON_SIZE = 80;
+const PHOTO_HEIGHT = 128;
 
 export function WordTile({
   card,
@@ -26,6 +29,8 @@ export function WordTile({
 }) {
   const theme = useTheme();
   const learned = isMastered(card);
+  const hasPhoto = Boolean(card.imageUri);
+
   return (
     <Pressable
       onPress={onPress}
@@ -35,14 +40,26 @@ export function WordTile({
         styles.tile,
         { backgroundColor: theme.card, borderColor: theme.border, opacity: pressed ? 0.85 : 1 },
       ]}>
-      <View style={styles.stickerWrap}>
-        <Sticker category={card.category} imageUri={card.imageUri} size={STICKER} />
+
+      {/* Изображение / иконка */}
+      <View style={hasPhoto ? styles.photoWrap : styles.iconWrap}>
+        {hasPhoto ? (
+          <Image
+            source={{ uri: card.imageUri! }}
+            style={styles.photo}
+            contentFit="contain"
+            transition={150}
+          />
+        ) : (
+          <Sticker category={card.category} size={ICON_SIZE} />
+        )}
         {learned ? (
           <View style={[styles.badge, { backgroundColor: theme.card }]}>
             <Icon name="checkmark.seal.fill" size={20} color={theme.gold} />
           </View>
         ) : null}
       </View>
+
       <ThemedText type="default" style={styles.word} numberOfLines={1}>
         {card.word}
       </ThemedText>
@@ -58,19 +75,36 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     gap: Spacing.one,
-    paddingVertical: Spacing.three,
-    paddingHorizontal: Spacing.two,
+    paddingBottom: Spacing.three,
     borderRadius: Radius.lg,
     borderWidth: 1,
+    overflow: 'hidden',
   },
-  stickerWrap: { width: STICKER, height: STICKER },
-  // Бейдж «выучено» — кружок фона карточки с золотой печатью-галочкой в углу стикера.
+
+  // Режим фото: на всю ширину тайла
+  photoWrap: {
+    alignSelf: 'stretch',
+    height: PHOTO_HEIGHT,
+    backgroundColor: 'transparent',
+  },
+  photo: {
+    width: '100%',
+    height: '100%',
+  },
+
+  // Режим иконки: компактный квадрат
+  iconWrap: {
+    width: ICON_SIZE,
+    height: ICON_SIZE,
+    marginTop: Spacing.three,
+  },
+
   badge: {
     position: 'absolute',
-    top: -6,
-    right: -6,
+    top: 4,
+    right: 4,
     borderRadius: Radius.pill,
     padding: 1,
   },
-  word: { fontWeight: '700', marginTop: Spacing.one },
+  word: { fontWeight: '700', paddingHorizontal: Spacing.two },
 });

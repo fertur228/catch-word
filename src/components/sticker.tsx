@@ -61,7 +61,7 @@ export function Sticker({
         <Image
           source={{ uri: imageUri }}
           style={{ width: '100%', height: '100%', borderRadius: radius }}
-          contentFit="contain"
+          contentFit="cover"
           transition={150}
         />
       ) : (
