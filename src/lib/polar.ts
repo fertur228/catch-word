@@ -34,22 +34,33 @@ export function isPolarConfigured(): boolean {
 
 /**
  * Строит checkout URL.
- * Polar поддерживает query-параметр customer_email для предзаполнения.
- * Success URL задаётся в дашборде на каждую ссылку отдельно.
+ * - customer_email: предзаполняет email в форме Polar.
+ * - reference_id:   Supabase user UUID, копируется Polar в метаданные сессии →
+ *                   ордера → подписки → вебхука. Так polar-webhook знает, кому
+ *                   выдать доступ без поиска по email.
  */
-export function getPolarCheckoutUrl(product: PolarProduct, email?: string): string | null {
+export function getPolarCheckoutUrl(
+  product: PolarProduct,
+  email?: string,
+  userId?: string,
+): string | null {
   const base = LINKS[product];
   if (!base) return null;
 
   const url = new URL(base);
-  if (email) url.searchParams.set('customer_email', email);
+  if (email)  url.searchParams.set('customer_email', email);
+  if (userId) url.searchParams.set('reference_id', userId);
 
   return url.toString();
 }
 
 /** Редиректит на Polar checkout. Возвращает false если не настроено. */
-export function redirectToPolar(product: PolarProduct, email?: string): boolean {
-  const url = getPolarCheckoutUrl(product, email);
+export function redirectToPolar(
+  product: PolarProduct,
+  email?: string,
+  userId?: string,
+): boolean {
+  const url = getPolarCheckoutUrl(product, email, userId);
   if (!url) return false;
   window.location.href = url;
   return true;

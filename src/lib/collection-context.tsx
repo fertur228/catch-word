@@ -18,6 +18,7 @@ import {
 } from 'react';
 
 import { useAuth } from '@/lib/auth-context';
+import { useSubscription } from '@/lib/subscription';
 import * as db from '@/lib/db';
 import {
   clearCloudCardsForPair,
@@ -31,7 +32,6 @@ import { LEARNING_LANG, NATIVE_LANG, getSeedCards } from '@/lib/mock-data';
 import { computeNextReview, freshSrs, isDue, isMastered } from '@/lib/srs';
 import type { CollectionStats, SrsRating, UserPrefs, WordCard } from '@/types';
 
-/** Спека §8: на тарифе Free — 10 сканов всего. Здесь это мок-счётчик. */
 const FREE_SCAN_LIMIT = 10;
 
 /** Ключи настроек в таблице key_value. */
@@ -52,7 +52,9 @@ const DEFAULT_PREFS: UserPrefs = {
 interface CollectionContextValue {
   cards: WordCard[];
   loading: boolean;
-  /** Сколько бесплатных сканов осталось (мок; реальный учёт — на бэкенде, §7.3). */
+  /** true — у пользователя активная подписка (Polar). */
+  isPremium: boolean;
+  /** Сколько сканов осталось (для free: 0–10; для premium: 9999). */
   scansLeft: number;
   scanLimit: number;
   addCard: (card: WordCard) => Promise<void>;
@@ -134,6 +136,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
 
   const { session } = useAuth();
   const userId = session?.user?.id ?? null;
+  const { isPremium } = useSubscription();
   // Текущие карточки в ref — чтобы эффект синхронизации не перезапускался на каждое изменение.
   const cardsRef = useRef<WordCard[]>([]);
   cardsRef.current = cards;
@@ -244,15 +247,16 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
   }, [userId]);
 
   const tryScan = useCallback(() => {
+    if (isPremium) return true;
     if (scansLeft <= 0) return false;
     setScansLeft((n) => Math.max(0, n - 1));
     return true;
-  }, [scansLeft]);
+  }, [isPremium, scansLeft]);
 
-  // Вернуть скан, если распознавание не удалось.
   const refundScan = useCallback(() => {
+    if (isPremium) return;
     setScansLeft((n) => Math.min(FREE_SCAN_LIMIT, n + 1));
-  }, []);
+  }, [isPremium]);
 
   // Очистить коллекцию ТЕКУЩЕГО курса (активной пары языков). Слова других
   // пар остаются. Стартовые после этого не пересоздаются.
@@ -342,8 +346,9 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     return {
       cards: scopedCards,
       loading,
-      scansLeft,
-      scanLimit: FREE_SCAN_LIMIT,
+      isPremium,
+      scansLeft: isPremium ? 9999 : scansLeft,
+      scanLimit: isPremium ? 9999 : FREE_SCAN_LIMIT,
       addCard,
       removeCard,
       clearCollection,
@@ -365,6 +370,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
   }, [
     scopedCards,
     loading,
+    isPremium,
     scansLeft,
     addCard,
     removeCard,

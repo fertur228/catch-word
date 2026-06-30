@@ -101,7 +101,7 @@ export function PaywallScreen() {
 
     if (isWeb) {
       const product = `${plan.tier}_${period}` as PolarProduct;
-      if (redirectToPolar(product, user?.email ?? undefined)) return;
+      if (redirectToPolar(product, user?.email ?? undefined, user?.id ?? undefined)) return;
       void alertAsync('Скоро', 'Оплата подключается — зайди немного позже.');
       return;
     }
@@ -112,7 +112,7 @@ export function PaywallScreen() {
 
   const onLifetime = () => {
     if (isWeb) {
-      if (redirectToPolar('lifetime', user?.email ?? undefined)) return;
+      if (redirectToPolar('lifetime', user?.email ?? undefined, user?.id ?? undefined)) return;
       void alertAsync('Скоро', 'Оплата подключается — зайди немного позже.');
       return;
     }
