@@ -30,6 +30,7 @@ import { alertAsync, confirmAsync } from '@/lib/dialog';
 import { LANGUAGES, getLanguage } from '@/lib/mock-data';
 import { pluralWords } from '@/lib/plural';
 import { MANAGE_SUBSCRIPTION_URL, PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from '@/constants/links';
+import { setGuest } from '@/lib/web-guest';
 
 // --- Палитра «цветных кружков» под иконку строки (мягкий фон + насыщенная иконка) ---
 type Tone = 'primary' | 'accent' | 'accent2' | 'success' | 'warning' | 'gold' | 'danger' | 'neutral';
@@ -264,7 +265,10 @@ export function SettingsScreen() {
       'Выйти',
       true,
     );
-    if (ok) signOut();
+    if (ok) {
+      setGuest(false);
+      await signOut();
+    }
   };
 
   // Выбор языка из листа.
