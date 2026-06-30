@@ -25,7 +25,7 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 /** Внутренний навигатор: уже внутри CollectionProvider, поэтому видит prefs. */
 function RootNavigator() {
   const scheme = useColorScheme();
-  const { loading, prefs } = useCollection();
+  const { loading, prefs, completeOnboarding } = useCollection();
   const { session, loading: authLoading } = useAuth();
   const guest = useGuest();
   const segments = useSegments();
@@ -39,6 +39,14 @@ function RootNavigator() {
     if (!loading) SplashScreen.hideAsync().catch(() => {});
   }, [loading]);
 
+  // Веб: пользователь уже видел лендинг — онбординг не нужен.
+  // Автоматически помечаем как пройденный при первом входе (гость или Google).
+  useEffect(() => {
+    if (isWeb && !loading && !prefs.onboarded && (guest || !!session)) {
+      void completeOnboarding();
+    }
+  }, [isWeb, loading, prefs.onboarded, guest, session, completeOnboarding]);
+
   // Пока грузимся (на вебе ещё и сессия) — ничего не рисуем.
   if (loading || (isWeb && authLoading)) return null;
 
@@ -47,9 +55,8 @@ function RootNavigator() {
     return <Redirect href="/welcome" />;
   }
 
-  // Нужно ли показать онбординг: после входа/гостя (на нативе — всегда),
-  // и только не на публичных страницах.
-  const needOnboarding = !onPublic && !prefs.onboarded && (!isWeb || session != null || guest);
+  // Нужно ли показать онбординг (только нативные платформы, на вебе — никогда).
+  const needOnboarding = !isWeb && !onPublic && !prefs.onboarded;
 
   return (
     <ThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
