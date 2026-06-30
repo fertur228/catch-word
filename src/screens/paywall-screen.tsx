@@ -19,7 +19,7 @@ import { useAuth } from '@/lib/auth-context';
 import type { Plan } from '@/types';
 import { PRIVACY_URL, TERMS_URL } from '@/constants/links';
 import { alertAsync } from '@/lib/dialog';
-import { isPolarConfigured, redirectToPolar, type PolarProduct } from '@/lib/polar';
+import { isPolarConfigured, redirectToPolar } from '@/lib/polar';
 
 type Period = 'weekly' | 'monthly' | 'yearly';
 
@@ -90,9 +90,7 @@ export function PaywallScreen() {
     }
 
     if (isWeb) {
-      // premium_weekly / premium_monthly / premium_yearly
-      const product: PolarProduct = `premium_${period}`;
-      if (redirectToPolar(product, user?.email ?? undefined, user?.id ?? undefined)) return;
+      if (redirectToPolar(user?.email ?? undefined, user?.id ?? undefined)) return;
       void alertAsync('Скоро', 'Оплата подключается — зайди немного позже.');
       return;
     }
