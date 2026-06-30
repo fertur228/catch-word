@@ -1,7 +1,6 @@
 /**
  * Плитка карточки в сетке Коллекции: стикер + слово + перевод.
- * Когда есть вырезка (imageUri) — фото занимает всю ширину тайла (высота 128).
- * Когда фото нет — компактный квадрат-иконка 80×80.
+ * Все тайлы одинаковой высоты — фото или иконка занимают одну и ту же область.
  * На выученных словах — золотой бейдж «выучено».
  */
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -14,9 +13,6 @@ import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { isMastered } from '@/lib/srs';
 import type { WordCard } from '@/types';
-
-const ICON_SIZE = 80;
-const PHOTO_HEIGHT = 128;
 
 export function WordTile({
   card,
@@ -41,21 +37,21 @@ export function WordTile({
         { backgroundColor: theme.card, borderColor: theme.border, opacity: pressed ? 0.85 : 1 },
       ]}>
 
-      {/* Изображение / иконка */}
-      <View style={hasPhoto ? styles.photoWrap : styles.iconWrap}>
+      {/* Зона изображения — одинаковая для всех тайлов */}
+      <View style={styles.mediaWrap}>
         {hasPhoto ? (
           <Image
             source={{ uri: card.imageUri! }}
-            style={styles.photo}
+            style={StyleSheet.absoluteFill}
             contentFit="contain"
             transition={150}
           />
         ) : (
-          <Sticker category={card.category} size={ICON_SIZE} />
+          <Sticker category={card.category} size={80} />
         )}
         {learned ? (
           <View style={[styles.badge, { backgroundColor: theme.card }]}>
-            <Icon name="checkmark.seal.fill" size={20} color={theme.gold} />
+            <Icon name="checkmark.seal.fill" size={18} color={theme.gold} />
           </View>
         ) : null}
       </View>
@@ -80,25 +76,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
   },
-
-  // Режим фото: на всю ширину тайла
-  photoWrap: {
+  mediaWrap: {
     alignSelf: 'stretch',
-    height: PHOTO_HEIGHT,
-    backgroundColor: 'transparent',
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  photo: {
-    width: '100%',
-    height: '100%',
-  },
-
-  // Режим иконки: компактный квадрат
-  iconWrap: {
-    width: ICON_SIZE,
-    height: ICON_SIZE,
-    marginTop: Spacing.three,
-  },
-
   badge: {
     position: 'absolute',
     top: 4,
