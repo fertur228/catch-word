@@ -28,17 +28,33 @@ function pickImage(useCamera: boolean): Promise<string | null> {
     input.type = 'file';
     input.accept = 'image/*';
     if (useCamera) input.setAttribute('capture', 'environment');
+    // iOS Safari: input должен быть в DOM, иначе .click() игнорируется.
+    input.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;pointer-events:none';
+
+    let resolved = false;
+    const done = (val: string | null) => {
+      if (resolved) return;
+      resolved = true;
+      input.remove();
+      window.removeEventListener('focus', onFocus);
+      resolve(val);
+    };
+
     input.onchange = () => {
-      const file = input.files && input.files[0];
-      if (!file) {
-        resolve(null);
-        return;
-      }
+      const file = input.files?.[0];
+      if (!file) { done(null); return; }
       const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
-      reader.onerror = () => resolve(null);
+      reader.onload = () => done(typeof reader.result === 'string' ? reader.result : null);
+      reader.onerror = () => done(null);
       reader.readAsDataURL(file);
     };
+
+    // iOS Safari: при закрытии пикера без выбора onchange не всегда стреляет —
+    // окно снова получает focus; ждём 500ms на случай медленного onchange.
+    const onFocus = () => setTimeout(() => done(null), 500);
+    window.addEventListener('focus', onFocus);
+
+    document.body.appendChild(input);
     input.click();
   });
 }
