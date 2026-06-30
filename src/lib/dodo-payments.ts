@@ -41,7 +41,7 @@ export function getDodoCheckoutUrl(product: DodoProduct, email?: string): string
   const base = LINKS[product];
   if (!base) return null;
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://catchword.app';
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://catch-words.com';
 
   const url = new URL(base);
   url.searchParams.set('success_url', `${origin}/payment-success`);
