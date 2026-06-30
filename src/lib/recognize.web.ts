@@ -142,31 +142,23 @@ export async function cropToSticker(
 }
 
 /**
- * Кроп по «визиру»: центральный квадрат, соответствующий рамке наведения.
- * Сторона рамки (pt) переводится в пиксели фото через cover-масштаб превью.
+ * На вебе «визира» (рамки наведения) нет — пользователь не наводит живую камеру,
+ * а ВЫБИРАЕТ готовое фото (input capture / галерея). Поэтому кроп по экранной
+ * рамке тут неуместен: он вырезал бы случайный центральный квадрат и калечил бы
+ * фото ещё до распознавания. Возвращаем кадр ЦЕЛИКОМ — распознавание само найдёт
+ * главный предмет. (Сигнатура совпадает с recognize.ts; screen-аргументы не нужны.)
  */
 export async function cropToFrame(
   uri: string,
-  screenW: number,
-  screenH: number,
-  frameSidePt: number,
+  _screenW: number,
+  _screenH: number,
+  _frameSidePt: number,
 ): Promise<{ uri: string; width: number; height: number } | null> {
   try {
     const img = await loadImage(uri);
-    const pw = img.naturalWidth || img.width;
-    const ph = img.naturalHeight || img.height;
-    if (!pw || !ph || screenW <= 0 || screenH <= 0) return { uri, width: pw, height: ph };
-    const scale = Math.max(screenW / pw, screenH / ph);
-    const side = Math.max(1, Math.min(pw, ph, Math.round(frameSidePt / scale)));
-    const sx = Math.max(0, Math.round((pw - side) / 2));
-    const sy = Math.max(0, Math.round((ph - side) / 2));
-    const canvas = document.createElement('canvas');
-    canvas.width = side;
-    canvas.height = side;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return { uri, width: pw, height: ph };
-    ctx.drawImage(img, sx, sy, side, side, 0, 0, side, side);
-    return { uri: canvas.toDataURL('image/jpeg', 0.9), width: side, height: side };
+    const width = img.naturalWidth || img.width;
+    const height = img.naturalHeight || img.height;
+    return { uri, width, height };
   } catch (e) {
     console.warn('cropToFrame web failed:', e);
     return null;
