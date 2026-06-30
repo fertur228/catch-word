@@ -24,9 +24,11 @@ import { Sticker } from '@/components/sticker';
 import { ThemedText } from '@/components/themed-text';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useAuth } from '@/lib/auth-context';
 import type { Plan } from '@/types';
 import { PRIVACY_URL, TERMS_URL } from '@/constants/links';
 import { alertAsync } from '@/lib/dialog';
+import { isDodoConfigured, redirectToDodo, type DodoProduct } from '@/lib/dodo-payments';
 
 /** Период оплаты для переключателя «Месяц / Год». */
 type Period = 'monthly' | 'yearly';
@@ -83,33 +85,39 @@ export function PaywallScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   // По спеке §8 гоним в годовую подписку → она и выбрана по умолчанию.
   const [period, setPeriod] = useState<Period>('yearly');
 
   const plans = useMemo(() => buildPlans(period), [period]);
+  const isWeb = Platform.OS === 'web';
+  const dodoReady = isWeb && isDodoConfigured();
 
-  // Заглушка покупки тарифа: на нативе — RevenueCat (§11, слой 2), на вебе — Stripe позже.
   const onSelectPlan = (plan: Plan) => {
     if (plan.tier === 'free') {
       void alertAsync('Free', 'Это бесплатный тариф — он уже активен.');
       return;
     }
-    void alertAsync(
-      `Покупка «${plan.name}»`,
-      Platform.OS === 'web'
-        ? 'Веб-оплата скоро. Пока оформить подписку можно в мобильном приложении CatchWord.'
-        : 'Оплата подключается через RevenueCat — это слой 2 плана сборки (§11). Сейчас это заглушка.',
-    );
+
+    if (isWeb) {
+      const product = `${plan.tier}_${period}` as DodoProduct;
+      if (redirectToDodo(product, user?.email ?? undefined)) return;
+      // DodoPayments ещё не настроен — env vars не заданы.
+      void alertAsync('Скоро', 'Оплата подключается — зайди немного позже.');
+      return;
+    }
+
+    // Нативные платформы: RevenueCat (слой 2).
+    void alertAsync(`Покупка «${plan.name}»`, 'Оплата подключается через RevenueCat.');
   };
 
-  // Lifetime $79.99 — разовая покупка Premium навсегда (спека §8).
   const onLifetime = () => {
-    void alertAsync(
-      'Lifetime — $79.99',
-      Platform.OS === 'web'
-        ? 'Веб-оплата скоро. Пока доступно в мобильном приложении CatchWord.'
-        : 'Разовая покупка Premium навсегда. Подключим через RevenueCat — слой 2 (§11).',
-    );
+    if (isWeb) {
+      if (redirectToDodo('lifetime', user?.email ?? undefined)) return;
+      void alertAsync('Скоро', 'Оплата подключается — зайди немного позже.');
+      return;
+    }
+    void alertAsync('Lifetime — $79.99', 'Разовая покупка Premium навсегда. Подключим через RevenueCat.');
   };
 
   const onRestore = () => {
@@ -177,7 +185,12 @@ export function PaywallScreen() {
               </ThemedText>
             </View>
           </View>
-          <Button title="Купить навсегда" variant="secondary" icon="star.fill" onPress={onLifetime} />
+          <Button
+            title={dodoReady ? 'Купить навсегда' : 'Скоро'}
+            variant="secondary"
+            icon={dodoReady ? 'star.fill' : 'clock.fill'}
+            onPress={onLifetime}
+          />
         </View>
       </Reveal>
 

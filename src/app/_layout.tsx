@@ -65,6 +65,7 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(marketing)" options={{ headerShown: false }} />
         <Stack.Screen name="auth-callback" options={{ headerShown: false }} />
+        <Stack.Screen name="payment-success" options={{ headerShown: false }} />
         <Stack.Screen name="result" options={{ presentation: 'modal', title: 'Результат' }} />
         <Stack.Screen name="card/[id]" options={{ title: 'Карточка' }} />
         <Stack.Screen name="paywall" options={{ presentation: 'modal', title: 'CatchWord Premium' }} />
