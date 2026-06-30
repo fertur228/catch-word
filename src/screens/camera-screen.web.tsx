@@ -1,8 +1,7 @@
 /**
- * Камера — веб-версия. Дизайн 1:1 с нативной (iOS):
- * тёмный фон + анимированный визир + угловые скобки + сканирующий луч + кнопка-затвор.
- * Живого превью нет — вместо него тёмный фон. Кнопка-затвор открывает камеру
- * телефона (capture=environment) или файловый диалог на десктопе.
+ * Камера — веб-версия.
+ * Десктоп: живое превью через getUserMedia + захват кадра по нажатию затвора.
+ * Мобильный браузер: открываем камеру телефона через input[capture=environment].
  * iOS Safari: input обязательно должен быть в DOM до .click().
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -29,16 +28,20 @@ import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
 import { createScanJob, SCAN_FRAME, type ScanMode } from '@/lib/scan-job';
 
-/** Цвета поверх тёмного фона (имитируем нативный оверлей камеры). */
 const ON_CAMERA = '#FFFFFF';
 const FRAME_LINE = 'rgba(255,255,255,0.28)';
-const FRAME_GLASS = 'rgba(255,255,255,0.12)';
+const FRAME_GLASS = 'rgba(255,255,255,0.08)';
 const CAM_BG = '#0a0a10';
 
 const FRAME = SCAN_FRAME; // 264
 const CORNER = 34;
 const THICK = 4;
 const RAD = 18;
+
+/** true на десктопных браузерах (ноутбук, ПК), false на мобильных. */
+const IS_DESKTOP =
+  typeof navigator !== 'undefined' &&
+  !/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 function useIsFocused() {
   const [focused, setFocused] = useState(true);
@@ -95,6 +98,73 @@ export function CameraScreen() {
   const locked = scansLeft <= 0;
   const [mode, setMode] = useState<ScanMode>('single');
   const busy = useRef(false);
+
+  // Веб-камера (только десктоп)
+  const webcamDivRef = useRef<HTMLDivElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [camError, setCamError] = useState(false);
+
+  // Callback-ref: вызывается когда View с превью монтируется/демонтируется.
+  const webcamContainerRef = useCallback((node: unknown) => {
+    webcamDivRef.current = node as HTMLDivElement | null;
+  }, []);
+
+  // Запуск/остановка веб-камеры при смене фокуса экрана.
+  useEffect(() => {
+    if (!IS_DESKTOP) return;
+
+    const stopCam = () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      if (videoRef.current) {
+        videoRef.current.remove();
+        videoRef.current = null;
+      }
+    };
+
+    if (!isFocused) {
+      stopCam();
+      return;
+    }
+
+    const div = webcamDivRef.current;
+    if (!div) return;
+
+    let cancelled = false;
+    navigator.mediaDevices
+      .getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } } })
+      .then((stream) => {
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = true;
+        video.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+        div.appendChild(video);
+        videoRef.current = video;
+        setCamError(false);
+      })
+      .catch(() => { if (!cancelled) setCamError(true); });
+
+    return () => {
+      cancelled = true;
+      stopCam();
+    };
+  }, [isFocused]);
+
+  /** Захват кадра из живого превью (только десктоп). */
+  const captureFrame = (): string | null => {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    canvas.getContext('2d')?.drawImage(video, 0, 0);
+    return canvas.toDataURL('image/jpeg', 0.92);
+  };
 
   // Анимации — те же, что на нативе.
   const pulse = useSharedValue(0);
@@ -154,7 +224,18 @@ export function CameraScreen() {
       }
       busy.current = true;
       try {
-        const uri = await pickImage(useCamera);
+        let uri: string | null = null;
+
+        if (IS_DESKTOP && useCamera) {
+          // Десктоп: захват кадра из веб-камеры (или файловый диалог при ошибке)
+          uri = captureFrame();
+          if (!uri) {
+            uri = await pickImage(false);
+          }
+        } else {
+          uri = await pickImage(useCamera);
+        }
+
         if (!uri) {
           refundScan();
           return;
@@ -165,12 +246,14 @@ export function CameraScreen() {
         busy.current = false;
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [router, tryScan, refundScan, mode],
   );
 
+  const hasLiveCamera = IS_DESKTOP && !camError;
+
   return (
     <View style={styles.root}>
-      {/* Тёмный фон — имитация живого превью */}
       <View style={[StyleSheet.absoluteFill, { backgroundColor: CAM_BG }]} />
 
       <SafeAreaView style={styles.overlay}>
@@ -198,6 +281,14 @@ export function CameraScreen() {
         {/* ── ЦЕНТР: анимированный визир ── */}
         <View style={styles.centerWrap} pointerEvents="none">
           <Animated.View style={[styles.frame, frameStyle]}>
+            {/* Живое превью веб-камеры (только десктоп) */}
+            {IS_DESKTOP ? (
+              <View
+                ref={webcamContainerRef as React.Ref<View>}
+                style={styles.webcamFill}
+              />
+            ) : null}
+
             {/* Стекло-подложка */}
             <View style={styles.frameGlass} />
             {/* Угловые скобки */}
@@ -213,12 +304,28 @@ export function CameraScreen() {
                 scanStyle,
               ]}
             />
+
+            {/* Ошибка доступа к камере */}
+            {IS_DESKTOP && camError ? (
+              <View style={styles.camErrorWrap}>
+                <Icon name="camera.fill" size={28} color="rgba(255,255,255,0.5)" />
+                <ThemedText style={styles.camErrorText}>
+                  Нет доступа к камере
+                </ThemedText>
+              </View>
+            ) : null}
           </Animated.View>
 
           <View style={styles.hintWrap}>
             <Pill
-              label={mode === 'scene' ? 'Наведи на комнату или полку' : 'Наведи на предмет'}
-              icon="viewfinder"
+              label={
+                hasLiveCamera
+                  ? 'Наведи на предмет и нажми кнопку'
+                  : mode === 'scene'
+                    ? 'Наведи на комнату или полку'
+                    : 'Наведи на предмет'
+              }
+              icon={hasLiveCamera ? 'camera.fill' : 'viewfinder'}
               tone="overlay"
             />
           </View>
@@ -226,7 +333,6 @@ export function CameraScreen() {
 
         {/* ── НИЗ: режим + затвор + галерея ── */}
         <View style={styles.bottomRow}>
-          {/* Переключатель режима */}
           <View style={styles.modeToggle}>
             <Pill
               label="Предмет"
@@ -242,7 +348,6 @@ export function CameraScreen() {
             />
           </View>
 
-          {/* Кнопка-затвор */}
           <View style={styles.shutterWrap}>
             {!locked ? (
               <Animated.View
@@ -266,7 +371,6 @@ export function CameraScreen() {
             </Pressable>
           </View>
 
-          {/* Ссылка «Загрузить из галереи» — под затвором */}
           <Pressable
             onPress={() => capture(false)}
             disabled={locked}
@@ -284,7 +388,6 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   overlay: { flex: 1, justifyContent: 'space-between' },
 
-  // Верх
   topGroup: {
     gap: Spacing.two,
     paddingHorizontal: Spacing.three,
@@ -304,13 +407,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.4)',
   },
 
-  // Визир
   centerWrap: { alignItems: 'center', gap: Spacing.four },
   frame: {
     width: FRAME,
     height: FRAME,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Контейнер для DOM-video элемента (только десктоп).
+  webcamFill: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    borderRadius: 30,
+    overflow: 'hidden',
   },
   frameGlass: {
     position: 'absolute',
@@ -336,9 +445,18 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.9,
     shadowRadius: 8,
   },
+  camErrorWrap: {
+    position: 'absolute',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  camErrorText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 13,
+    fontWeight: '500',
+  },
   hintWrap: { alignItems: 'center' },
 
-  // Низ
   bottomRow: {
     alignItems: 'center',
     gap: Spacing.three,
