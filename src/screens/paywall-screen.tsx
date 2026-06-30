@@ -28,7 +28,7 @@ import { useAuth } from '@/lib/auth-context';
 import type { Plan } from '@/types';
 import { PRIVACY_URL, TERMS_URL } from '@/constants/links';
 import { alertAsync } from '@/lib/dialog';
-import { isDodoConfigured, redirectToDodo, type DodoProduct } from '@/lib/dodo-payments';
+import { isPolarConfigured, redirectToPolar, type PolarProduct } from '@/lib/polar';
 
 /** Период оплаты для переключателя «Месяц / Год». */
 type Period = 'monthly' | 'yearly';
@@ -91,7 +91,7 @@ export function PaywallScreen() {
 
   const plans = useMemo(() => buildPlans(period), [period]);
   const isWeb = Platform.OS === 'web';
-  const dodoReady = isWeb && isDodoConfigured();
+  const dodoReady = isWeb && isPolarConfigured();
 
   const onSelectPlan = (plan: Plan) => {
     if (plan.tier === 'free') {
@@ -100,9 +100,8 @@ export function PaywallScreen() {
     }
 
     if (isWeb) {
-      const product = `${plan.tier}_${period}` as DodoProduct;
-      if (redirectToDodo(product, user?.email ?? undefined)) return;
-      // DodoPayments ещё не настроен — env vars не заданы.
+      const product = `${plan.tier}_${period}` as PolarProduct;
+      if (redirectToPolar(product, user?.email ?? undefined)) return;
       void alertAsync('Скоро', 'Оплата подключается — зайди немного позже.');
       return;
     }
@@ -113,7 +112,7 @@ export function PaywallScreen() {
 
   const onLifetime = () => {
     if (isWeb) {
-      if (redirectToDodo('lifetime', user?.email ?? undefined)) return;
+      if (redirectToPolar('lifetime', user?.email ?? undefined)) return;
       void alertAsync('Скоро', 'Оплата подключается — зайди немного позже.');
       return;
     }
