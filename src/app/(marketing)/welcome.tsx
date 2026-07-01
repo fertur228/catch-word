@@ -1,46 +1,74 @@
 /**
- * Лендинг CatchWord (/welcome) — маркетинговая страница по структуре YC:
- * герой → доверие → как это работает → возможности → почему работает →
- * тарифы → FAQ → финальный CTA. Тёплая «Claude»-эстетика: серифные заголовки,
- * коралловый акцент, много воздуха. Веб-first, но на общих themed-компонентах
- * (работает и на нативе). Тёмная/светлая тема — через токены useTheme().
+ * Лендинг CatchWord (/welcome) — минималистичный, в духе нативных iOS/SwiftUI-
+ * приложений: фиксированная тёмно-серая палитра (не зависит от темы), SF-
+ * типографика, сгруппированные inset-списки с hairline-разделителями, крупный
+ * тайтл, монохром, белая capsule-кнопка. Структура — по YC (hero → как работает
+ * → возможности → тарифы → FAQ → CTA). Веб-first, но на RN-примитивах.
  */
-import { Pressable, StyleSheet, View } from 'react-native';
+import type { ReactNode } from 'react';
+import {
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import Head from 'expo-router/head';
 import type { SFSymbol } from 'expo-symbols';
 
 import { Icon } from '@/components/icon';
-import { Container, MarketingShell, useIsWide } from '@/components/marketing';
-import { Sticker } from '@/components/sticker';
-import { ThemedText } from '@/components/themed-text';
-import { Fonts, Radius, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from '@/constants/links';
 import { useAuth } from '@/lib/auth-context';
 import { setGuest } from '@/lib/web-guest';
 
-const FEATURES: { icon: SFSymbol; title: string; desc: string }[] = [
-  { icon: 'sparkles', title: 'Умное распознавание', desc: 'Не просто перевод: примеры, мнемоника и подсказки в одном касании.' },
-  { icon: 'square.grid.2x2', title: 'Поймай всю сцену', desc: 'До 8 предметов за один кадр — целая комната новых слов сразу.' },
-  { icon: 'arrow.triangle.2.circlepath', title: 'Интервальные повторения', desc: 'Выверенный график повторов — слова остаются с тобой надолго.' },
-  { icon: 'rectangle.stack.fill', title: 'Коллекция-стикеры', desc: 'Каждое слово — вырезанный стикер предмета. Твой визуальный словарь.' },
-  { icon: 'speaker.wave.2.fill', title: 'Произношение', desc: 'Слушай, как звучит слово, и повторяй вслух с первого раза.' },
-  { icon: 'globe', title: 'Все языки', desc: 'Учи любую пару языков в Premium. Один аккаунт — все устройства.' },
+/** Фиксированная тёмно-серая палитра (Apple-like). Один тон — без ярких акцентов. */
+const C = {
+  bg: '#0C0C0E',
+  elev: '#161619',
+  tile: '#232327',
+  hair: 'rgba(255,255,255,0.08)',
+  text: '#F5F5F7',
+  text2: '#98989F',
+  text3: '#66666D',
+  icon: '#D0D0D6',
+  cta: '#F5F5F7',
+  ctaText: '#0C0C0E',
+};
+
+/** Системный шрифт (SF на Apple). */
+const SF = Platform.select({ web: 'system-ui', default: 'System' }) as string;
+
+const HOW: { icon: SFSymbol; title: string; sub: string }[] = [
+  { icon: 'camera.fill', title: 'Наведи камеру', sub: 'На любой предмет вокруг — дома, на улице, в кафе.' },
+  { icon: 'sparkles', title: 'Поймай слово', sub: 'AI даёт слово, перевод, транскрипцию и живые примеры.' },
+  { icon: 'arrow.triangle.2.circlepath', title: 'Запоминай', sub: 'Карточка вернётся на повтор ровно в нужный момент.' },
+];
+
+const FEATURES: { icon: SFSymbol; title: string; sub: string }[] = [
+  { icon: 'sparkles', title: 'Умное распознавание', sub: 'Примеры, мнемоника и подсказки в одном касании.' },
+  { icon: 'square.grid.2x2', title: 'Вся сцена', sub: 'До 8 предметов за один кадр.' },
+  { icon: 'arrow.triangle.2.circlepath', title: 'Интервальные повторения', sub: 'Выверенный график повторов — слова остаются надолго.' },
+  { icon: 'rectangle.stack.fill', title: 'Коллекция-стикеры', sub: 'Каждое слово — вырезанный стикер предмета.' },
+  { icon: 'speaker.wave.2.fill', title: 'Произношение', sub: 'Слушай, как звучит слово, и повторяй вслух.' },
+  { icon: 'globe', title: 'Все языки', sub: 'Любая пара языков в Premium, на всех устройствах.' },
 ];
 
 const FAQ: { q: string; a: string }[] = [
-  { q: 'CatchWord бесплатный?', a: 'Да. 10 сканов бесплатно навсегда, без карты. Premium снимает лимит и открывает все языки.' },
-  { q: 'Нужен интернет?', a: 'Для распознавания — да. Коллекция, карточки и повторение работают и офлайн.' },
-  { q: 'На чём работает?', a: 'Прямо в браузере и как приложение — прогресс синхронизируется между устройствами.' },
-  { q: 'Какие языки?', a: 'Английский и другие; в Premium доступны все пары языков.' },
+  { q: 'CatchWord бесплатный?', a: '10 сканов бесплатно навсегда, без карты. Premium снимает лимит и открывает все языки.' },
+  { q: 'Нужен интернет?', a: 'Для распознавания — да. Коллекция и повторение работают и офлайн.' },
+  { q: 'Где работает?', a: 'В браузере и как приложение — прогресс синхронизируется между устройствами.' },
   { q: 'Как отменить Premium?', a: 'В любой момент, без скрытых списаний.' },
 ];
 
 export default function Welcome() {
-  const theme = useTheme();
   const router = useRouter();
-  const wide = useIsWide();
   const { signInWithGoogle } = useAuth();
+  const { width } = useWindowDimensions();
+  const big = width >= 700;
 
   const onStart = () => void signInWithGoogle().catch(() => {});
   const onGuest = () => {
@@ -49,438 +77,310 @@ export default function Welcome() {
   };
 
   return (
-    <MarketingShell>
+    <View style={styles.page}>
       <Head>
         <title>CatchWord — учи язык через камеру</title>
         <meta
           name="description"
-          content="Наведи камеру на любой предмет — получи слово, перевод, произношение и карточку для запоминания. Учи язык в реальной жизни. 10 сканов бесплатно."
+          content="Наведи камеру на любой предмет — получи слово, перевод, произношение и карточку для запоминания. 10 сканов бесплатно."
         />
       </Head>
 
-      {/* ── HERO ── */}
-      <Container style={[styles.hero, wide && styles.heroWide]}>
-        <View style={[styles.heroText, wide && styles.heroTextWide]}>
-          <Eyebrow icon="sparkles" label="AI-словарь в камере" />
-          <ThemedText style={[styles.h1, wide && styles.h1Wide]}>Мир вокруг — твой словарь.</ThemedText>
-          <ThemedText type="default" themeColor="textSecondary" style={styles.heroSub}>
-            Наведи камеру CatchWord на любой предмет — получи слово на новом языке, перевод,
-            произношение и карточку, которая сама вернётся на повтор.
-          </ThemedText>
-          <View style={styles.heroCtas}>
-            <Cta label="Начать бесплатно" onPress={onStart} />
-            <Pressable onPress={onGuest} hitSlop={8} style={styles.ghostLink}>
-              <ThemedText type="smallBold" themeColor="textSecondary">
-                Осмотреться без входа →
-              </ThemedText>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+        <TopBar />
+
+        <View style={styles.container}>
+          {/* ── HERO ── */}
+          <View style={styles.hero}>
+            <Text style={[styles.h1, { fontSize: big ? 56 : 40, lineHeight: big ? 60 : 44, letterSpacing: big ? -1.4 : -1 }]}>
+              Мир вокруг —{'\n'}твой словарь.
+            </Text>
+            <Text style={styles.heroSub}>
+              Наведи камеру на любой предмет — получи слово, перевод, произношение и карточку,
+              которая сама вернётся на повтор.
+            </Text>
+            <View style={styles.heroCtas}>
+              <Cta label="Начать бесплатно" onPress={onStart} />
+              <Pressable onPress={onGuest} hitSlop={8}>
+                <Text style={styles.link}>Осмотреться →</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.heroNote}>10 сканов бесплатно · без карты</Text>
+
+            <WordCard />
+          </View>
+
+          {/* ── HOW ── */}
+          <Section header="Как это работает">
+            <Group>
+              {HOW.map((r, i) => (
+                <Row key={r.title} icon={r.icon} title={r.title} sub={r.sub} last={i === HOW.length - 1} />
+              ))}
+            </Group>
+          </Section>
+
+          {/* ── FEATURES ── */}
+          <Section header="Возможности">
+            <Group>
+              {FEATURES.map((r, i) => (
+                <Row key={r.title} icon={r.icon} title={r.title} sub={r.sub} last={i === FEATURES.length - 1} />
+              ))}
+            </Group>
+          </Section>
+
+          {/* ── PRICING ── */}
+          <Section header="Тарифы">
+            <Group>
+              <PriceRow name="Free" sub="10 сканов · один язык" price="$0" />
+              <PriceRow name="Premium" sub="Безлимит · все языки · вся сцена" price="$6.99 / мес" last />
+            </Group>
+            <Pressable onPress={() => router.push('/pricing')} hitSlop={8} style={styles.moreLink}>
+              <Text style={styles.link}>Все тарифы →</Text>
             </Pressable>
+          </Section>
+
+          {/* ── FAQ ── */}
+          <Section header="Вопросы">
+            <Group>
+              {FAQ.map((r, i) => (
+                <Row key={r.q} title={r.q} sub={r.a} last={i === FAQ.length - 1} />
+              ))}
+            </Group>
+          </Section>
+
+          {/* ── FINAL CTA ── */}
+          <View style={styles.finalCta}>
+            <Text style={styles.finalTitle}>Начни ловить слова сегодня</Text>
+            <Text style={styles.finalSub}>Открой камеру — и первое слово уже твоё.</Text>
+            <Cta label="Начать бесплатно" onPress={onStart} />
           </View>
-          <ThemedText type="small" themeColor="textSecondary" style={styles.heroNote}>
-            Бесплатно навсегда · 10 сканов · без карты
-          </ThemedText>
+
+          <Footer />
         </View>
-
-        <View style={[styles.heroVisual, wide && styles.heroVisualWide]}>
-          <WordCard />
-        </View>
-      </Container>
-
-      {/* ── TRUST STRIP ── */}
-      <Container>
-        <View style={[styles.trust, { borderColor: theme.border }]}>
-          <Trust icon="gift.fill" text="10 сканов бесплатно" />
-          <Trust icon="sparkles" text="Примеры и мнемоники от AI" />
-          <Trust icon="arrow.triangle.2.circlepath" text="Повтор по системе SRS" />
-        </View>
-      </Container>
-
-      {/* ── HOW IT WORKS ── */}
-      <Container style={styles.section}>
-        <Header eyebrow="Как это работает" title="Три шага до первого слова" />
-        <View style={[styles.grid, wide && styles.row]}>
-          <Step wide={wide} n="1" icon="camera.fill" title="Наведи камеру" desc="Открой CatchWord и наведи на любой предмет — дома, на улице, в кафе." />
-          <Step wide={wide} n="2" icon="sparkles" title="Поймай слово" desc="AI распознаёт предмет и выдаёт слово, перевод, транскрипцию и живые примеры." />
-          <Step wide={wide} n="3" icon="arrow.triangle.2.circlepath" title="Запоминай" desc="Слово попадает в коллекцию и возвращается на повтор, когда ты вот-вот его забудешь." />
-        </View>
-      </Container>
-
-      {/* ── FEATURES ── */}
-      <Container style={styles.section}>
-        <Header eyebrow="Что внутри" title="Больше, чем переводчик" />
-        <View style={styles.features}>
-          {FEATURES.map((f) => (
-            <Feature key={f.title} wide={wide} {...f} />
-          ))}
-        </View>
-      </Container>
-
-      {/* ── METHOD ── */}
-      <Container style={styles.section}>
-        <View style={[styles.method, { backgroundColor: theme.accentSoft }]}>
-          <Header eyebrow="Почему это работает" title="Слова, которые остаются" center />
-          <View style={[styles.grid, wide && styles.row, styles.methodRows]}>
-            <MethodPoint wide={wide} icon="lightbulb.fill" title="Контекст важнее списков" desc="Ты запоминаешь слово вместе с реальным предметом и моментом — мозг цепляется крепче, чем за строчку в списке." />
-            <MethodPoint wide={wide} icon="clock.fill" title="Повтор в нужный момент" desc="Карточка возвращается ровно тогда, когда ты вот-вот забудешь — это и есть интервальное повторение." />
-          </View>
-        </View>
-      </Container>
-
-      {/* ── PRICING TEASER ── */}
-      <Container style={styles.section}>
-        <Header eyebrow="Тарифы" title="Начни бесплатно" />
-        <View style={[styles.grid, wide && styles.row]}>
-          <MiniPlan wide={wide} name="Free" price="$0" note="навсегда" items={['10 сканов', 'Коллекция и повторение', 'Один язык']} />
-          <MiniPlan wide={wide} name="Premium" price="$6.99" note="в месяц" highlighted items={['Безлимит сканов', 'Все языки', 'Поймай всю сцену', '7 дней бесплатно']} />
-        </View>
-        <Pressable onPress={() => router.push('/pricing')} hitSlop={8} style={styles.centerLink}>
-          <ThemedText type="smallBold" themeColor="accent">
-            Сравнить тарифы →
-          </ThemedText>
-        </Pressable>
-      </Container>
-
-      {/* ── FAQ ── */}
-      <Container style={styles.section}>
-        <Header eyebrow="Вопросы" title="Коротко о главном" />
-        <View style={styles.faq}>
-          {FAQ.map((item) => (
-            <Faq key={item.q} {...item} />
-          ))}
-        </View>
-      </Container>
-
-      {/* ── FINAL CTA ── */}
-      <Container style={styles.section}>
-        <View style={[styles.finalCta, { backgroundColor: theme.accentSoft }]}>
-          <ThemedText style={styles.finalTitle}>Начни ловить слова сегодня</ThemedText>
-          <ThemedText type="default" themeColor="textSecondary" style={styles.finalSub}>
-            Открой камеру — и первое слово уже твоё.
-          </ThemedText>
-          <Cta label="Начать бесплатно" onPress={onStart} />
-        </View>
-      </Container>
-    </MarketingShell>
-  );
-}
-
-// ── Мелкие компоненты страницы ────────────────────────────────────────────────
-
-function Eyebrow({ icon, label }: { icon: SFSymbol; label: string }) {
-  const theme = useTheme();
-  return (
-    <View style={[styles.eyebrow, { backgroundColor: theme.accentSoft }]}>
-      <Icon name={icon} size={15} color={theme.accent} />
-      <ThemedText type="smallBold" style={{ color: theme.accent }}>
-        {label}
-      </ThemedText>
+      </ScrollView>
     </View>
   );
 }
 
-/** Тёплый коралловый CTA (вход через Google). */
-function Cta({ label, onPress }: { label: string; onPress: () => void }) {
-  const theme = useTheme();
+// ── Компоненты ────────────────────────────────────────────────────────────────
+
+function TopBar() {
+  const router = useRouter();
+  const { signInWithGoogle } = useAuth();
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.cta, { backgroundColor: theme.accent, shadowColor: theme.accent, opacity: pressed ? 0.92 : 1 }]}>
-      <Icon name="person.crop.circle.badge.plus" size={19} color="#FFFFFF" />
-      <ThemedText style={styles.ctaLabel}>{label}</ThemedText>
+    <View style={styles.topbar}>
+      <View style={styles.topbarInner}>
+        <Pressable onPress={() => router.push('/welcome')} hitSlop={6}>
+          <Text style={styles.brand}>CatchWord</Text>
+        </Pressable>
+        <View style={styles.topbarRight}>
+          <Pressable onPress={() => router.push('/pricing')} hitSlop={8}>
+            <Text style={styles.navLink}>Тарифы</Text>
+          </Pressable>
+          <Pressable onPress={() => void signInWithGoogle().catch(() => {})} hitSlop={8}>
+            <Text style={styles.navSignIn}>Войти</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/** Белая capsule-кнопка (Apple-like). */
+function Cta({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.cta, pressed && { opacity: 0.85 }]}>
+      <Text style={styles.ctaLabel}>{label}</Text>
     </Pressable>
   );
 }
 
-/** Визуал героя — «пойманное слово» карточкой. */
-function WordCard() {
-  const theme = useTheme();
+function Section({ header, children }: { header: string; children: ReactNode }) {
   return (
-    <View style={[styles.wordCard, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
-      <View style={[styles.caughtBadge, { backgroundColor: theme.accentSoft }]}>
-        <Icon name="checkmark.seal.fill" size={14} color={theme.accent} />
-        <ThemedText type="smallBold" style={{ color: theme.accent }}>
-          поймано
-        </ThemedText>
-      </View>
-      <Sticker symbol="cup.and.saucer.fill" tone="accent" size={84} />
-      <ThemedText style={[styles.wordWord, { color: theme.text }]}>coffee</ThemedText>
-      <ThemedText type="default" themeColor="textSecondary">
-        кофе · /ˈkɒf.i/
-      </ThemedText>
-      <View style={[styles.wordExample, { backgroundColor: theme.backgroundElement }]}>
-        <ThemedText type="small" themeColor="textSecondary">
-          «Two coffees, please.»
-        </ThemedText>
-      </View>
+    <View style={styles.section}>
+      <Text style={styles.sectionHeader}>{header.toUpperCase()}</Text>
+      {children}
     </View>
   );
 }
 
-function Trust({ icon, text }: { icon: SFSymbol; text: string }) {
-  const theme = useTheme();
-  return (
-    <View style={styles.trustItem}>
-      <Icon name={icon} size={18} color={theme.accent} />
-      <ThemedText type="smallBold" themeColor="textSecondary">
-        {text}
-      </ThemedText>
-    </View>
-  );
+/** Сгруппированная inset-карточка (как секция iOS Settings). */
+function Group({ children }: { children: ReactNode }) {
+  return <View style={styles.group}>{children}</View>;
 }
 
-function Header({ eyebrow, title, center }: { eyebrow: string; title: string; center?: boolean }) {
+function Row({ icon, title, sub, last }: { icon?: SFSymbol; title: string; sub?: string; last?: boolean }) {
   return (
-    <View style={[styles.header, center && styles.center]}>
-      <ThemedText type="smallBold" themeColor="accent">
-        {eyebrow.toUpperCase()}
-      </ThemedText>
-      <ThemedText style={[styles.h2, center && styles.centerText]}>{title}</ThemedText>
-    </View>
-  );
-}
-
-function Step({ wide, n, icon, title, desc }: { wide: boolean; n: string; icon: SFSymbol; title: string; desc: string }) {
-  const theme = useTheme();
-  return (
-    <View style={[styles.card, wide && styles.flex1, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
-      <View style={styles.stepTop}>
-        <View style={[styles.iconTile, { backgroundColor: theme.accentSoft }]}>
-          <Icon name={icon} size={22} color={theme.accent} />
-        </View>
-        <ThemedText style={[styles.stepNum, { color: theme.backgroundSelected }]}>{n}</ThemedText>
-      </View>
-      <ThemedText style={[styles.cardTitle, { color: theme.text }]}>{title}</ThemedText>
-      <ThemedText type="small" themeColor="textSecondary">
-        {desc}
-      </ThemedText>
-    </View>
-  );
-}
-
-function Feature({ wide, icon, title, desc }: { wide: boolean; icon: SFSymbol; title: string; desc: string }) {
-  const theme = useTheme();
-  return (
-    <View style={[styles.card, wide ? styles.featureWide : styles.featureFull, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
-      <View style={[styles.iconTile, { backgroundColor: theme.accentSoft }]}>
-        <Icon name={icon} size={20} color={theme.accent} />
-      </View>
-      <ThemedText style={[styles.cardTitle, { color: theme.text }]}>{title}</ThemedText>
-      <ThemedText type="small" themeColor="textSecondary">
-        {desc}
-      </ThemedText>
-    </View>
-  );
-}
-
-function MethodPoint({ wide, icon, title, desc }: { wide: boolean; icon: SFSymbol; title: string; desc: string }) {
-  const theme = useTheme();
-  return (
-    <View style={[styles.methodPoint, wide && styles.flex1]}>
-      <View style={[styles.iconTile, { backgroundColor: theme.card }]}>
-        <Icon name={icon} size={20} color={theme.accent} />
-      </View>
-      <View style={styles.methodBody}>
-        <ThemedText style={[styles.cardTitle, { color: theme.text }]}>{title}</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
-          {desc}
-        </ThemedText>
-      </View>
-    </View>
-  );
-}
-
-function MiniPlan({
-  wide,
-  name,
-  price,
-  note,
-  items,
-  highlighted,
-}: {
-  wide: boolean;
-  name: string;
-  price: string;
-  note: string;
-  items: string[];
-  highlighted?: boolean;
-}) {
-  const theme = useTheme();
-  return (
-    <View
-      style={[
-        styles.card,
-        wide && styles.flex1,
-        { backgroundColor: theme.card, borderColor: highlighted ? theme.accent : theme.border, shadowColor: theme.shadow },
-        highlighted && styles.planHi,
-      ]}>
-      <ThemedText type="smallBold" themeColor="textSecondary">
-        {name}
-      </ThemedText>
-      <View style={styles.planPrice}>
-        <ThemedText style={[styles.planPriceNum, { color: theme.text }]}>{price}</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
-          {' '}
-          {note}
-        </ThemedText>
-      </View>
-      <View style={styles.planItems}>
-        {items.map((it) => (
-          <View key={it} style={styles.planItem}>
-            <Icon name="checkmark.circle.fill" size={16} color={theme.accent} />
-            <ThemedText type="small">{it}</ThemedText>
+    <View>
+      <View style={styles.row}>
+        {icon ? (
+          <View style={styles.tile}>
+            <Icon name={icon} size={18} color={C.icon} />
           </View>
-        ))}
+        ) : null}
+        <View style={styles.rowBody}>
+          <Text style={styles.rowTitle}>{title}</Text>
+          {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
+        </View>
+      </View>
+      {!last ? <View style={[styles.sep, { marginLeft: icon ? 60 : 16 }]} /> : null}
+    </View>
+  );
+}
+
+function PriceRow({ name, sub, price, last }: { name: string; sub: string; price: string; last?: boolean }) {
+  return (
+    <View>
+      <View style={styles.row}>
+        <View style={styles.rowBody}>
+          <Text style={styles.rowTitle}>{name}</Text>
+          <Text style={styles.rowSub}>{sub}</Text>
+        </View>
+        <Text style={styles.price}>{price}</Text>
+      </View>
+      {!last ? <View style={[styles.sep, { marginLeft: 16 }]} /> : null}
+    </View>
+  );
+}
+
+/** Минимальная карточка-визуал: «пойманное слово». */
+function WordCard() {
+  return (
+    <View style={styles.wordCard}>
+      <Text style={styles.wordCaught}>ПОЙМАНО</Text>
+      <View style={styles.wordMain}>
+        <View style={styles.wordTile}>
+          <Icon name="cup.and.saucer.fill" size={22} color={C.icon} />
+        </View>
+        <View>
+          <Text style={styles.wordWord}>coffee</Text>
+          <Text style={styles.wordTrans}>кофе · /ˈkɒf.i/</Text>
+        </View>
+      </View>
+      <View style={styles.wordSep} />
+      <Text style={styles.wordExample}>«Two coffees, please.»</Text>
+    </View>
+  );
+}
+
+function Footer() {
+  const router = useRouter();
+  return (
+    <View style={styles.footer}>
+      <Text style={styles.footerCopy}>© CatchWord</Text>
+      <View style={styles.footerLinks}>
+        <FooterLink label="Тарифы" onPress={() => router.push('/pricing')} />
+        <FooterLink label="Конфиденциальность" onPress={() => Linking.openURL(PRIVACY_URL)} />
+        <FooterLink label="Условия" onPress={() => Linking.openURL(TERMS_URL)} />
+        <FooterLink label="Поддержка" onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)} />
       </View>
     </View>
   );
 }
 
-function Faq({ q, a }: { q: string; a: string }) {
-  const theme = useTheme();
+function FooterLink({ label, onPress }: { label: string; onPress: () => void }) {
   return (
-    <View style={[styles.faqItem, { borderColor: theme.border }]}>
-      <ThemedText style={[styles.faqQ, { color: theme.text }]}>{q}</ThemedText>
-      <ThemedText type="small" themeColor="textSecondary" style={styles.faqA}>
-        {a}
-      </ThemedText>
-    </View>
+    <Pressable onPress={onPress} hitSlop={6}>
+      <Text style={styles.footerLink}>{label}</Text>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  // Секции
-  section: { paddingTop: Spacing.six },
-  grid: { gap: Spacing.three },
-  row: { flexDirection: 'row', alignItems: 'stretch' },
-  flex1: { flex: 1 },
-  center: { alignItems: 'center' },
-  centerText: { textAlign: 'center' },
+  page: { flex: 1, backgroundColor: C.bg },
+  scroll: { paddingBottom: 56 },
+  container: { width: '100%', maxWidth: 720, alignSelf: 'center', paddingHorizontal: 24 },
+
+  // Топбар
+  topbar: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.hair },
+  topbarInner: {
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
+    paddingHorizontal: 24,
+    height: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  brand: { fontFamily: SF, fontSize: 17, fontWeight: '600', color: C.text, letterSpacing: -0.2 },
+  topbarRight: { flexDirection: 'row', alignItems: 'center', gap: 24 },
+  navLink: { fontFamily: SF, fontSize: 15, fontWeight: '500', color: C.text2 },
+  navSignIn: { fontFamily: SF, fontSize: 15, fontWeight: '600', color: C.text },
 
   // Герой
-  hero: { paddingTop: Spacing.six, gap: Spacing.four },
-  heroWide: { flexDirection: 'row', alignItems: 'center', gap: Spacing.six, paddingTop: 80 },
-  heroText: { gap: Spacing.three },
-  heroTextWide: { flex: 1.1 },
-  h1: { fontFamily: Fonts.serif, fontSize: 40, lineHeight: 46, fontWeight: '700', letterSpacing: -0.5 },
-  h1Wide: { fontSize: 56, lineHeight: 60 },
-  heroSub: { fontSize: 18, lineHeight: 28, maxWidth: 520 },
-  heroCtas: { flexDirection: 'row', alignItems: 'center', gap: Spacing.four, flexWrap: 'wrap', marginTop: Spacing.one },
-  heroNote: { marginTop: Spacing.one },
-  ghostLink: { paddingVertical: Spacing.two },
-  heroVisual: { alignItems: 'center', justifyContent: 'center' },
-  heroVisualWide: { flex: 1 },
+  hero: { paddingTop: 72 },
+  h1: { fontFamily: SF, fontWeight: '700', color: C.text },
+  heroSub: { fontFamily: SF, fontSize: 18, lineHeight: 27, color: C.text2, maxWidth: 540, marginTop: 18 },
+  heroCtas: { flexDirection: 'row', alignItems: 'center', gap: 22, marginTop: 30 },
+  heroNote: { fontFamily: SF, fontSize: 13, color: C.text3, marginTop: 16 },
+  link: { fontFamily: SF, fontSize: 15, fontWeight: '600', color: C.text2 },
 
-  eyebrow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.one + 2,
-    borderRadius: Radius.pill,
-  },
-
+  // Кнопка
   cta: {
-    flexDirection: 'row',
+    backgroundColor: C.cta,
+    borderRadius: 980,
+    paddingVertical: 13,
+    paddingHorizontal: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    alignSelf: 'flex-start',
-    gap: Spacing.two,
-    paddingVertical: 15,
-    paddingHorizontal: 26,
-    borderRadius: Radius.pill,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.28,
-    shadowRadius: 18,
-    elevation: 4,
   },
-  ctaLabel: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  ctaLabel: { fontFamily: SF, fontSize: 16, fontWeight: '600', color: C.ctaText, letterSpacing: -0.2 },
 
-  // Карточка-визуал героя
+  // Карточка-визуал
   wordCard: {
+    alignSelf: 'flex-start',
     width: '100%',
-    maxWidth: 340,
-    alignItems: 'center',
-    gap: Spacing.two,
-    padding: Spacing.five,
-    borderRadius: Radius.xxl,
-    borderWidth: 1,
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.12,
-    shadowRadius: 32,
-    elevation: 6,
+    maxWidth: 420,
+    marginTop: 40,
+    padding: 20,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.hair,
+    backgroundColor: C.elev,
+    gap: 14,
   },
-  caughtBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: 4,
-    borderRadius: Radius.pill,
-    marginBottom: Spacing.one,
-  },
-  wordWord: { fontFamily: Fonts.serif, fontSize: 34, fontWeight: '700', marginTop: Spacing.two },
-  wordExample: { marginTop: Spacing.two, paddingHorizontal: Spacing.three, paddingVertical: Spacing.two, borderRadius: Radius.md },
+  wordCaught: { fontFamily: SF, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, color: C.text3 },
+  wordMain: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  wordTile: { width: 46, height: 46, borderRadius: 12, backgroundColor: C.tile, alignItems: 'center', justifyContent: 'center' },
+  wordWord: { fontFamily: SF, fontSize: 24, fontWeight: '700', color: C.text, letterSpacing: -0.4 },
+  wordTrans: { fontFamily: SF, fontSize: 14, color: C.text2, marginTop: 2 },
+  wordSep: { height: StyleSheet.hairlineWidth, backgroundColor: C.hair },
+  wordExample: { fontFamily: SF, fontSize: 14, color: C.text2 },
 
-  // Доверие
-  trust: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: Spacing.four,
-    marginTop: Spacing.five,
-    paddingVertical: Spacing.four,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  trustItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  // Секции
+  section: { marginTop: 60 },
+  sectionHeader: { fontFamily: SF, fontSize: 12.5, fontWeight: '600', letterSpacing: 0.6, color: C.text3, marginLeft: 8, marginBottom: 12 },
 
-  // Заголовки секций
-  header: { gap: Spacing.two, marginBottom: Spacing.four },
-  h2: { fontFamily: Fonts.serif, fontSize: 30, lineHeight: 36, fontWeight: '700', letterSpacing: -0.3 },
-
-  // Карточки (шаги/фичи/тарифы)
-  card: {
-    gap: Spacing.two,
-    padding: Spacing.four,
-    borderRadius: Radius.xl,
-    borderWidth: 1,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.06,
-    shadowRadius: 16,
-    elevation: 2,
-  },
-  cardTitle: { fontSize: 18, fontWeight: '700', letterSpacing: -0.2 },
-  iconTile: { width: 44, height: 44, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
-  stepTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  stepNum: { fontSize: 44, fontWeight: '800', lineHeight: 46 },
-
-  // Фичи-грид
-  features: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.three },
-  featureWide: { flexBasis: '31%', flexGrow: 1, minWidth: 240 },
-  featureFull: { width: '100%' },
-
-  // Метод (тёплая плашка)
-  method: { padding: Spacing.five, borderRadius: Radius.xxl },
-  methodRows: { marginTop: Spacing.two },
-  methodPoint: { flexDirection: 'row', gap: Spacing.three, alignItems: 'flex-start' },
-  methodBody: { flex: 1, gap: Spacing.one },
-
-  // Тарифы
-  planHi: { borderWidth: 2 },
-  planPrice: { flexDirection: 'row', alignItems: 'baseline' },
-  planPriceNum: { fontSize: 34, fontWeight: '800' },
-  planItems: { gap: Spacing.two, marginTop: Spacing.one },
-  planItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  centerLink: { alignSelf: 'center', marginTop: Spacing.four, paddingVertical: Spacing.two },
-
-  // FAQ
-  faq: { gap: 0 },
-  faqItem: { paddingVertical: Spacing.four, borderTopWidth: StyleSheet.hairlineWidth, gap: Spacing.one },
-  faqQ: { fontSize: 17, fontWeight: '700' },
-  faqA: { maxWidth: 640 },
+  // Сгруппированный список
+  group: { backgroundColor: C.elev, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: C.hair, overflow: 'hidden' },
+  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, paddingVertical: 14, paddingHorizontal: 16 },
+  tile: { width: 30, height: 30, borderRadius: 8, backgroundColor: C.tile, alignItems: 'center', justifyContent: 'center' },
+  rowBody: { flex: 1, gap: 3, paddingTop: 1 },
+  rowTitle: { fontFamily: SF, fontSize: 16, fontWeight: '500', color: C.text, lineHeight: 21, letterSpacing: -0.2 },
+  rowSub: { fontFamily: SF, fontSize: 14, color: C.text2, lineHeight: 19 },
+  sep: { height: StyleSheet.hairlineWidth, backgroundColor: C.hair },
+  price: { fontFamily: SF, fontSize: 16, fontWeight: '600', color: C.text, marginTop: 1 },
+  moreLink: { alignSelf: 'flex-start', marginTop: 14, marginLeft: 4 },
 
   // Финальный CTA
-  finalCta: { alignItems: 'center', gap: Spacing.three, paddingVertical: Spacing.six, paddingHorizontal: Spacing.four, borderRadius: Radius.xxl },
-  finalTitle: { fontFamily: Fonts.serif, fontSize: 32, lineHeight: 38, fontWeight: '700', letterSpacing: -0.3, textAlign: 'center' },
-  finalSub: { textAlign: 'center', maxWidth: 420 },
+  finalCta: { alignItems: 'center', marginTop: 72, gap: 14 },
+  finalTitle: { fontFamily: SF, fontSize: 30, fontWeight: '700', letterSpacing: -0.6, color: C.text, textAlign: 'center' },
+  finalSub: { fontFamily: SF, fontSize: 16, color: C.text2, textAlign: 'center', maxWidth: 380, lineHeight: 23 },
+
+  // Футер
+  footer: {
+    marginTop: 72,
+    paddingTop: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: C.hair,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 16,
+  },
+  footerCopy: { fontFamily: SF, fontSize: 13, color: C.text3 },
+  footerLinks: { flexDirection: 'row', alignItems: 'center', gap: 20, flexWrap: 'wrap' },
+  footerLink: { fontFamily: SF, fontSize: 13, color: C.text2 },
 });
