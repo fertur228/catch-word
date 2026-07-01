@@ -33,6 +33,12 @@ export async function uploadSticker(
 ): Promise<string | null> {
   if (!isLocalFile(localUri)) return localUri;
   try {
+    // Файл мог быть удалён (старая карточка ссылается на исчезнувший стикер —
+    // напр. после переустановки/очистки). Это ожидаемо: тихо пропускаем, без
+    // шумного warn на каждый вход.
+    const info = await FileSystem.getInfoAsync(localUri);
+    if (!info.exists) return null;
+
     const b64 = await FileSystem.readAsStringAsync(localUri, {
       encoding: FileSystem.EncodingType.Base64,
     });

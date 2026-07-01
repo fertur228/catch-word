@@ -180,15 +180,32 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
   const addCard = useCallback(
     async (card: WordCard) => {
       // Гарантируем, что у новой карточки есть SRS-поля (если экран их не задал).
-      let withSrs: WordCard = card.dueAt == null ? { ...card, ...freshSrs(card.createdAt) } : card;
-      // Вошли — грузим стикер в Storage и сохраняем публичный URL (виден на всех устройствах).
-      if (userId && needsUpload(withSrs.imageUri)) {
-        const url = await uploadSticker(withSrs.imageUri, userId, withSrs.id);
-        if (url) withSrs = { ...withSrs, imageUri: url };
-      }
+      const withSrs: WordCard = card.dueAt == null ? { ...card, ...freshSrs(card.createdAt) } : card;
+      // МГНОВЕННО: сохраняем локально и показываем карточку (с локальной картинкой).
+      // Раньше тут ЖДАЛИ загрузку стикера в облако (сеть) — из-за этого «Сохранить
+      // в коллекцию» тормозило. Теперь заливаем в фоне, UI не блокируется.
       await db.insertCard(withSrs);
       setCards((prev) => [withSrs, ...prev.filter((c) => c.id !== withSrs.id)]);
-      if (userId) pushCard(userId, withSrs).catch(() => {});
+      // В ФОНЕ: залить стикер в Storage, подменить локальный URI на облачный и
+      // запушить карточку. Медленная сеть/ошибки больше не тормозят сохранение.
+      if (userId) {
+        void (async () => {
+          try {
+            let synced = withSrs;
+            if (needsUpload(withSrs.imageUri)) {
+              const url = await uploadSticker(withSrs.imageUri, userId, withSrs.id);
+              if (url && url !== withSrs.imageUri) {
+                synced = { ...withSrs, imageUri: url };
+                await db.insertCard(synced); // upsert: обновляем на облачный URL
+                setCards((prev) => prev.map((c) => (c.id === synced.id ? synced : c)));
+              }
+            }
+            await pushCard(userId, synced);
+          } catch {
+            /* фоновая синхронизация — best-effort */
+          }
+        })();
+      }
     },
     [userId],
   );
