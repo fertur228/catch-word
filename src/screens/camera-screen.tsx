@@ -49,7 +49,9 @@ import { Reveal } from '@/components/reveal';
 import { QuestBanner } from '@/components/quest-banner';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
+import { alertAsync } from '@/lib/dialog';
 import { createScanJob, SCAN_FRAME, type ScanMode } from '@/lib/scan-job';
 
 /** Цвета элементов поверх живого видео (не зависят от темы — лежат на кадре). */
@@ -79,6 +81,7 @@ export function CameraScreen() {
   const theme = useTheme();
   const router = useRouter();
   const isFocused = useIsFocused();
+  const { user, signInWithGoogle } = useAuth();
   const { scansLeft, scanLimit, tryScan } = useCollection();
   const locked = scansLeft <= 0;
   const [permission, requestPermission] = useCameraPermissions();
@@ -148,6 +151,20 @@ export function CameraScreen() {
 
   const onShutter = useCallback(async () => {
     if (navigating.current) return;
+    // Скан только для вошедших: иначе серверный лимит не привязать к аккаунту
+    // (и слова/прогресс негде хранить). Вход через Google, как на пейволле.
+    if (!user) {
+      await alertAsync(
+        'Войдите, чтобы сканировать',
+        'Так слова сохранятся в твоём аккаунте и синхронизируются между устройствами. Вход через Google.',
+      );
+      try {
+        await signInWithGoogle();
+      } catch {
+        void alertAsync('Не удалось войти', 'Попробуй ещё раз.');
+      }
+      return;
+    }
     // Спека §5.2: перед съёмкой проверяем лимит; исчерпан → Пейволл.
     if (!tryScan()) {
       router.push('/paywall');
@@ -170,7 +187,7 @@ export function CameraScreen() {
     // Сначала экран «Распознаю…» (scanning), он сам уйдёт на Результат.
     const jobId = createScanJob(photoUri, mode);
     router.push({ pathname: '/scanning', params: { jobId } });
-  }, [router, tryScan, flash, mode]);
+  }, [router, tryScan, flash, mode, user, signInWithGoogle]);
 
   // 1) Разрешение ещё загружается.
   if (!permission) {

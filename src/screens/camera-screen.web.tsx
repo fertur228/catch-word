@@ -25,7 +25,9 @@ import { QuestBanner } from '@/components/quest-banner';
 import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
+import { alertAsync } from '@/lib/dialog';
 import { createScanJob, SCAN_FRAME, type ScanMode } from '@/lib/scan-job';
 
 const ON_CAMERA = '#FFFFFF';
@@ -90,6 +92,7 @@ export function CameraScreen() {
   const theme = useTheme();
   const router = useRouter();
   const isFocused = useIsFocused();
+  const { user, signInWithGoogle } = useAuth();
   const { scansLeft, scanLimit, tryScan, refundScan } = useCollection();
   const locked = scansLeft <= 0;
   const [mode, setMode] = useState<ScanMode>('single');
@@ -179,6 +182,20 @@ export function CameraScreen() {
   const capture = useCallback(
     async (useCamera: boolean) => {
       if (busy.current) return;
+      // Скан только для вошедших: серверный лимит привязан к аккаунту, и слова
+      // сохраняются в облаке. Вход через Google, как на пейволле.
+      if (!user) {
+        await alertAsync(
+          'Войдите, чтобы сканировать',
+          'Так слова сохранятся в твоём аккаунте и синхронизируются между устройствами. Вход через Google.',
+        );
+        try {
+          await signInWithGoogle();
+        } catch {
+          void alertAsync('Не удалось войти', 'Попробуй ещё раз.');
+        }
+        return;
+      }
       if (!tryScan()) { router.push('/paywall'); return; }
       busy.current = true;
       try {
@@ -197,7 +214,7 @@ export function CameraScreen() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [router, tryScan, refundScan, mode],
+    [router, tryScan, refundScan, mode, user, signInWithGoogle],
   );
 
   return (
