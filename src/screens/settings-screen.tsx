@@ -530,7 +530,7 @@ export function SettingsScreen() {
               See it. Catch it. Speak it.
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary" style={styles.footerSub}>
-              CatchWord · сделано с любовью в Казахстане
+              CatchWord
             </ThemedText>
           </View>
         </Reveal>

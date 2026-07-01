@@ -29,7 +29,7 @@ import {
   uploadSticker,
 } from '@/lib/cloud-sync';
 import { getDailyQuest, matchesQuest, todayIndex, type DailyQuest } from '@/lib/daily-quest';
-import { LEARNING_LANG, NATIVE_LANG, getSeedCards } from '@/lib/mock-data';
+import { LEARNING_LANG, NATIVE_LANG } from '@/lib/mock-data';
 import { computeNextReview, freshSrs, isDue, isMastered } from '@/lib/srs';
 import type { CollectionStats, SrsRating, UserPrefs, WordCard } from '@/types';
 
@@ -41,7 +41,6 @@ const PREF_NATIVE = 'native_lang';
 const PREF_ONBOARDED = 'onboarded';
 const PREF_QUEST_LAST_DAY = 'quest_last_done_day';
 const PREF_QUEST_STREAK = 'quest_streak';
-const PREF_SEEDED = 'seeded';
 
 /** Дефолтные настройки до загрузки/первого запуска (демо: English ← Русский). */
 const DEFAULT_PREFS: UserPrefs = {
@@ -156,15 +155,8 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
         db.getPref(PREF_QUEST_LAST_DAY),
         db.getPref(PREF_QUEST_STREAK),
       ]);
-      // 2) Карточки: стартовые сидим только при ПЕРВОМ запуске. После ручной
-      //    очистки коллекции (флаг 'seeded') заново не создаём.
-      const seeded = await db.getPref(PREF_SEEDED);
-      if (seeded !== 'true' && (await db.countCards()) === 0) {
-        for (const seed of getSeedCards()) {
-          await db.insertCard(seed);
-        }
-      }
-      if (seeded !== 'true') await db.setPref(PREF_SEEDED, 'true');
+      // 2) Карточки: демо-словами НЕ засеваем — новый пользователь начинает с
+      //    ПУСТОЙ коллекции и ловит первые слова сам.
       const all = await db.getAllCards();
       if (!alive) return;
       setPrefs({
