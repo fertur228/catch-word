@@ -93,7 +93,7 @@ export function CameraScreen() {
   const router = useRouter();
   const isFocused = useIsFocused();
   const { user, signInWithGoogle } = useAuth();
-  const { scansLeft, scanLimit, tryScan, refundScan } = useCollection();
+  const { isPremium, scansLeft, scanLimit, tryScan, refundScan } = useCollection();
   const locked = scansLeft <= 0;
   const [mode, setMode] = useState<ScanMode>('single');
   const busy = useRef(false);
@@ -226,7 +226,7 @@ export function CameraScreen() {
         <View style={styles.topGroup}>
           <View style={styles.topRow}>
             <Pill
-              label={`${scansLeft}/${scanLimit} сканов`}
+              label={isPremium ? 'Неограниченно' : `${scansLeft}/${scanLimit} сканов`}
               icon="bolt.fill"
               tone="overlay"
               onPress={() => router.push('/paywall')}

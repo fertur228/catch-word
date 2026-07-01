@@ -105,7 +105,9 @@ interface SettingRowProps {
 /** Универсальная строка настроек: цветная иконка · текст · значение · шеврон. */
 function SettingRow({ icon, tone = 'neutral', label, sublabel, value, accessory, onPress, chevron }: SettingRowProps) {
   const theme = useTheme();
-  const t = TONES[tone];
+  // Монохром-графит: плитки иконок нейтрально-серые; цвет только у деструктивных
+  // (danger = красный) — так по HIG цвет несёт смысл, а не украшает.
+  const isDanger = tone === 'danger';
   const press = usePressScale(0.985);
   const showChevron = chevron ?? (!!onPress && !accessory);
 
@@ -122,8 +124,8 @@ function SettingRow({ icon, tone = 'neutral', label, sublabel, value, accessory,
             press.animStyle,
             pressed && onPress ? { backgroundColor: theme.backgroundSelected } : null,
           ]}>
-          <View style={[styles.rowIcon, { backgroundColor: theme[t.soft] }]}>
-            <Icon name={icon} size={17} color={theme[t.strong]} />
+          <View style={[styles.rowIcon, { backgroundColor: isDanger ? theme.dangerSoft : theme.backgroundSelected }]}>
+            <Icon name={icon} size={17} color={isDanger ? theme.danger : theme.text} />
           </View>
           <View style={styles.rowText}>
             <ThemedText type="default" style={styles.rowLabel} numberOfLines={1}>
@@ -335,16 +337,22 @@ export function SettingsScreen() {
                 icon="bolt.fill"
                 tone="warning"
                 label="Сканы"
-                sublabel={scansLeft === 0 ? 'Лимит исчерпан — перейди на Premium' : undefined}
+                sublabel={!isPremium && scansLeft === 0 ? 'Лимит исчерпан — перейди на Premium' : undefined}
                 accessory={
-                  <View style={styles.scansAccessory}>
-                    <ThemedText type="smallBold" style={{ color: scansLeft === 0 ? theme.danger : theme.warning }}>
-                      {scansLeft}
+                  isPremium ? (
+                    <ThemedText type="smallBold" themeColor="textSecondary">
+                      Неограниченно
                     </ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary">
-                      /{scanLimit}
-                    </ThemedText>
-                  </View>
+                  ) : (
+                    <View style={styles.scansAccessory}>
+                      <ThemedText type="smallBold" style={{ color: scansLeft === 0 ? theme.danger : theme.warning }}>
+                        {scansLeft}
+                      </ThemedText>
+                      <ThemedText type="small" themeColor="textSecondary">
+                        /{scanLimit}
+                      </ThemedText>
+                    </View>
+                  )
                 }
               />
               {user
@@ -688,7 +696,7 @@ const styles = StyleSheet.create({
 
   // Секции и группы
   section: { gap: Spacing.two },
-  sectionLabel: { marginLeft: Spacing.one, letterSpacing: 0.6 },
+  sectionLabel: { marginLeft: Spacing.three, letterSpacing: 0.4, fontSize: 13 },
   sectionBody: { gap: Spacing.two },
   group: {
     borderRadius: Radius.lg,

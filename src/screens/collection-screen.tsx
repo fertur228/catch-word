@@ -32,7 +32,6 @@ import { Reveal } from '@/components/reveal';
 import { Screen } from '@/components/screen';
 import { SearchBar } from '@/components/search-bar';
 import { SegmentedControl } from '@/components/segmented-control';
-import { StatCard } from '@/components/stat-card';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { WordTile } from '@/components/word-tile';
@@ -111,6 +110,18 @@ function groupCardsByTheme(cards: WordCard[]): GridSection[] {
       data: toRows(list),
     };
   });
+}
+
+/** Одна метрика в сводной карточке (минимал, монохром — в духе iOS). */
+function Stat({ value, label }: { value: number; label: string }) {
+  return (
+    <View style={styles.statCol}>
+      <ThemedText style={styles.statValue}>{value}</ThemedText>
+      <ThemedText type="small" themeColor="textSecondary" style={styles.statLabel}>
+        {label}
+      </ThemedText>
+    </View>
+  );
 }
 
 export function CollectionScreen() {
@@ -196,12 +207,14 @@ export function CollectionScreen() {
   // Передаём элементом (не функцией-компонентом), чтобы поле поиска не теряло фокус.
   const listHeader = (
     <View style={styles.header}>
-      {/* Статистика коллекции */}
+      {/* Статистика коллекции — единой сгруппированной карточкой (iOS-минимал) */}
       <Reveal delay={0}>
-        <View style={styles.stats}>
-          <StatCard icon="sparkles" tone="accent" value={stats.total} label="Поймано" />
-          <StatCard icon="graduationcap.fill" tone="success" value={stats.mastered} label="Выучено" />
-          <StatCard icon="flame.fill" tone="gold" value={stats.streak} label="Серия" />
+        <View style={[styles.statCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <Stat value={stats.total} label="Поймано" />
+          <View style={[styles.statSep, { backgroundColor: theme.border }]} />
+          <Stat value={stats.mastered} label="Выучено" />
+          <View style={[styles.statSep, { backgroundColor: theme.border }]} />
+          <Stat value={stats.streak} label="Серия" />
         </View>
       </Reveal>
 
@@ -279,7 +292,9 @@ export function CollectionScreen() {
         renderSectionHeader={({ section }: { section: SectionListData<TileRow, GridSection> }) => (
           <View style={[styles.sectionHeader, { backgroundColor: theme.background }]}>
             <View style={styles.sectionHeaderTop}>
-              <ThemedText type="smallBold">{section.title}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary" style={styles.sectionTitle}>
+                {section.title.toUpperCase()}
+              </ThemedText>
               <ThemedText type="small" themeColor="textSecondary">
                 {section.learned != null
                   ? `${section.learned}/${section.total} выучено`
@@ -325,7 +340,18 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   header: { gap: Spacing.three, marginBottom: Spacing.one },
-  stats: { flexDirection: 'row', gap: Spacing.two },
+  statCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.three,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  statCol: { flex: 1, alignItems: 'center', gap: 2 },
+  statValue: { fontSize: 24, fontWeight: '700', letterSpacing: -0.4 },
+  statLabel: { letterSpacing: 0.2 },
+  statSep: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginVertical: Spacing.two },
+  sectionTitle: { fontWeight: '600', letterSpacing: 0.5, fontSize: 12.5 },
   progressCard: {
     gap: Spacing.two,
     padding: Spacing.three,

@@ -1,111 +1,97 @@
 /**
  * Палитра, отступы, скругления и шрифты приложения.
  *
- * Цвета заданы для светлой и тёмной темы. Активную палитру отдаёт хук
- * `useTheme()` (src/hooks/use-theme.ts). Любой цвет берём через тему, а не
- * прописываем хардкодом в компонентах — тогда тёмная/светлая тема работают сами.
+ * Цвета — по Apple HIG: семантические system colors iOS с точными значениями.
+ * Единый акцент — ГРАФИТ (монохром): тёмно-серый в light, светло-серый в dark.
+ * Семантические цвета (red/green/orange) сохранены для действий/статусов —
+ * так по HIG (цвет = смысл). Любой цвет берём через тему, не хардкодом.
  */
 
 import '@/global.css';
 
 import { Platform } from 'react-native';
 
-/**
- * ВАЖНО: значения в `Colors` — ВСЕГДА строки-цвета. Тип `ThemeColor` собирается
- * из ключей этого объекта, и `ThemedText`/`ThemedView` подставляют значение прямо
- * в `color`/`backgroundColor`. Если положить сюда массив (пару для градиента) —
- * типы сломаются. Поэтому пары для «градиентов» лежат отдельно — см. `Gradients`.
- */
+/** ВАЖНО: значения — ВСЕГДА строки-цвета. Набор ключей в light и dark совпадает. */
 export const Colors = {
   light: {
-    text: '#11181C',
-    textSecondary: '#5B6168',
-    background: '#FFFFFF',
-    backgroundElement: '#F1F2F5',
-    backgroundSelected: '#E4E6EB',
-    card: '#FFFFFF',
-    border: '#E3E5EA',
-    primary: '#4F46E5',
-    primarySoft: '#EEF0FF',
+    text: '#000000', // label
+    textSecondary: 'rgba(60,60,67,0.6)', // secondaryLabel
+    background: '#FFFFFF', // systemBackground
+    backgroundElement: '#F2F2F7', // systemGray6 / grouped
+    backgroundSelected: '#E5E5EA', // systemGray5
+    card: '#FFFFFF', // secondarySystemGroupedBackground
+    border: 'rgba(60,60,67,0.29)', // separator
+    /** Акцент — графит (тёмно-серый). Кнопки/активные элементы + белый текст. */
+    primary: '#3A3A3C',
+    primarySoft: 'rgba(60,60,67,0.10)',
     onPrimary: '#FFFFFF',
-    success: '#1F9D55',
-    danger: '#E5484D',
-    gold: '#C77C0A',
-    overlay: 'rgba(0,0,0,0.45)',
-    // --- добавлено для «CapWords-grade» полировки (все значения — строки) ---
-    /** Тёплый акцент (коралл) — «поймал слово!», подсветки. */
-    accent: '#FF7A59',
-    accentSoft: '#FFE9E2',
-    /** Второй акцент (бирюза) — статистика, прогресс. */
-    accent2: '#12B5A5',
-    accent2Soft: '#DCF7F3',
-    warning: '#E8920C',
-    warningSoft: '#FDF1DD',
-    successSoft: '#E2F5EA',
-    dangerSoft: '#FDE7E7',
-    goldSoft: '#FBF0DC',
-    /** Концы «градиента» основного цвета (используются вместе с Gradients). */
-    primaryGradientTop: '#6D5DF6',
-    primaryGradientBottom: '#4F46E5',
-    /** Цвет тени (накладывается с низкой прозрачностью через shadowOpacity). */
-    shadow: '#0B1220',
-    /** Фон нижней панели вкладок. */
+    success: '#34C759', // systemGreen
+    danger: '#FF3B30', // systemRed
+    gold: '#FF9500', // systemOrange
+    overlay: 'rgba(0,0,0,0.40)',
+    accent: '#3A3A3C', // графит = единый акцент
+    accentSoft: 'rgba(60,60,67,0.10)',
+    accent2: '#8E8E93', // systemGray (вторичный нейтральный)
+    accent2Soft: 'rgba(142,142,147,0.14)',
+    warning: '#FF9500',
+    warningSoft: 'rgba(255,149,0,0.14)',
+    successSoft: 'rgba(52,199,89,0.14)',
+    dangerSoft: 'rgba(255,59,48,0.12)',
+    goldSoft: 'rgba(255,149,0,0.14)',
+    primaryGradientTop: '#48484A',
+    primaryGradientBottom: '#3A3A3C',
+    shadow: '#000000',
     tabBar: '#FFFFFF',
-    /** Заглушка-плейсхолдер (скелетоны загрузки). */
-    skeleton: '#ECEEF2',
+    skeleton: '#E9E9EE',
   },
   dark: {
-    text: '#ECEDEE',
-    textSecondary: '#9BA1A6',
-    background: '#0B0B0F',
-    backgroundElement: '#17181D',
-    backgroundSelected: '#23252B',
-    card: '#16171C',
-    border: '#2A2C33',
-    primary: '#6366F1',
-    primarySoft: '#1E1B3A',
-    onPrimary: '#FFFFFF',
-    success: '#34D399',
-    danger: '#FF6B6B',
-    gold: '#FFC53D',
-    overlay: 'rgba(0,0,0,0.55)',
-    // --- тёмные парные значения (тот же набор ключей, что и в light) ---
-    accent: '#FF8C6B',
-    accentSoft: '#3A241C',
-    accent2: '#2DD4BF',
-    accent2Soft: '#10312D',
-    warning: '#F4B23E',
-    warningSoft: '#3A2E12',
-    successSoft: '#10301F',
-    dangerSoft: '#3A1B1B',
-    goldSoft: '#332A14',
-    primaryGradientTop: '#7C74FF',
-    primaryGradientBottom: '#5B54E6',
+    text: '#FFFFFF', // label
+    textSecondary: 'rgba(235,235,245,0.6)', // secondaryLabel
+    background: '#000000', // systemBackground (dark)
+    backgroundElement: '#1C1C1E', // systemGray6 (dark)
+    backgroundSelected: '#2C2C2E', // systemGray5 (dark)
+    card: '#1C1C1E', // secondarySystemGroupedBackground (dark)
+    border: 'rgba(84,84,88,0.6)', // separator (dark)
+    /** Графит в тёмной — СВЕТЛО-серый (контраст на чёрном), текст на нём тёмный. */
+    primary: '#EBEBF0',
+    primarySoft: 'rgba(235,235,245,0.14)',
+    onPrimary: '#000000',
+    success: '#30D158',
+    danger: '#FF453A',
+    gold: '#FF9F0A',
+    overlay: 'rgba(0,0,0,0.60)',
+    accent: '#EBEBF0',
+    accentSoft: 'rgba(235,235,245,0.14)',
+    accent2: '#98989F',
+    accent2Soft: 'rgba(152,152,159,0.16)',
+    warning: '#FF9F0A',
+    warningSoft: 'rgba(255,159,10,0.18)',
+    successSoft: 'rgba(48,209,88,0.18)',
+    dangerSoft: 'rgba(255,69,58,0.18)',
+    goldSoft: 'rgba(255,159,10,0.18)',
+    primaryGradientTop: '#EBEBF0',
+    primaryGradientBottom: '#C7C7CC',
     shadow: '#000000',
-    tabBar: '#0B0B0F',
-    skeleton: '#202229',
+    tabBar: '#0A0A0A',
+    skeleton: '#2C2C2E',
   },
 } as const;
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
-/**
- * Пары цветов для «градиентов». Нативного `LinearGradient` в проекте нет,
- * поэтому пары используются как [верх, низ] для имитации (наложение двух View)
- * или просто как согласованная палитра акцентов. Значения — строки.
- */
+/** Пары для «градиентов» (наложение двух View). Графит/системные тона. */
 export const Gradients = {
   light: {
-    primary: ['#6D5DF6', '#4F46E5'],
-    sunset: ['#FF9A6B', '#FF6F91'],
-    mint: ['#34D399', '#12B5A5'],
-    gold: ['#FFC53D', '#E8920C'],
+    primary: ['#48484A', '#3A3A3C'],
+    sunset: ['#FF9F0A', '#FF375F'],
+    mint: ['#34C759', '#30D158'],
+    gold: ['#FFCC00', '#FF9500'],
   },
   dark: {
-    primary: ['#7C74FF', '#5B54E6'],
-    sunset: ['#FF8C6B', '#FF6F91'],
-    mint: ['#34D399', '#0E9E8F'],
-    gold: ['#FFC53D', '#C77C0A'],
+    primary: ['#EBEBF0', '#C7C7CC'],
+    sunset: ['#FF9F0A', '#FF375F'],
+    mint: ['#30D158', '#34C759'],
+    gold: ['#FFD60A', '#FF9F0A'],
   },
 } as const;
 
@@ -113,13 +99,9 @@ export type GradientName = keyof typeof Gradients.light & keyof typeof Gradients
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
     sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
     serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
     mono: 'ui-monospace',
   },
   default: {
@@ -136,7 +118,7 @@ export const Fonts = Platform.select({
   },
 });
 
-/** Шкала отступов (в точках). Используй вместо «магических» чисел. */
+/** Шкала отступов (в точках). HIG: базовый контентный отступ 16pt, тап-цель ≥44pt. */
 export const Spacing = {
   half: 2,
   one: 4,
@@ -147,7 +129,7 @@ export const Spacing = {
   six: 64,
 } as const;
 
-/** Шкала скруглений углов. */
+/** Шкала скруглений. iOS-списки (inset grouped) ≈ 10pt. */
 export const Radius = {
   sm: 8,
   md: 12,
@@ -157,22 +139,13 @@ export const Radius = {
   pill: 999,
 } as const;
 
-/**
- * Тайминги и пружины для анимаций (react-native-reanimated).
- * Держим в одном месте, чтобы движение по всему приложению было единым.
- *  - `duration`  — для `withTiming` (мс);
- *  - `spring`    — пресеты для `withSpring` (живое, «пружинистое» движение);
- *  - `scalePressed` — насколько сжимать элемент при нажатии.
- */
 export const Motion = {
   duration: { fast: 140, base: 240, slow: 420, lazy: 700 },
-  /** Пресеты пружин: soft — мягко, bouncy — с отскоком, stiff — быстро и чётко. */
   spring: {
     soft: { damping: 18, stiffness: 160, mass: 1 },
     bouncy: { damping: 12, stiffness: 180, mass: 0.9 },
     stiff: { damping: 26, stiffness: 280, mass: 1 },
   },
-  /** Масштаб элемента в нажатом состоянии (микро-интеракция). */
   scalePressed: 0.96,
 } as const;
 

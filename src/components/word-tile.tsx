@@ -89,5 +89,5 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
     padding: 1,
   },
-  word: { fontWeight: '700', paddingHorizontal: Spacing.two },
+  word: { fontWeight: '600', paddingHorizontal: Spacing.two, letterSpacing: -0.2 },
 });

@@ -82,7 +82,7 @@ export function CameraScreen() {
   const router = useRouter();
   const isFocused = useIsFocused();
   const { user, signInWithGoogle } = useAuth();
-  const { scansLeft, scanLimit, tryScan } = useCollection();
+  const { isPremium, scansLeft, scanLimit, tryScan } = useCollection();
   const locked = scansLeft <= 0;
   const [permission, requestPermission] = useCameraPermissions();
   // Режим съёмки: один предмет (по рамке) или вся сцена (несколько предметов).
@@ -249,7 +249,7 @@ export function CameraScreen() {
         {/* Верх: счётчик сканов + настройки */}
         <View style={styles.topRow} pointerEvents="box-none">
           <Pill
-            label={`${scansLeft}/${scanLimit} сканов`}
+            label={isPremium ? 'Неограниченно' : `${scansLeft}/${scanLimit} сканов`}
             icon="bolt.fill"
             tone="overlay"
             onPress={() => router.push('/paywall')}

@@ -43,7 +43,7 @@ export default function TabsLayout() {
           title: 'Повторение',
           tabBarIcon: ({ color, size }) => <Icon name="graduationcap.fill" size={size} color={color} />,
           tabBarBadge: stats.dueCount > 0 ? stats.dueCount : undefined,
-          tabBarBadgeStyle: { backgroundColor: theme.accent, color: '#FFFFFF' },
+          tabBarBadgeStyle: { backgroundColor: theme.danger, color: '#FFFFFF' },
         }}
       />
       <Tabs.Screen
