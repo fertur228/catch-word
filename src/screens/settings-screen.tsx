@@ -26,6 +26,7 @@ import { Motion, Radius, Spacing, type ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
+import { useSubscription } from '@/lib/subscription';
 import { alertAsync, confirmAsync } from '@/lib/dialog';
 import { LANGUAGES, getLanguage } from '@/lib/mock-data';
 import { pluralWords } from '@/lib/plural';
@@ -170,6 +171,11 @@ export function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { prefs, setLanguages, cards, clearCollection, scansLeft, scanLimit } = useCollection();
   const { user, signInWithGoogle, signOut } = useAuth();
+  const { isPremium, status } = useSubscription();
+
+  // Ярлык тарифа для «пилюли»: Premium (активен/пробный) или Free.
+  const planLabel = isPremium ? (status === 'trialing' ? 'Premium · пробный' : 'Premium') : 'Free';
+  const planTone: Tone = isPremium ? 'primary' : 'gold';
 
   const learning = getLanguage(prefs.learningLang);
   const native = getLanguage(prefs.nativeLang);
@@ -317,7 +323,7 @@ export function SettingsScreen() {
                 </>
               )}
             </View>
-            <Tag text="Free" tone="gold" />
+            <Tag text={planLabel} tone={planTone} />
           </View>
         </Reveal>
 
@@ -445,13 +451,13 @@ export function SettingsScreen() {
         {/* ПОДПИСКА */}
         <Reveal delay={180}>
           <Section label="ПОДПИСКА">
-            <PremiumBanner onPress={() => router.push('/paywall')} />
+            {!isPremium ? <PremiumBanner onPress={() => router.push('/paywall')} /> : null}
             <Group>
               <SettingRow
                 icon="star.fill"
                 tone="gold"
                 label="Текущий тариф"
-                accessory={<Tag text="Free" tone="gold" />}
+                accessory={<Tag text={planLabel} tone={planTone} />}
               />
               <SettingRow
                 icon="arrow.clockwise"

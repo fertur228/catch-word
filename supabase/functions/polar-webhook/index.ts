@@ -30,48 +30,82 @@ function json(body: unknown, status = 200): Response {
 // Signed content: `{webhook-id}.{webhook-timestamp}.{raw-body}`
 // Secret из Polar — уже base64-encoded, декодируем перед использованием.
 async function verifySignature(req: Request, rawBody: string): Promise<boolean> {
-  const msgId     = req.headers.get('webhook-id');
-  const timestamp = req.headers.get('webhook-timestamp');
-  const sigHeader = req.headers.get('webhook-signature');
+  try {
+    const msgId     = req.headers.get('webhook-id');
+    const timestamp = req.headers.get('webhook-timestamp');
+    const sigHeader = req.headers.get('webhook-signature');
 
-  if (!msgId || !timestamp || !sigHeader) return false;
+    if (!msgId || !timestamp || !sigHeader) return false;
 
-  // Защита от replay-атак: отклоняем запросы старше 5 минут.
-  const ts = parseInt(timestamp, 10);
-  if (isNaN(ts) || Math.abs(Date.now() / 1000 - ts) > 300) return false;
+    // Защита от replay-атак: отклоняем запросы старше 5 минут.
+    const ts = parseInt(timestamp, 10);
+    if (isNaN(ts) || Math.abs(Date.now() / 1000 - ts) > 300) return false;
 
-  const signedContent = `${msgId}.${timestamp}.${rawBody}`;
-  const secretBytes = Uint8Array.from(atob(POLAR_WEBHOOK_SECRET), (c) => c.charCodeAt(0));
+    const signedContent = `${msgId}.${timestamp}.${rawBody}`;
 
-  const key = await crypto.subtle.importKey(
-    'raw',
-    secretBytes,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
+    // Standard Webhooks: секрет имеет вид `whsec_<base64>`. Polar (и большинство
+    // дашбордов) показывают его с префиксом — если его случайно скопировали в
+    // секрет целиком, atob падает на `_`. Снимаем префикс перед декодом.
+    const rawSecret = POLAR_WEBHOOK_SECRET.startsWith('whsec_')
+      ? POLAR_WEBHOOK_SECRET.slice('whsec_'.length)
+      : POLAR_WEBHOOK_SECRET;
+    const secretBytes = Uint8Array.from(atob(rawSecret), (c) => c.charCodeAt(0));
 
-  const sigBytes = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    new TextEncoder().encode(signedContent),
-  );
-  const expected = `v1,${btoa(String.fromCharCode(...new Uint8Array(sigBytes)))}`;
+    const key = await crypto.subtle.importKey(
+      'raw',
+      secretBytes,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
 
-  // Заголовок может содержать несколько подписей через пробел (ротация секретов).
-  // Сравниваем за константное время, чтобы исключить timing-атаки.
-  return sigHeader.split(' ').some((sig) => {
-    if (sig.length !== expected.length) return false;
-    let diff = 0;
-    for (let i = 0; i < sig.length; i++) {
-      diff |= sig.charCodeAt(i) ^ expected.charCodeAt(i);
-    }
-    return diff === 0;
-  });
+    const sigBytes = await crypto.subtle.sign(
+      'HMAC',
+      key,
+      new TextEncoder().encode(signedContent),
+    );
+    const expected = `v1,${btoa(String.fromCharCode(...new Uint8Array(sigBytes)))}`;
+
+    // Заголовок может содержать несколько подписей через пробел (ротация секретов).
+    // Сравниваем за константное время, чтобы исключить timing-атаки.
+    return sigHeader.split(' ').some((sig) => {
+      if (sig.length !== expected.length) return false;
+      let diff = 0;
+      for (let i = 0; i < sig.length; i++) {
+        diff |= sig.charCodeAt(i) ^ expected.charCodeAt(i);
+      }
+      return diff === 0;
+    });
+  } catch (e) {
+    // Никогда не роняем функцию в 500 из-за формата секрета — иначе Polar
+    // будет бесконечно ретраить, а мы не увидим причину. Логируем и отбиваем 401.
+    console.error('[polar-webhook] verifySignature error:', e);
+    return false;
+  }
 }
 
 // deno-lint-ignore no-explicit-any
 type AnyRecord = Record<string, any>;
+
+// Резервная привязка: если Polar не передал reference_id в metadata (напр. купили
+// без него), находим пользователя Supabase по email из чек-аута. Так подписка
+// всё равно свяжется с аккаунтом.
+async function findUserIdByEmail(
+  admin: ReturnType<typeof createClient>,
+  email: string,
+): Promise<string | null> {
+  if (!email) return null;
+  try {
+    const target = email.toLowerCase();
+    // Небольшая база (MVP) — одной страницы достаточно.
+    const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    if (error) return null;
+    const u = data.users.find((x) => (x.email ?? '').toLowerCase() === target);
+    return u?.id ?? null;
+  } catch {
+    return null;
+  }
+}
 
 // ── Обработчики событий ───────────────────────────────────────────────────────
 
@@ -82,9 +116,12 @@ async function handleSubscriptionEvent(
 ): Promise<void> {
   const subId      = data.id as string;
   const metadata   = (data.metadata ?? {}) as Record<string, string>;
-  const userId     = metadata.reference_id ?? null;
   const email      = (data.customer?.email ?? '') as string;
   const customerId = (data.customer_id ?? data.customer?.id ?? '') as string;
+
+  // Основной путь — reference_id (Supabase UUID) из checkout-метаданных.
+  // Запасной — поиск по email, если reference_id не пришёл.
+  const userId = metadata.reference_id ?? (await findUserIdByEmail(admin, email));
 
   // Polar присылает status в поле data.status для большинства событий.
   // Для subscription.revoked принудительно ставим 'revoked' (на случай если

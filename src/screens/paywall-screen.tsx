@@ -78,17 +78,31 @@ const PLANS: Plan[] = [
 export function PaywallScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, signInWithGoogle } = useAuth();
   const isWeb = Platform.OS === 'web';
 
-  const onSelectPlan = (plan: Plan) => {
+  const onSelectPlan = async (plan: Plan) => {
     if (plan.tier === 'free') {
       void alertAsync('Free', 'Это бесплатный тариф — он уже активен.');
       return;
     }
 
     if (isWeb) {
-      if (redirectToPolar(user?.email ?? undefined, user?.id ?? undefined)) return;
+      // Без аккаунта покупку не к чему привязать (нет reference_id для вебхука) —
+      // сначала вход через Google, чтобы подписка встала на аккаунт.
+      if (!user) {
+        await alertAsync(
+          'Сначала войдите',
+          'Войдите через Google — подписка привяжется к вашему аккаунту и будет доступна на всех устройствах.',
+        );
+        try {
+          await signInWithGoogle();
+        } catch {
+          void alertAsync('Не удалось войти', 'Попробуйте ещё раз.');
+        }
+        return;
+      }
+      if (redirectToPolar(user.email ?? undefined, user.id)) return;
       void alertAsync('Скоро', 'Оплата подключается — зайди немного позже.');
       return;
     }

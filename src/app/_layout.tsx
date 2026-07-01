@@ -30,9 +30,12 @@ function RootNavigator() {
   const guest = useGuest();
   const segments = useSegments();
   const isWeb = Platform.OS === 'web';
-  // Публичные (маркетинговые) маршруты и возврат OAuth — без гейтов.
+  // Публичные (маркетинговые) маршруты, возврат OAuth и возврат с оплаты Polar —
+  // без гейтов. Без payment-success покупатель, вернувшийся с Polar до того как
+  // сессия восстановилась (или гость), улетал бы на лендинг со входом.
   const first = segments[0] as string | undefined;
-  const onPublic = first === '(marketing)' || first === 'auth-callback';
+  const onPublic =
+    first === '(marketing)' || first === 'auth-callback' || first === 'payment-success';
 
   // Прячем сплеш, как только данные готовы.
   useEffect(() => {
