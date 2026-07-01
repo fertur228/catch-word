@@ -24,10 +24,14 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withDelay,
+  withSequence,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
 
+import { Confetti } from '@/components/anim/confetti';
+import { FlyToTab } from '@/components/anim/fly-to-tab';
+import { Shine } from '@/components/anim/sparkle';
 import { Button } from '@/components/button';
 import { Chip } from '@/components/chip';
 import { Icon } from '@/components/icon';
@@ -38,6 +42,7 @@ import { Sticker } from '@/components/sticker';
 import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { feedbackCorrect, feedbackImpact, feedbackWrong } from '@/lib/feedback';
 import { useCollection } from '@/lib/collection-context';
 import { lookupWord, suggestWords, type DictEntry } from '@/lib/dictionary';
 import { RECOGNIZABLE, getRandomRecognizable } from '@/lib/mock-data';
@@ -135,6 +140,9 @@ export function ResultScreen() {
   // Слово уже было в коллекции — не плодим дубликат.
   const [alreadyHave, setAlreadyHave] = useState(false);
   const backTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Конфетти при поимке/сохранении и «полёт» стикера в коллекцию.
+  const [burst, setBurst] = useState(0);
+  const [flyTs, setFlyTs] = useState(0);
 
   // --- Состояние инлайн-редактора слова (фича 2) ---
   const [editing, setEditing] = useState(false);
@@ -152,6 +160,18 @@ export function ResultScreen() {
 
   // Подсказки по мере ввода (substring-автодополнение из словаря).
   const suggestions = draftWord.trim() ? suggestWords(draftWord, 6) : [];
+
+  // Момент «Поймал!»: конфетти-салют + тактильный удар (кроме режима сцены —
+  // там свой поток мульти-выбора без единого героя).
+  useEffect(() => {
+    if (job?.mode === 'scene' && job.items && job.items.length > 1) return;
+    const t = setTimeout(() => {
+      setBurst(1);
+      feedbackImpact();
+    }, 260);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Озвучиваем слово сразу после «попа» стикера — «See it. Catch it. Speak it.».
   useEffect(() => {
@@ -175,6 +195,7 @@ export function ResultScreen() {
     if (dup) {
       setAlreadyHave(true);
       setSaved(true);
+      feedbackWrong(); // мягкий «бзз» — уже поймано
       const q = await completeQuestForWord(content.word);
       if (q) setQuestCompleted(true);
       backTimer.current = setTimeout(() => router.back(), q ? 1900 : 1100);
@@ -199,6 +220,9 @@ export function ResultScreen() {
     };
     await addCard(card);
     setSaved(true);
+    feedbackCorrect(); // радостный «дзынь» + успех-вибрация
+    setBurst((b) => b + 1); // ещё один салют на сохранение
+    setFlyTs(Date.now()); // стикер «улетает» в коллекцию
     // Квест дня: если поймали целевой предмет — засчитываем и показываем дольше.
     const questDone = await completeQuestForWord(card.word);
     if (questDone) setQuestCompleted(true);
@@ -314,6 +338,7 @@ export function ResultScreen() {
   }
 
   return (
+    <>
     <Screen scroll>
       {/* Группа появления. */}
       <View style={styles.reveal}>
@@ -337,20 +362,18 @@ export function ResultScreen() {
             </ThemedText>
           </Animated.View>
         ) : null}
-        {/* Бейдж «Поймал!» — тёплый акцент, ощущение пойманного слова. */}
-        <FadeIn duration={Motion.duration.base}>
-          <View style={styles.caughtRow}>
-            <View style={[styles.caughtBadge, { backgroundColor: theme.accentSoft }]}>
-              <Icon name="sparkles" size={15} color={theme.accent} />
-              <ThemedText type="smallBold" style={{ color: theme.accent }}>
-                Поймал!
-              </ThemedText>
-            </View>
+        {/* Бейдж «Поймал!» — тёплый акцент, «выскакивает» с ощущением победы. */}
+        <Reveal preset="zoom" style={styles.caughtRow}>
+          <View style={[styles.caughtBadge, { backgroundColor: theme.accentSoft }]}>
+            <Icon name="sparkles" size={15} color={theme.accent} />
+            <ThemedText type="smallBold" style={{ color: theme.accent }}>
+              Поймал!
+            </ThemedText>
           </View>
-        </FadeIn>
+        </Reveal>
 
         {/* Стикер с пружинным «попом» + печать успеха после сохранения. */}
-        <StickerPop category={content.category} imageUri={content.imageUri} saved={saved} />
+        <StickerPop category={content.category} imageUri={content.imageUri} saved={saved} shake={alreadyHave} />
 
         {editing ? (
           /* --- Инлайн-редактор слова (фича 2) --- */
@@ -577,6 +600,11 @@ export function ResultScreen() {
         </Reveal>
       ) : null}
     </Screen>
+
+    {/* Салют при поимке/сохранении + «полёт» стикера в коллекцию (поверх всего). */}
+    <Confetti trigger={burst} originTop="30%" count={24} />
+    <FlyToTab trigger={flyTs} category={content.category} imageUri={content.imageUri} startTop={0.28} />
+    </>
   );
 }
 
@@ -607,15 +635,19 @@ function StickerPop({
   category,
   imageUri,
   saved,
+  shake,
 }: {
   category?: string | null;
   imageUri?: string | null;
   saved: boolean;
+  /** Горизонтальная «тряска» — сигнал, что слово уже в коллекции. */
+  shake?: boolean;
 }) {
   const theme = useTheme();
   const scale = useSharedValue(0.4);
   const opacity = useSharedValue(0);
   const rotate = useSharedValue(-6);
+  const shakeX = useSharedValue(0);
 
   useEffect(() => {
     opacity.value = withTiming(1, { duration: Motion.duration.fast });
@@ -623,15 +655,33 @@ function StickerPop({
     rotate.value = withDelay(70, withSpring(0, Motion.spring.bouncy));
   }, [opacity, scale, rotate]);
 
+  // Тряска при обнаружении дубликата.
+  useEffect(() => {
+    if (!shake) return;
+    shakeX.value = withSequence(
+      withTiming(-10, { duration: 60 }),
+      withTiming(10, { duration: 60 }),
+      withTiming(-6, { duration: 60 }),
+      withTiming(6, { duration: 60 }),
+      withTiming(0, { duration: 60 }),
+    );
+  }, [shake, shakeX]);
+
   const animStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
-    transform: [{ scale: scale.value }, { rotate: `${rotate.value}deg` }],
+    transform: [{ translateX: shakeX.value }, { scale: scale.value }, { rotate: `${rotate.value}deg` }],
   }));
+
+  const radius = STICKER_SIZE * 0.28;
 
   return (
     <View style={styles.stickerWrap}>
       <Animated.View style={animStyle}>
         <Sticker category={category} imageUri={imageUri} size={STICKER_SIZE} />
+        {/* Разовый световой блик по стикеру (скруглённый оверлей — тень не режем). */}
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { borderRadius: radius, overflow: 'hidden' }]}>
+          <Shine trigger={saved ? 2 : 1} width={STICKER_SIZE} />
+        </View>
       </Animated.View>
 
       {saved ? (

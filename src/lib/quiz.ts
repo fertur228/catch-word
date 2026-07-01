@@ -17,6 +17,7 @@ import type { WordCard } from '@/types';
 
 /** Виды вопросов. */
 export type QuizKind =
+  | 'intro' // Знакомство: показать новое слово целиком (без теста)
   | 'wordToTranslation'
   | 'translationToWord'
   | 'imageToWord'
@@ -24,12 +25,22 @@ export type QuizKind =
   | 'audioToWord'
   | 'audioToTranslation'
   | 'translationToImage'
-  | 'clozeExample';
+  | 'clozeExample'
+  | 'typeWord' // Впиши: ввести слово с клавиатуры (регистр не важен)
+  | 'speakWord'; // Скажи вслух: произнести слово (на честность)
 
 /** Как показываем сам вопрос. */
 export type PromptMode = 'text' | 'image' | 'audio' | 'cloze';
 /** Как показываем варианты ответа. */
 export type OptionMode = 'text' | 'image';
+/**
+ * Как пользователь отвечает:
+ *  - choice — выбор из вариантов (MC);
+ *  - type   — ввод слова с клавиатуры;
+ *  - speak  — произнести вслух + самооценка;
+ *  - intro  — знакомство, ответа нет (кнопка «Далее»).
+ */
+export type AnswerMode = 'choice' | 'type' | 'speak' | 'intro';
 
 /** Один вариант ответа. */
 export interface QuizOption {
@@ -54,8 +65,10 @@ export interface QuizQuestion {
   prompt: string;
   /** Как показываем варианты. */
   optionMode: OptionMode;
-  /** Варианты: ровно один correct, уже перемешаны. */
+  /** Варианты: ровно один correct, уже перемешаны. Пусто для type/speak/intro. */
   options: QuizOption[];
+  /** Как пользователь отвечает (choice/type/speak/intro). */
+  answerMode: AnswerMode;
 }
 
 /** Сколько вопросов по умолчанию и сколько всего вариантов. */
@@ -69,17 +82,45 @@ const TRANSLATION_ANSWER = new Set<QuizKind>([
   'audioToTranslation',
 ]);
 
-/** Порядок чередования форматов (берём первый подходящий для карточки). */
-const ROTATION: QuizKind[] = [
+/**
+ * Ярусы сложности по уровню освоения слова (адаптивная траектория «узнавание →
+ * продукция»). Внутри яруса чередуем по индексу и берём первый подходящий формат.
+ *  - УЗНАВАНИЕ (mastery ≤1): выбрать перевод/слово/картинку, на слух.
+ *  - РАННЯЯ ПРОДУКЦИЯ (2–3): пропуск в предложении, впиши слово.
+ *  - ПРОДУКЦИЯ (≥4): впиши / скажи вслух / пропуск.
+ * Совсем новое слово (mastery 0, ещё не повторяли) → «Знакомство».
+ */
+const RECOGNITION: QuizKind[] = [
   'wordToTranslation',
   'audioToWord',
   'imageToTranslation',
-  'clozeExample',
   'translationToWord',
   'audioToTranslation',
   'translationToImage',
   'imageToWord',
 ];
+const PRODUCTION_EARLY: QuizKind[] = ['clozeExample', 'typeWord'];
+const PRODUCTION: QuizKind[] = ['typeWord', 'speakWord', 'clozeExample'];
+
+/** Выбрать вид вопроса под карточку: ярус по mastery + первый подходящий формат. */
+function kindForCard(card: WordCard, pool: WordCard[], i: number): QuizKind {
+  const mastery = card.mastery ?? 0;
+  const reps = card.reps ?? 0;
+  // Новое слово — сначала знакомим, не тестируем.
+  if (mastery === 0 && reps === 0) return 'intro';
+
+  const tier = mastery >= 4 ? PRODUCTION : mastery >= 2 ? PRODUCTION_EARLY : RECOGNITION;
+  for (let k = 0; k < tier.length; k += 1) {
+    const cand = tier[(i + k) % tier.length];
+    if (isValid(card, pool, cand)) return cand;
+  }
+  // Запас: любой подходящий формат узнавания.
+  for (let k = 0; k < RECOGNITION.length; k += 1) {
+    const cand = RECOGNITION[(i + k) % RECOGNITION.length];
+    if (isValid(card, pool, cand)) return cand;
+  }
+  return 'wordToTranslation';
+}
 
 /** Запасные заглушки, если карточек мало (раздельно: слова / переводы). */
 const WORD_FILLERS = ['thing', 'object', 'item', 'word', 'place'];
@@ -102,6 +143,8 @@ function answerOf(card: WordCard, kind: QuizKind): string {
 /** Подпись-вопрос. */
 function labelOf(kind: QuizKind): string {
   switch (kind) {
+    case 'intro':
+      return 'Новое слово';
     case 'wordToTranslation':
     case 'imageToTranslation':
       return 'Как переводится?';
@@ -117,7 +160,19 @@ function labelOf(kind: QuizKind): string {
       return 'Выбери картинку';
     case 'clozeExample':
       return 'Вставь пропущенное слово';
+    case 'typeWord':
+      return 'Впиши слово';
+    case 'speakWord':
+      return 'Скажи вслух';
   }
+}
+
+/** Как пользователь отвечает на вопрос данного вида. */
+function answerModeOf(kind: QuizKind): AnswerMode {
+  if (kind === 'intro') return 'intro';
+  if (kind === 'typeWord') return 'type';
+  if (kind === 'speakWord') return 'speak';
+  return 'choice';
 }
 
 /** Как показываем вопрос для данного вида. */
@@ -133,6 +188,8 @@ function promptTextOf(card: WordCard, kind: QuizKind): string {
   if (kind === 'wordToTranslation') return card.word;
   if (kind === 'translationToWord' || kind === 'translationToImage') return card.translation;
   if (kind === 'clozeExample') return clozeSentence(card) ?? '';
+  // Впиши/Скажи — подсказка это перевод (произвести нужно само слово).
+  if (kind === 'typeWord' || kind === 'speakWord') return card.translation;
   return '';
 }
 
@@ -216,17 +273,24 @@ function buildImageOptions(card: WordCard, pool: WordCard[]): QuizOption[] | nul
 /** Подходит ли формат данной карточке/пулу. */
 function isValid(card: WordCard, pool: WordCard[], kind: QuizKind): boolean {
   if (kind === 'clozeExample') return clozeSentence(card) != null;
-  if (kind === 'translationToImage') return buildImageOptions(card, pool) != null;
+  // Вопросы «с картинкой» — только для карточек с НАСТОЯЩИМ фото (не иконкой),
+  // иначе получится «фото-вопрос», где на месте фото просто иконка категории.
+  if (kind === 'imageToWord' || kind === 'imageToTranslation') return !!card.imageUri;
+  if (kind === 'translationToImage') return !!card.imageUri && buildImageOptions(card, pool) != null;
   return true;
 }
 
 /** Собрать один вопрос выбранного вида. */
 function makeQuestion(card: WordCard, pool: WordCard[], kind: QuizKind, i: number): QuizQuestion {
+  const answerMode = answerModeOf(kind);
   const optionMode: OptionMode = kind === 'translationToImage' ? 'image' : 'text';
-  const options =
-    optionMode === 'image'
-      ? (buildImageOptions(card, pool) ?? buildTextOptions(card, pool, 'translationToWord'))
-      : buildTextOptions(card, pool, kind);
+  // Варианты нужны только для выбора (choice); type/speak/intro — без вариантов.
+  const options: QuizOption[] =
+    answerMode !== 'choice'
+      ? []
+      : optionMode === 'image'
+        ? (buildImageOptions(card, pool) ?? buildTextOptions(card, pool, 'translationToWord'))
+        : buildTextOptions(card, pool, kind);
   return {
     id: `${card.id}-${kind}-${i}`,
     kind,
@@ -236,6 +300,7 @@ function makeQuestion(card: WordCard, pool: WordCard[], kind: QuizKind, i: numbe
     prompt: promptTextOf(card, kind),
     optionMode,
     options,
+    answerMode,
   };
 }
 
@@ -245,8 +310,8 @@ function makeQuestion(card: WordCard, pool: WordCard[], kind: QuizKind, i: numbe
  * @param count сколько вопросов (по умолчанию 10; не больше числа карточек)
  * @param pool  пул для дистракторов/картинок (по умолчанию — те же карточки)
  *
- * Формат вопроса выбираем по «вращению» ROTATION, беря первый подходящий для
- * карточки (например, «вставь слово» — только если есть пример с этим словом).
+ * Формат вопроса выбираем адаптивно по уровню освоения карточки (kindForCard):
+ * новое слово → знакомство, дальше узнавание → продукция.
  */
 export function buildQuiz(
   cards: WordCard[],
@@ -255,16 +320,5 @@ export function buildQuiz(
 ): QuizQuestion[] {
   if (cards.length === 0) return [];
   const chosen = shuffle([...cards]).slice(0, Math.max(1, Math.min(count, cards.length)));
-
-  return chosen.map((card, i) => {
-    let kind: QuizKind = 'wordToTranslation';
-    for (let k = 0; k < ROTATION.length; k += 1) {
-      const cand = ROTATION[(i + k) % ROTATION.length];
-      if (isValid(card, pool, cand)) {
-        kind = cand;
-        break;
-      }
-    }
-    return makeQuestion(card, pool, kind, i);
-  });
+  return chosen.map((card, i) => makeQuestion(card, pool, kindForCard(card, pool, i), i));
 }

@@ -11,6 +11,7 @@
  */
 import { useEffect } from 'react';
 import { Platform, useColorScheme } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { DarkTheme, DefaultTheme, Redirect, Stack, ThemeProvider, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -99,10 +100,12 @@ function RootNavigator() {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <CollectionProvider>
-        <RootNavigator />
-      </CollectionProvider>
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <CollectionProvider>
+          <RootNavigator />
+        </CollectionProvider>
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }

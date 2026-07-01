@@ -17,8 +17,10 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
+  withSequence,
   withSpring,
   withTiming,
+  ZoomIn,
 } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,6 +32,8 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useReduceMotion } from '@/hooks/use-reduce-motion';
+import { feedbackSelection } from '@/lib/feedback';
 import { useCollection } from '@/lib/collection-context';
 import { LANGUAGES, LEARNING_LANG, NATIVE_LANG, getLanguage } from '@/lib/mock-data';
 import type { AppLanguage } from '@/types';
@@ -67,6 +71,7 @@ export function OnboardingScreen() {
   const insets = useSafeAreaInsets();
   const { setLanguages, completeOnboarding } = useCollection();
 
+  const reduce = useReduceMotion();
   const [step, setStep] = useState(0);
   const [dir, setDir] = useState(1); // направление перехода (для анимации въезда)
   const [learning, setLearning] = useState(LEARNING_LANG); // по умолчанию English
@@ -74,6 +79,21 @@ export function OnboardingScreen() {
   const [busy, setBusy] = useState(false);
 
   const isLanguageStep = step === TOTAL - 1;
+
+  // «Дышащая» финальная кнопка на шаге выбора языка — приглашает начать.
+  const ctaPulse = useSharedValue(1);
+  useEffect(() => {
+    if (isLanguageStep && !reduce) {
+      ctaPulse.value = withRepeat(
+        withSequence(withTiming(1.03, { duration: 900 }), withTiming(1, { duration: 900 })),
+        -1,
+        false,
+      );
+    } else {
+      ctaPulse.value = withTiming(1, { duration: 200 });
+    }
+  }, [isLanguageStep, reduce, ctaPulse]);
+  const ctaStyle = useAnimatedStyle(() => ({ transform: [{ scale: ctaPulse.value }] }));
 
   const goNext = () => {
     if (isLanguageStep) {
@@ -161,7 +181,9 @@ export function OnboardingScreen() {
             />
           ))}
         </View>
-        <Button title={ctaTitle} onPress={goNext} loading={busy} icon={isLanguageStep ? 'sparkles' : 'arrow.right'} />
+        <Animated.View style={ctaStyle}>
+          <Button title={ctaTitle} onPress={goNext} loading={busy} icon={isLanguageStep ? 'sparkles' : 'arrow.right'} />
+        </Animated.View>
       </View>
     </ThemedView>
   );
@@ -399,7 +421,10 @@ function LangOption({
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        feedbackSelection();
+        onPress();
+      }}
       onPressIn={() => (scale.value = withSpring(Motion.scalePressed, Motion.spring.stiff))}
       onPressOut={() => (scale.value = withSpring(1, Motion.spring.bouncy))}
       accessibilityRole="button"
@@ -414,6 +439,11 @@ function LangOption({
         <ThemedText type="smallBold" style={{ color: fg }}>
           {lang.label}
         </ThemedText>
+        {selected ? (
+          <Animated.View entering={ZoomIn.springify().damping(12).stiffness(220)}>
+            <Icon name="checkmark" size={15} color={fg} />
+          </Animated.View>
+        ) : null}
       </Animated.View>
     </Pressable>
   );

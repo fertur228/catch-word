@@ -19,6 +19,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { CameraModeToggle } from '@/components/camera-mode-toggle';
 import { Icon } from '@/components/icon';
 import { Pill } from '@/components/pill';
 import { QuestBanner } from '@/components/quest-banner';
@@ -290,8 +291,7 @@ export function CameraScreen() {
         {/* ── НИЗ ── */}
         <View style={styles.bottomRow}>
           <View style={styles.modeToggle}>
-            <Pill label="Предмет" icon="viewfinder" tone={mode === 'single' ? 'primary' : 'overlay'} onPress={() => setMode('single')} />
-            <Pill label="Вся сцена" icon="square.grid.2x2" tone={mode === 'scene' ? 'primary' : 'overlay'} onPress={() => setMode('scene')} />
+            <CameraModeToggle mode={mode} onChange={setMode} />
           </View>
 
           {IS_DESKTOP ? (

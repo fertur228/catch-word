@@ -3,30 +3,76 @@
  * Показывает, что сегодня найти и сфотографировать, серию 🔥, и «выполнено» —
  * когда цель поймана. Цвета — белые/полупрозрачные (лежит на кадре камеры).
  */
+import { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  FadeIn,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { Icon } from '@/components/icon';
-import { Radius, Spacing } from '@/constants/theme';
+import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { useCollection } from '@/lib/collection-context';
 
 const ON = '#FFFFFF';
 
 export function QuestBanner() {
   const theme = useTheme();
+  const reduce = useReduceMotion();
   const { dailyQuest, questDoneToday, questStreak } = useCollection();
 
+  const bob = useSharedValue(0); // лёгкое покачивание, пока квест не выполнен
+  const flame = useSharedValue(1); // пульс огонька серии
+  const donePop = useSharedValue(1); // «выскок» иконки при выполнении
+
+  useEffect(() => {
+    if (reduce || questDoneToday) {
+      bob.value = 0;
+      return;
+    }
+    bob.value = withRepeat(withTiming(1, { duration: 1800, easing: Easing.inOut(Easing.ease) }), -1, true);
+  }, [reduce, questDoneToday, bob]);
+
+  useEffect(() => {
+    if (reduce || questStreak <= 0) return;
+    flame.value = withRepeat(
+      withSequence(withTiming(1.18, { duration: 500 }), withTiming(1, { duration: 500 })),
+      -1,
+      false,
+    );
+  }, [reduce, questStreak, flame]);
+
+  useEffect(() => {
+    if (questDoneToday && !reduce) {
+      donePop.value = 0.6;
+      donePop.value = withSpring(1, Motion.spring.bouncy);
+    }
+  }, [questDoneToday, reduce, donePop]);
+
+  const bobStyle = useAnimatedStyle(() => ({ transform: [{ translateY: -3 * bob.value }] }));
+  const flameStyle = useAnimatedStyle(() => ({ transform: [{ scale: flame.value }] }));
+  const donePopStyle = useAnimatedStyle(() => ({ transform: [{ scale: donePop.value }] }));
+
   return (
-    <View
+    <Animated.View
       pointerEvents="none"
-      style={[styles.banner, questDoneToday ? styles.bannerDone : null]}>
-      <View style={styles.iconWrap}>
+      entering={reduce ? undefined : FadeIn.duration(Motion.duration.base)}
+      style={[styles.banner, questDoneToday ? styles.bannerDone : null, bobStyle]}>
+      <Animated.View style={[styles.iconWrap, donePopStyle]}>
         {questDoneToday ? (
           <Icon name="checkmark" size={18} color={ON} />
         ) : (
           <Text style={styles.emoji}>{dailyQuest.emoji}</Text>
         )}
-      </View>
+      </Animated.View>
 
       <View style={styles.texts}>
         <Text style={styles.label}>{questDoneToday ? 'Квест выполнен' : 'Квест дня'}</Text>
@@ -39,11 +85,13 @@ export function QuestBanner() {
 
       {questStreak > 0 ? (
         <View style={styles.streak}>
-          <Icon name="flame.fill" size={13} color={theme.gold} />
+          <Animated.View style={flameStyle}>
+            <Icon name="flame.fill" size={13} color={theme.gold} />
+          </Animated.View>
           <Text style={styles.streakText}>{questStreak}</Text>
         </View>
       ) : null}
-    </View>
+    </Animated.View>
   );
 }
 

@@ -40,6 +40,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { Button } from '@/components/button';
+import { CameraModeToggle } from '@/components/camera-mode-toggle';
 import { Icon } from '@/components/icon';
 import { Pill } from '@/components/pill';
 import { Sticker } from '@/components/sticker';
@@ -49,9 +50,11 @@ import { Reveal } from '@/components/reveal';
 import { QuestBanner } from '@/components/quest-banner';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
 import { alertAsync } from '@/lib/dialog';
+import { feedbackImpact, feedbackTap } from '@/lib/feedback';
 import { createScanJob, SCAN_FRAME, type ScanMode } from '@/lib/scan-job';
 
 /** Цвета элементов поверх живого видео (не зависят от темы — лежат на кадре). */
@@ -59,7 +62,7 @@ const ON_CAMERA = '#FFFFFF';
 const FRAME_LINE = 'rgba(255,255,255,0.28)';
 const FRAME_GLASS = 'rgba(255,255,255,0.12)';
 
-/** Размеры «визира» (сканирующей рамки). FRAME — единый с кропом (см. SCAN_FRAME). */
+/** Размеры «визира» (сканирующей рамки). */
 const FRAME = SCAN_FRAME;
 const CORNER = 34;
 const THICK = 4;
@@ -81,9 +84,11 @@ export function CameraScreen() {
   const theme = useTheme();
   const router = useRouter();
   const isFocused = useIsFocused();
+  const reduceMotion = useReduceMotion();
   const { user, signInWithGoogle } = useAuth();
   const { isPremium, scansLeft, scanLimit, tryScan } = useCollection();
   const locked = scansLeft <= 0;
+  const lowScans = !isPremium && scansLeft > 0 && scansLeft <= 2;
   const [permission, requestPermission] = useCameraPermissions();
   // Режим съёмки: один предмет (по рамке) или вся сцена (несколько предметов).
   const [mode, setMode] = useState<ScanMode>('single');
@@ -94,6 +99,10 @@ export function CameraScreen() {
   const breath = useSharedValue(0); // расходящееся кольцо у кнопки
   const flash = useSharedValue(0); // вспышка «затвора» при съёмке
   const press = useSharedValue(1); // пружинное нажатие кнопки
+  const capture = useSharedValue(0); // «удар»-зум кадра при съёмке
+  const scansBump = useSharedValue(1); // подскок счётчика при трате скана
+  const lowPulse = useSharedValue(0); // пульс счётчика, когда сканов мало
+  const prevScans = useRef(scansLeft);
 
   // Не даём списать скан дважды от быстрых тапов.
   const navigating = useRef(false);
@@ -109,6 +118,7 @@ export function CameraScreen() {
       return;
     }
     navigating.current = false;
+    if (reduceMotion) return;
     pulse.value = withRepeat(
       withTiming(1, { duration: Motion.duration.lazy, easing: Easing.inOut(Easing.ease) }),
       -1,
@@ -129,7 +139,32 @@ export function CameraScreen() {
       cancelAnimation(scan);
       cancelAnimation(breath);
     };
-  }, [isFocused, pulse, scan, breath]);
+  }, [isFocused, reduceMotion, pulse, scan, breath]);
+
+  // Подскок счётчика сканов при трате + пульс, когда сканов мало.
+  useEffect(() => {
+    if (scansLeft < prevScans.current && !reduceMotion) {
+      scansBump.value = withSequence(
+        withSpring(1.18, Motion.spring.stiff),
+        withSpring(1, Motion.spring.bouncy),
+      );
+    }
+    prevScans.current = scansLeft;
+  }, [scansLeft, reduceMotion, scansBump]);
+
+  useEffect(() => {
+    if (lowScans && !reduceMotion) {
+      lowPulse.value = withRepeat(
+        withTiming(1, { duration: 900, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true,
+      );
+    } else {
+      cancelAnimation(lowPulse);
+      lowPulse.value = withTiming(0, { duration: 200 });
+    }
+    return () => cancelAnimation(lowPulse);
+  }, [lowScans, reduceMotion, lowPulse]);
 
   const frameStyle = useAnimatedStyle(() => ({
     transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 1.035]) }],
@@ -148,6 +183,12 @@ export function CameraScreen() {
 
   const flashStyle = useAnimatedStyle(() => ({ opacity: flash.value }));
   const pressStyle = useAnimatedStyle(() => ({ transform: [{ scale: press.value }] }));
+  const captureStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: interpolate(capture.value, [0, 1], [1, 1.045]) }],
+  }));
+  const scansPillStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scansBump.value * interpolate(lowPulse.value, [0, 1], [1, 1.06]) }],
+  }));
 
   const onShutter = useCallback(async () => {
     if (navigating.current) return;
@@ -171,15 +212,23 @@ export function CameraScreen() {
       return;
     }
     navigating.current = true;
-    // Вспышка «затвора» — ощущение пойманного кадра.
+    feedbackImpact(); // тактильный «щелчок затвора»
+    // Вспышка «затвора» + короткий зум-удар кадра — ощущение пойманного кадра.
     flash.value = withSequence(
       withTiming(0.9, { duration: 70 }),
       withTiming(0, { duration: 240 }),
     );
+    capture.value = withSequence(
+      withTiming(1, { duration: 80 }),
+      withTiming(0, { duration: 300, easing: Easing.out(Easing.ease) }),
+    );
     // Снимаем реальный кадр. На симуляторе/при ошибке — без фото, поток продолжится.
     let photoUri: string | undefined;
     try {
-      const photo = await cameraRef.current?.takePictureAsync({ quality: 0.6 });
+      // Максимальное качество кадра → чёткая вырезка предмета (меньше JPEG-артефактов
+      // на краях). Обработку iOS (шумоподавление/резкость) НЕ пропускаем — она
+      // делает края чище для subject-lift.
+      const photo = await cameraRef.current?.takePictureAsync({ quality: 1 });
       photoUri = photo?.uri;
     } catch (e) {
       console.warn('Съёмка не удалась:', e);
@@ -187,7 +236,7 @@ export function CameraScreen() {
     // Сначала экран «Распознаю…» (scanning), он сам уйдёт на Результат.
     const jobId = createScanJob(photoUri, mode);
     router.push({ pathname: '/scanning', params: { jobId } });
-  }, [router, tryScan, flash, mode, user, signInWithGoogle]);
+  }, [router, tryScan, flash, capture, mode, user, signInWithGoogle]);
 
   // 1) Разрешение ещё загружается.
   if (!permission) {
@@ -233,7 +282,9 @@ export function CameraScreen() {
   return (
     <View style={styles.flex}>
       {isFocused ? (
-        <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
+        <Animated.View style={[StyleSheet.absoluteFill, captureStyle]}>
+          <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
+        </Animated.View>
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.cameraOff]} />
       )}
@@ -248,16 +299,21 @@ export function CameraScreen() {
         <View style={styles.topGroup} pointerEvents="box-none">
         {/* Верх: счётчик сканов + настройки */}
         <View style={styles.topRow} pointerEvents="box-none">
-          <Pill
-            label={isPremium ? 'Неограниченно' : `${scansLeft}/${scanLimit} сканов`}
-            icon="bolt.fill"
-            tone="overlay"
-            onPress={() => router.push('/paywall')}
-          />
+          <Animated.View style={scansPillStyle}>
+            <Pill
+              label={isPremium ? 'Неограниченно' : `${scansLeft}/${scanLimit} сканов`}
+              icon="bolt.fill"
+              tone={lowScans ? 'primary' : 'overlay'}
+              onPress={() => router.push('/paywall')}
+            />
+          </Animated.View>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Настройки"
-            onPress={() => router.push('/settings')}
+            onPress={() => {
+              feedbackTap();
+              router.push('/settings');
+            }}
             hitSlop={10}
             style={({ pressed }) => [styles.gear, { opacity: pressed ? 0.7 : 1 }]}>
             <Icon name="gearshape.fill" size={20} color={ON_CAMERA} />
@@ -267,7 +323,7 @@ export function CameraScreen() {
         <QuestBanner />
         </View>
 
-        {/* Центр: сканирующий визир + подсказка */}
+        {/* Центр: сканирующий визир (квадрат) + подсказка */}
         <View style={styles.centerWrap} pointerEvents="none">
           <Animated.View style={[styles.frame, frameStyle]}>
             {/* Полупрозрачная подложка-«стекло» и тонкая полная рамка */}
@@ -295,18 +351,7 @@ export function CameraScreen() {
         {/* Низ: переключатель режима + заметка про симулятор + кнопка съёмки */}
         <View style={styles.bottomRow} pointerEvents="box-none">
           <View style={styles.modeToggle} pointerEvents="auto">
-            <Pill
-              label="Предмет"
-              icon="viewfinder"
-              tone={mode === 'single' ? 'primary' : 'overlay'}
-              onPress={() => setMode('single')}
-            />
-            <Pill
-              label="Вся сцена"
-              icon="square.grid.2x2"
-              tone={mode === 'scene' ? 'primary' : 'overlay'}
-              onPress={() => setMode('scene')}
-            />
+            <CameraModeToggle mode={mode} onChange={setMode} />
           </View>
 
           <View style={styles.shutterWrap}>
@@ -357,7 +402,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   topGroup: {
-    gap: Spacing.two,
+    gap: Spacing.four,
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.two,
   },
@@ -370,7 +415,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.4)',
   },
 
-  // --- Сканирующий визир ---
+  // --- Сканирующий визир (квадрат) ---
   centerWrap: { alignItems: 'center', gap: Spacing.four },
   frame: {
     width: FRAME,
@@ -409,7 +454,7 @@ const styles = StyleSheet.create({
 
   // --- Низ: заметка + кнопка съёмки ---
   bottomRow: { alignItems: 'center', gap: Spacing.three, paddingBottom: Spacing.five },
-  modeToggle: { flexDirection: 'row', gap: Spacing.two, justifyContent: 'center' },
+  modeToggle: { flexDirection: 'row', justifyContent: 'center' },
   shutterWrap: { width: 110, height: 90, alignItems: 'center', justifyContent: 'center' },
   breathRing: {
     position: 'absolute',

@@ -4,6 +4,7 @@
  */
 import { StyleSheet, View } from 'react-native';
 
+import { Shine } from '@/components/anim/sparkle';
 import { Button } from '@/components/button';
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
@@ -19,12 +20,15 @@ export function PlanCard({ plan, onPress }: { plan: Plan; onPress: () => void })
     <View
       style={[
         styles.card,
+        highlighted ? styles.cardHighlighted : null,
         {
           backgroundColor: highlighted ? theme.primarySoft : theme.card,
           borderColor: highlighted ? theme.primary : theme.border,
           borderWidth: highlighted ? 2 : 1,
         },
       ]}>
+      {/* Выделенный тариф ловит мягкий световой блик — притягивает взгляд. */}
+      {highlighted ? <Shine loop width={260} /> : null}
       {plan.badge ? (
         <View style={[styles.badge, { backgroundColor: theme.gold }]}>
           <ThemedText type="smallBold" style={styles.badgeText}>
@@ -65,6 +69,8 @@ const styles = StyleSheet.create({
     padding: Spacing.four,
     gap: Spacing.two,
   },
+  // Выделенный тариф обрезает блик по скруглению.
+  cardHighlighted: { overflow: 'hidden' },
   badge: {
     position: 'absolute',
     top: Spacing.three,

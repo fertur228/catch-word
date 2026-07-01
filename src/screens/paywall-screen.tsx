@@ -15,6 +15,7 @@ import { useAuth } from '@/lib/auth-context';
 import type { Plan } from '@/types';
 import { PRIVACY_URL, TERMS_URL } from '@/constants/links';
 import { alertAsync } from '@/lib/dialog';
+import { feedbackTap } from '@/lib/feedback';
 import { isPolarConfigured, redirectToPolar } from '@/lib/polar';
 
 const PLANS: Plan[] = [
@@ -82,6 +83,7 @@ export function PaywallScreen() {
   const isWeb = Platform.OS === 'web';
 
   const onSelectPlan = async (plan: Plan) => {
+    feedbackTap();
     if (plan.tier === 'free') {
       void alertAsync('Free', 'Это бесплатный тариф — он уже активен.');
       return;

@@ -17,6 +17,7 @@ import Animated, {
   useSharedValue,
   withSpring,
   withTiming,
+  ZoomIn,
 } from 'react-native-reanimated';
 
 import { Badge } from '@/components/badge';
@@ -33,6 +34,8 @@ import { Sticker } from '@/components/sticker';
 import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useReduceMotion } from '@/hooks/use-reduce-motion';
+import { feedbackImpact } from '@/lib/feedback';
 import { useCollection } from '@/lib/collection-context';
 
 const DAY_MS = 86_400_000;
@@ -77,15 +80,17 @@ function masteryLabel(m: number): string {
   return 'Новое слово';
 }
 
-/** Стикер «выпрыгивает» при открытии — приятный момент «вот оно, твоё слово». */
+/** Стикер «вырастает» при открытии — приятный момент «вот оно, твоё слово». */
 function StickerHero({ category, imageUri }: { category?: string | null; imageUri?: string | null }) {
-  const scale = useSharedValue(0.7);
-  const opacity = useSharedValue(0);
+  const reduce = useReduceMotion();
+  const scale = useSharedValue(reduce ? 1 : 0.55);
+  const opacity = useSharedValue(reduce ? 1 : 0);
 
   useEffect(() => {
-    scale.value = withSpring(1, Motion.spring.bouncy);
+    if (reduce) return;
+    scale.value = withSpring(1, Motion.spring.celebration);
     opacity.value = withTiming(1, { duration: Motion.duration.base });
-  }, [opacity, scale]);
+  }, [opacity, scale, reduce]);
 
   const animStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -96,6 +101,28 @@ function StickerHero({ category, imageUri }: { category?: string | null; imageUr
     <Animated.View style={animStyle}>
       <Sticker category={category} imageUri={imageUri} size={150} />
     </Animated.View>
+  );
+}
+
+/** Пять звёзд освоения: заполненные «выскакивают» одна за другой. */
+function MasteryStars({ mastery }: { mastery: number }) {
+  const theme = useTheme();
+  const reduce = useReduceMotion();
+  return (
+    <View style={styles.stars}>
+      {[0, 1, 2, 3, 4].map((i) => {
+        if (i >= mastery) {
+          return <Icon key={i} name="star" size={24} color={theme.backgroundSelected} />;
+        }
+        return (
+          <Animated.View
+            key={i}
+            entering={reduce ? undefined : ZoomIn.delay(i * 90).springify().damping(12).stiffness(200)}>
+            <Icon name="star.fill" size={24} color={theme.gold} />
+          </Animated.View>
+        );
+      })}
+    </View>
   );
 }
 
@@ -142,6 +169,7 @@ export function CardDetailScreen() {
         text: 'Удалить',
         style: 'destructive',
         onPress: async () => {
+          feedbackImpact();
           await removeCard(card.id);
           router.back();
         },
@@ -198,16 +226,7 @@ export function CardDetailScreen() {
             </ThemedText>
             <Badge label={masteryLabel(mastery)} tone={masteryTone} />
           </View>
-          <View style={styles.stars}>
-            {[0, 1, 2, 3, 4].map((i) => (
-              <Icon
-                key={i}
-                name={i < mastery ? 'star.fill' : 'star'}
-                size={24}
-                color={i < mastery ? theme.gold : theme.backgroundSelected}
-              />
-            ))}
-          </View>
+          <MasteryStars mastery={mastery} />
           <ProgressBar progress={mastery / 5} tone="gold" />
           <View style={styles.dueRow}>
             <Icon name="clock.fill" size={14} color={theme.textSecondary} />

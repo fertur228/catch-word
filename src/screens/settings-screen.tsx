@@ -22,14 +22,15 @@ import { Icon } from '@/components/icon';
 import { Reveal } from '@/components/reveal';
 import { Screen } from '@/components/screen';
 import { ThemedText } from '@/components/themed-text';
+import { Toast } from '@/components/toast';
 import { Motion, Radius, Spacing, type ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { feedbackSelection } from '@/lib/feedback';
 import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
 import { useSubscription } from '@/lib/subscription';
 import { alertAsync, confirmAsync } from '@/lib/dialog';
 import { LANGUAGES, getLanguage } from '@/lib/mock-data';
-import { pluralWords } from '@/lib/plural';
 import { MANAGE_SUBSCRIPTION_URL, PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from '@/constants/links';
 import { setGuest } from '@/lib/web-guest';
 
@@ -189,6 +190,8 @@ export function SettingsScreen() {
   const [voices, setVoices] = useState<Speech.Voice[]>([]);
   const [voicesLoading, setVoicesLoading] = useState(true);
   const [selectedVoice, setSelectedVoice] = useState<string | null>(null); // null = системный по умолчанию
+  const [voiceOpen, setVoiceOpen] = useState(false); // открыт ли лист выбора голоса
+  const [toast, setToast] = useState<string | null>(null); // короткое подтверждение действий
 
   // Образец для пред-прослушки — название языка на нём самом (реальное слово).
   const sample = useMemo(() => getLanguage(prefs.learningLang).label, [prefs.learningLang]);
@@ -279,11 +282,27 @@ export function SettingsScreen() {
     }
   };
 
-  // Выбор языка из листа.
+  // Выбор языка из листа — с тактильным откликом и тостом-подтверждением.
   const chooseLanguage = (code: string) => {
+    feedbackSelection();
     if (picker === 'learning') setLanguages(code, prefs.nativeLang);
     else if (picker === 'native') setLanguages(prefs.learningLang, code);
     setPicker(null);
+    setToast(`${picker === 'native' ? 'Родной язык' : 'Язык изучения'}: ${getLanguage(code).label}`);
+  };
+
+  // Имя текущего голоса для строки «Голос» (свёрнутый список → лист выбора).
+  const currentVoiceName =
+    selectedVoice === null
+      ? 'Системный'
+      : voices.find((v) => v.identifier === selectedVoice)?.name ?? 'Системный';
+
+  // Выбор голоса из листа: выбираем и сразу проигрываем пример (лист не закрываем —
+  // можно попробовать несколько подряд).
+  const chooseVoice = (id: string | null) => {
+    feedbackSelection();
+    setSelectedVoice(id);
+    preview(id ?? undefined);
   };
 
   const version = Constants.expoConfig?.version ?? '1.0.0';
@@ -329,15 +348,57 @@ export function SettingsScreen() {
           </View>
         </Reveal>
 
-        {/* АККАУНТ */}
-        <Reveal delay={40}>
-          <Section label="АККАУНТ">
+        {/* АККАУНТ — только для гостя (вход). У вошедшего email виден в шапке. */}
+        {!user ? (
+          <Reveal delay={40}>
+            <Section label="АККАУНТ">
+              <Group>
+                <SettingRow
+                  icon="person.crop.circle.badge.plus"
+                  label="Войти через Google"
+                  sublabel="Сохрани прогресс и фото в облаке"
+                  onPress={onSignIn}
+                />
+              </Group>
+            </Section>
+          </Reveal>
+        ) : null}
+
+        {/* КУРС: языки + голос — всё про изучаемый язык одной группой */}
+        <Reveal delay={60}>
+          <Section label="КУРС">
+            <Group>
+              <SettingRow
+                icon="globe"
+                label="Изучаю"
+                value={`${learning.label} ${learning.flag}`}
+                onPress={() => setPicker('learning')}
+              />
+              <SettingRow
+                icon="text.bubble.fill"
+                label="Родной"
+                value={`${native.label} ${native.flag}`}
+                onPress={() => setPicker('native')}
+              />
+              <SettingRow
+                icon="speaker.wave.2.fill"
+                label="Голос"
+                value={currentVoiceName}
+                onPress={() => setVoiceOpen(true)}
+              />
+            </Group>
+          </Section>
+        </Reveal>
+
+        {/* PREMIUM: апселл + сканы + управление подпиской */}
+        <Reveal delay={120}>
+          <Section label="PREMIUM">
+            {!isPremium ? <PremiumBanner onPress={() => router.push('/paywall')} /> : null}
             <Group>
               <SettingRow
                 icon="bolt.fill"
-                tone="warning"
                 label="Сканы"
-                sublabel={!isPremium && scansLeft === 0 ? 'Лимит исчерпан — перейди на Premium' : undefined}
+                sublabel={!isPremium && scansLeft === 0 ? 'Лимит исчерпан' : undefined}
                 accessory={
                   isPremium ? (
                     <ThemedText type="smallBold" themeColor="textSecondary">
@@ -345,7 +406,7 @@ export function SettingsScreen() {
                     </ThemedText>
                   ) : (
                     <View style={styles.scansAccessory}>
-                      <ThemedText type="smallBold" style={{ color: scansLeft === 0 ? theme.danger : theme.warning }}>
+                      <ThemedText type="smallBold" style={{ color: scansLeft === 0 ? theme.danger : theme.text }}>
                         {scansLeft}
                       </ThemedText>
                       <ThemedText type="small" themeColor="textSecondary">
@@ -355,127 +416,13 @@ export function SettingsScreen() {
                   )
                 }
               />
-              {user
-                ? [
-                    <SettingRow
-                      key="account-info"
-                      icon="person.crop.circle.fill"
-                      tone="primary"
-                      label={user.email ?? 'Аккаунт Google'}
-                      sublabel="Прогресс и фото синхронизируются"
-                    />,
-                    <SettingRow
-                      key="signout"
-                      icon="rectangle.portrait.and.arrow.right"
-                      tone="danger"
-                      label="Выйти"
-                      onPress={onSignOut}
-                    />,
-                  ]
-                : (
-                    <SettingRow
-                      icon="person.crop.circle.badge.plus"
-                      tone="primary"
-                      label="Войти через Google"
-                      sublabel="Сохрани прогресс и фото в облаке"
-                      onPress={onSignIn}
-                    />
-                  )}
-            </Group>
-          </Section>
-        </Reveal>
-
-        {/* ПАРА ЯЗЫКОВ (КУРС) */}
-        <Reveal delay={60}>
-          <Section label="ПАРА ЯЗЫКОВ · КУРС">
-            <Group>
-              <SettingRow
-                icon="globe"
-                tone="primary"
-                label="Изучаю"
-                sublabel="Слова этого языка ловлю в коллекцию"
-                value={`${learning.label} ${learning.flag}`}
-                onPress={() => setPicker('learning')}
-              />
-              <SettingRow
-                icon="text.bubble.fill"
-                tone="accent"
-                label="Родной"
-                sublabel="На него показывается перевод"
-                value={`${native.label} ${native.flag}`}
-                onPress={() => setPicker('native')}
-              />
-            </Group>
-            <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
-              У каждой пары — своя коллекция. Сменишь пару — откроется её коллекция.
-              Сейчас в паре {learning.flag} → {native.flag}: {cards.length} {pluralWords(cards.length)}.
-            </ThemedText>
-          </Section>
-        </Reveal>
-
-        {/* ГОЛОС / АКЦЕНТ */}
-        <Reveal delay={120}>
-          <Section label="ГОЛОС / АКЦЕНТ">
-            <Group>
-              {/* Системный голос по умолчанию — всегда доступен */}
-              <SettingRow
-                icon="speaker.wave.2.fill"
-                tone={selectedVoice === null ? 'primary' : 'accent2'}
-                label="Системный голос"
-                sublabel="По умолчанию"
-                onPress={() => {
-                  setSelectedVoice(null);
-                  preview();
-                }}
-                accessory={<VoiceTrailing selected={selectedVoice === null} />}
-              />
-              {voices.map((v) => (
-                <SettingRow
-                  key={v.identifier}
-                  icon="waveform"
-                  tone={selectedVoice === v.identifier ? 'primary' : 'accent2'}
-                  label={v.name}
-                  sublabel={
-                    v.quality === Speech.VoiceQuality.Enhanced ? `${v.language} · Enhanced` : v.language
-                  }
-                  onPress={() => {
-                    setSelectedVoice(v.identifier);
-                    preview(v.identifier);
-                  }}
-                  accessory={<VoiceTrailing selected={selectedVoice === v.identifier} />}
-                />
-              ))}
-            </Group>
-            <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
-              {voicesLoading
-                ? 'Загружаю голоса…'
-                : voices.length > 0
-                  ? 'Нажми голос, чтобы услышать пример.'
-                  : 'Другие голоса появятся на реальном устройстве.'}
-            </ThemedText>
-          </Section>
-        </Reveal>
-
-        {/* ПОДПИСКА */}
-        <Reveal delay={180}>
-          <Section label="ПОДПИСКА">
-            {!isPremium ? <PremiumBanner onPress={() => router.push('/paywall')} /> : null}
-            <Group>
-              <SettingRow
-                icon="star.fill"
-                tone="gold"
-                label="Текущий тариф"
-                accessory={<Tag text={planLabel} tone={planTone} />}
-              />
               <SettingRow
                 icon="arrow.clockwise"
-                tone="neutral"
                 label="Восстановить покупки"
                 onPress={() => stub('Восстановление покупок')}
               />
               <SettingRow
                 icon="creditcard.fill"
-                tone="primary"
                 label="Управление подпиской"
                 onPress={() => Linking.openURL(MANAGE_SUBSCRIPTION_URL)}
               />
@@ -483,62 +430,51 @@ export function SettingsScreen() {
           </Section>
         </Reveal>
 
-        {/* ДАННЫЕ */}
-        <Reveal delay={210}>
-          <Section label="ДАННЫЕ">
+        {/* ДОПОЛНИТЕЛЬНО: данные + информация */}
+        <Reveal delay={180}>
+          <Section label="ДОПОЛНИТЕЛЬНО">
             <Group>
-              <SettingRow
-                icon="square.and.arrow.up"
-                tone="accent2"
-                label="Экспортировать коллекцию"
-                onPress={onExport}
-              />
+              <SettingRow icon="square.and.arrow.up" label="Экспортировать коллекцию" onPress={onExport} />
               <SettingRow
                 icon="trash.fill"
                 tone="danger"
                 label="Очистить коллекцию"
-                sublabel="Только текущую пару языков"
+                sublabel="Только текущую пару"
                 onPress={onClear}
               />
-            </Group>
-          </Section>
-        </Reveal>
-
-        {/* О ПРИЛОЖЕНИИ */}
-        <Reveal delay={240}>
-          <Section label="О ПРИЛОЖЕНИИ">
-            <Group>
-              <SettingRow
-                icon="lock.fill"
-                tone="neutral"
-                label="Политика конфиденциальности"
-                onPress={() => Linking.openURL(PRIVACY_URL)}
-              />
-              <SettingRow
-                icon="doc.text.fill"
-                tone="neutral"
-                label="Условия использования"
-                onPress={() => Linking.openURL(TERMS_URL)}
-              />
+              <SettingRow icon="lock.fill" label="Конфиденциальность" onPress={() => Linking.openURL(PRIVACY_URL)} />
+              <SettingRow icon="doc.text.fill" label="Условия использования" onPress={() => Linking.openURL(TERMS_URL)} />
               <SettingRow
                 icon="envelope.fill"
-                tone="neutral"
                 label="Связаться с нами"
                 onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=CatchWord`)}
               />
-              <SettingRow icon="info.circle.fill" tone="neutral" label="Версия" value={version} />
             </Group>
           </Section>
         </Reveal>
 
-        {/* Подвал-слоган */}
-        <Reveal delay={300}>
+        {/* Выйти — отдельной красной строкой внизу (для вошедших) */}
+        {user ? (
+          <Reveal delay={220}>
+            <Group>
+              <SettingRow
+                icon="rectangle.portrait.and.arrow.right"
+                tone="danger"
+                label="Выйти"
+                onPress={onSignOut}
+              />
+            </Group>
+          </Reveal>
+        ) : null}
+
+        {/* Подвал-слоган + версия */}
+        <Reveal delay={260}>
           <View style={styles.footer}>
             <ThemedText type="smallBold" themeColor="textSecondary">
               See it. Catch it. Speak it.
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary" style={styles.footerSub}>
-              CatchWord
+              CatchWord · v{version}
             </ThemedText>
           </View>
         </Reveal>
@@ -553,6 +489,20 @@ export function SettingsScreen() {
         onSelect={chooseLanguage}
         onClose={() => setPicker(null)}
       />
+
+      {/* Лист выбора голоса (нижний модал) */}
+      <VoicePicker
+        visible={voiceOpen}
+        voices={voices}
+        voicesLoading={voicesLoading}
+        selected={selectedVoice}
+        bottomInset={insets.bottom}
+        onSelect={chooseVoice}
+        onClose={() => setVoiceOpen(false)}
+      />
+
+      {/* Тост-подтверждение (смена языка и т.п.) */}
+      <Toast message={toast} onHide={() => setToast(null)} />
     </>
   );
 }
@@ -671,6 +621,102 @@ function LanguageOption({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Нижний лист выбора голоса (свёрнутый список голосов → сюда)
+// ---------------------------------------------------------------------------
+
+interface VoicePickerProps {
+  visible: boolean;
+  voices: Speech.Voice[];
+  voicesLoading: boolean;
+  selected: string | null;
+  bottomInset: number;
+  onSelect: (id: string | null) => void;
+  onClose: () => void;
+}
+
+function VoicePicker({ visible, voices, voicesLoading, selected, bottomInset, onSelect, onClose }: VoicePickerProps) {
+  const theme = useTheme();
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalRoot}>
+        <Pressable style={[styles.backdrop, { backgroundColor: theme.overlay }]} onPress={onClose} />
+        <Animated.View
+          entering={SlideInDown.springify().damping(20).stiffness(180)}
+          style={[styles.sheet, { backgroundColor: theme.card, paddingBottom: bottomInset + Spacing.three }]}>
+          <View style={[styles.grabber, { backgroundColor: theme.border }]} />
+          <ThemedText type="default" style={styles.sheetTitle}>
+            Голос озвучки
+          </ThemedText>
+          <ScrollView showsVerticalScrollIndicator={false} style={styles.sheetList}>
+            <VoiceOption
+              label="Системный голос"
+              sublabel="По умолчанию"
+              active={selected === null}
+              onPress={() => onSelect(null)}
+            />
+            {voices.map((v) => (
+              <VoiceOption
+                key={v.identifier}
+                label={v.name}
+                sublabel={v.quality === Speech.VoiceQuality.Enhanced ? `${v.language} · Enhanced` : v.language}
+                active={selected === v.identifier}
+                onPress={() => onSelect(v.identifier)}
+              />
+            ))}
+          </ScrollView>
+          <ThemedText type="small" themeColor="textSecondary" style={styles.sheetHint}>
+            {voicesLoading
+              ? 'Загружаю голоса…'
+              : voices.length > 0
+                ? 'Нажми голос, чтобы услышать пример.'
+                : 'Другие голоса появятся на реальном устройстве.'}
+          </ThemedText>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+function VoiceOption({
+  label,
+  sublabel,
+  active,
+  onPress,
+}: {
+  label: string;
+  sublabel?: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  const press = usePressScale(0.97);
+  return (
+    <Pressable onPress={onPress} onPressIn={press.onPressIn} onPressOut={press.onPressOut}>
+      {({ pressed }) => (
+        <Animated.View
+          style={[
+            styles.option,
+            press.animStyle,
+            { backgroundColor: active ? theme.primarySoft : pressed ? theme.backgroundSelected : 'transparent' },
+          ]}>
+          <View style={styles.voiceOptionText}>
+            <ThemedText type="default" numberOfLines={1} style={styles.rowLabel}>
+              {label}
+            </ThemedText>
+            {sublabel ? (
+              <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                {sublabel}
+              </ThemedText>
+            ) : null}
+          </View>
+          <VoiceTrailing selected={active} />
+        </Animated.View>
+      )}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   // Герой
   hero: {
@@ -734,6 +780,8 @@ const styles = StyleSheet.create({
 
   // Голоса
   voiceTrailing: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  voiceOptionText: { flex: 1, gap: 1 },
+  sheetHint: { marginTop: Spacing.two, marginLeft: Spacing.one },
   hint: { marginLeft: Spacing.one },
 
   // Баннер Premium

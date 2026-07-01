@@ -32,13 +32,7 @@ export default function Root({ children }: PropsWithChildren) {
         />
         <meta property="og:type" content="website" />
 
-        {/* Веб-шрифты для CSS-переменных темы (Spline Sans = display, Inter = body). */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
+        {/* Шрифт — системный (как в нативной аппке), внешние веб-шрифты не грузим. */}
 
         {/* Сбрасывает скролл-поведение, чтобы body скроллился как в нативе. */}
         <ScrollViewStyleReset />

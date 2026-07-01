@@ -12,7 +12,7 @@
  * В обоих режимах карточки рисуются сеткой 2×N; выученные слова (mastery≥4) помечены
  * золотым бейджем на плитке. Поиск и фильтр по теме работают в обоих режимах.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -22,11 +22,20 @@ import {
   View,
   type SectionListData,
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 
+import { useCountUp } from '@/components/anim/count-up';
 import { Chip } from '@/components/chip';
 import { DailyQuestCard } from '@/components/daily-quest-card';
 import { EmptyState } from '@/components/empty-state';
+import { Icon } from '@/components/icon';
 import { ProgressBar } from '@/components/progress-bar';
 import { Reveal } from '@/components/reveal';
 import { Screen } from '@/components/screen';
@@ -37,6 +46,8 @@ import { ThemedView } from '@/components/themed-view';
 import { WordTile } from '@/components/word-tile';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useReduceMotion } from '@/hooks/use-reduce-motion';
+import { feedbackSelection } from '@/lib/feedback';
 import { useCollection } from '@/lib/collection-context';
 import { groupCardsByDay } from '@/lib/dates';
 import { CATEGORIES } from '@/lib/mock-data';
@@ -113,10 +124,34 @@ function groupCardsByTheme(cards: WordCard[]): GridSection[] {
 }
 
 /** Одна метрика в сводной карточке (минимал, монохром — в духе iOS). */
-function Stat({ value, label }: { value: number; label: string }) {
+function Stat({ value, label, flame }: { value: number; label: string; flame?: boolean }) {
+  const theme = useTheme();
+  const reduce = useReduceMotion();
+  // Число «докручивается» 0→value при появлении.
+  const display = useCountUp(value);
+  const pulse = useSharedValue(1);
+
+  useEffect(() => {
+    if (reduce || !flame || value <= 0) return;
+    pulse.value = withRepeat(
+      withSequence(withTiming(1.18, { duration: 520 }), withTiming(1, { duration: 520 })),
+      -1,
+      false,
+    );
+  }, [reduce, flame, value, pulse]);
+
+  const flameStyle = useAnimatedStyle(() => ({ transform: [{ scale: pulse.value }] }));
+
   return (
     <View style={styles.statCol}>
-      <ThemedText style={styles.statValue}>{value}</ThemedText>
+      <View style={styles.statValueRow}>
+        {flame && value > 0 ? (
+          <Animated.View style={flameStyle}>
+            <Icon name="flame.fill" size={18} color={theme.gold} />
+          </Animated.View>
+        ) : null}
+        <ThemedText style={styles.statValue}>{display}</ThemedText>
+      </View>
       <ThemedText type="small" themeColor="textSecondary" style={styles.statLabel}>
         {label}
       </ThemedText>
@@ -161,6 +196,19 @@ export function CollectionScreen() {
   }, [filtered, mode]);
 
   const masteryProgress = stats.total > 0 ? stats.mastered / stats.total : 0;
+
+  // Самая свежая карточка — её плитку коротко подсвечиваем свечением.
+  const newestId = useMemo(() => {
+    let id: string | null = null;
+    let max = -Infinity;
+    for (const c of cards) {
+      if (c.createdAt > max) {
+        max = c.createdAt;
+        id = c.id;
+      }
+    }
+    return id;
+  }, [cards]);
 
   const openCard = (id: string) => router.push({ pathname: '/card/[id]', params: { id } });
   const resetFilters = () => {
@@ -214,7 +262,7 @@ export function CollectionScreen() {
           <View style={[styles.statSep, { backgroundColor: theme.border }]} />
           <Stat value={stats.mastered} label="Выучено" />
           <View style={[styles.statSep, { backgroundColor: theme.border }]} />
-          <Stat value={stats.streak} label="Серия" />
+          <Stat value={stats.streak} label="Серия" flame />
         </View>
       </Reveal>
 
@@ -253,7 +301,10 @@ export function CollectionScreen() {
               key={cat}
               label={cat}
               selected={category === cat}
-              onPress={() => setCategory(cat)}
+              onPress={() => {
+                feedbackSelection();
+                setCategory(cat);
+              }}
             />
           ))}
         </ScrollView>
@@ -261,7 +312,14 @@ export function CollectionScreen() {
 
       {/* Сортировка: «По датам» | «По темам» */}
       <Reveal delay={150}>
-        <SegmentedControl options={SORT_OPTIONS} value={mode} onChange={setMode} />
+        <SegmentedControl
+          options={SORT_OPTIONS}
+          value={mode}
+          onChange={(m) => {
+            feedbackSelection();
+            setMode(m);
+          }}
+        />
       </Reveal>
     </View>
   );
@@ -319,6 +377,7 @@ export function CollectionScreen() {
                   card={card}
                   onPress={() => openCard(card.id)}
                   onLongPress={() => confirmDelete(card)}
+                  highlight={card.id === newestId}
                 />
               </View>
             ))}
@@ -348,6 +407,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   statCol: { flex: 1, alignItems: 'center', gap: 2 },
+  statValueRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
   statValue: { fontSize: 24, fontWeight: '700', letterSpacing: -0.4 },
   statLabel: { letterSpacing: 0.2 },
   statSep: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginVertical: Spacing.two },

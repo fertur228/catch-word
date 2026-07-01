@@ -53,7 +53,8 @@ async function init(db: SQLite.SQLiteDatabase) {
       reps          INTEGER,
       mastery       INTEGER,
       notes         TEXT,
-      distractors   TEXT             -- JSON-массив строк (AI-варианты для теста)
+      distractors   TEXT,            -- JSON-массив строк (AI-варианты для теста)
+      owner_id      TEXT             -- id аккаунта-владельца (null = гость)
     );
     CREATE TABLE IF NOT EXISTS key_value (
       key   TEXT PRIMARY KEY NOT NULL,
@@ -70,6 +71,7 @@ async function init(db: SQLite.SQLiteDatabase) {
   await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN mastery INTEGER');
   await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN notes TEXT');
   await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN distractors TEXT');
+  await addColumnIfMissing(db, 'ALTER TABLE word_card ADD COLUMN owner_id TEXT');
 }
 
 export function getDb(): Promise<SQLite.SQLiteDatabase> {
@@ -103,6 +105,7 @@ interface Row {
   mastery: number | null;
   notes: string | null;
   distractors: string | null;
+  owner_id: string | null;
 }
 
 /** Превратить строку БД в удобный объект `WordCard` (camelCase). */
@@ -126,7 +129,26 @@ function rowToCard(r: Row): WordCard {
     mastery: r.mastery ?? undefined,
     notes: r.notes ?? undefined,
     distractors: r.distractors ? (JSON.parse(r.distractors) as string[]) : undefined,
+    ownerId: r.owner_id,
   };
+}
+
+/**
+ * Карточки одного владельца (аккаунта). Локальная БД общая на устройство, поэтому
+ * показываем только карточки текущего аккаунта; `null` — гостевые (без входа).
+ */
+export async function getCardsForOwner(ownerId: string | null): Promise<WordCard[]> {
+  const db = await getDb();
+  const rows =
+    ownerId == null
+      ? await db.getAllAsync<Row>(
+          'SELECT * FROM word_card WHERE owner_id IS NULL ORDER BY created_at DESC',
+        )
+      : await db.getAllAsync<Row>(
+          'SELECT * FROM word_card WHERE owner_id = ? ORDER BY created_at DESC',
+          ownerId,
+        );
+  return rows.map(rowToCard);
 }
 
 export async function getAllCards(): Promise<WordCard[]> {
@@ -146,8 +168,8 @@ export async function insertCard(c: WordCard): Promise<void> {
   await db.runAsync(
     `INSERT OR REPLACE INTO word_card
        (id, emoji, image_uri, word, translation, ipa, examples, category,
-        learning_lang, native_lang, created_at, due_at, interval, ease, reps, mastery, notes, distractors)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        learning_lang, native_lang, created_at, due_at, interval, ease, reps, mastery, notes, distractors, owner_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     c.id,
     c.emoji,
     c.imageUri ?? null,
@@ -166,6 +188,7 @@ export async function insertCard(c: WordCard): Promise<void> {
     c.mastery ?? null,
     c.notes ?? null,
     c.distractors ? JSON.stringify(c.distractors) : null,
+    c.ownerId ?? null,
   );
 }
 

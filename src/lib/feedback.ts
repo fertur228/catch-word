@@ -84,3 +84,13 @@ export function feedbackWrong() {
 export function feedbackTap() {
   safe(() => Haptics?.impactAsync(Haptics.ImpactFeedbackStyle.Light));
 }
+
+/** Чёткий «средний» удар — для «поймано», важных подтверждений. */
+export function feedbackImpact() {
+  safe(() => Haptics?.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
+}
+
+/** Сухой «щелчок» выбора — табы, сегменты, переключатели, чипы. */
+export function feedbackSelection() {
+  safe(() => Haptics?.selectionAsync());
+}

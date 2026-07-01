@@ -10,7 +10,7 @@
  */
 import type { ReactNode } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
-import Animated, { FadeIn as RFadeIn, FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeIn as RFadeIn, FadeInDown, ZoomIn } from 'react-native-reanimated';
 
 import { Motion } from '@/constants/theme';
 
@@ -22,21 +22,30 @@ interface RevealProps {
   distance?: number;
   /** Длительность, мс. */
   duration?: number;
+  /**
+   * Тип появления: 'down' — снизу-вверх (по умолчанию), 'fade' — только
+   * затухание, 'zoom' — пружинное «выскакивание» из масштаба.
+   */
+  preset?: 'down' | 'fade' | 'zoom';
   style?: StyleProp<ViewStyle>;
 }
 
-/** Появление снизу-вверх с затуханием. */
+/** Появление снизу-вверх с затуханием (или zoom/fade по `preset`). */
 export function Reveal({
   children,
   delay = 0,
   distance = 12,
   duration = Motion.duration.base,
+  preset,
   style,
 }: RevealProps) {
+  const mode = preset ?? (distance > 0 ? 'down' : 'fade');
   const entering =
-    distance > 0
-      ? FadeInDown.delay(delay).duration(duration)
-      : RFadeIn.delay(delay).duration(duration);
+    mode === 'zoom'
+      ? ZoomIn.delay(delay).springify().damping(14).stiffness(180)
+      : mode === 'down'
+        ? FadeInDown.delay(delay).duration(duration)
+        : RFadeIn.delay(delay).duration(duration);
 
   return (
     <Animated.View entering={entering} style={style}>

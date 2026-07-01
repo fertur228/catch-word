@@ -140,13 +140,19 @@ export const Radius = {
 } as const;
 
 export const Motion = {
-  duration: { fast: 140, base: 240, slow: 420, lazy: 700 },
+  duration: { fast: 140, base: 240, slow: 420, lazy: 700, celebration: 900 },
   spring: {
     soft: { damping: 18, stiffness: 160, mass: 1 },
     bouncy: { damping: 12, stiffness: 180, mass: 0.9 },
     stiff: { damping: 26, stiffness: 280, mass: 1 },
+    /** Резкая, но чуть упругая — для табов, свайпов, «щелчков». */
+    snappy: { damping: 22, stiffness: 240, mass: 1 },
+    /** Празднование: сильный overshoot для «взрыва» бейджа/стикера. */
+    celebration: { damping: 10, stiffness: 140, mass: 0.9 },
   },
   scalePressed: 0.96,
+  /** Шаг «лесенки» появления контента, мс. */
+  stagger: 60,
 } as const;
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;

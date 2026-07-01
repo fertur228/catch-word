@@ -4,6 +4,7 @@
  */
 import { Tabs } from 'expo-router';
 
+import { AnimatedTabBar } from '@/components/animated-tab-bar';
 import { Icon } from '@/components/icon';
 import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
@@ -14,13 +15,15 @@ export default function TabsLayout() {
 
   return (
     <Tabs
+      // Кастомный анимированный таб-бар (скользящий индикатор, pop иконок, хаптика).
+      // props типизированы недрами React Navigation — приводим к нашему узкому типу.
+      tabBar={(props) => <AnimatedTabBar {...(props as any)} />}
       screenOptions={{
         tabBarActiveTintColor: theme.primary,
         tabBarInactiveTintColor: theme.textSecondary,
         headerStyle: { backgroundColor: theme.background },
         headerTintColor: theme.text,
         headerShadowVisible: false,
-        tabBarStyle: { backgroundColor: theme.tabBar, borderTopColor: theme.border },
       }}>
       <Tabs.Screen
         name="index"
@@ -43,7 +46,6 @@ export default function TabsLayout() {
           title: 'Повторение',
           tabBarIcon: ({ color, size }) => <Icon name="graduationcap.fill" size={size} color={color} />,
           tabBarBadge: stats.dueCount > 0 ? stats.dueCount : undefined,
-          tabBarBadgeStyle: { backgroundColor: theme.danger, color: '#FFFFFF' },
         }}
       />
       <Tabs.Screen

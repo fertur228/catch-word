@@ -274,6 +274,22 @@ const ICONS: Record<string, Draw> = {
       stroke={c}
     />
   ),
+  'eye.fill': (c) => (
+    <>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" fill={c} stroke={c} />
+      <circle cx="12" cy="12" r="3" fill="#fff" stroke="#fff" />
+    </>
+  ),
+  'trophy.fill': (c) => (
+    <>
+      <path
+        d="M6 9a6 6 0 0 0 12 0V4H6v5zM6 4H4a2 2 0 0 0 2 2m12-2h2a2 2 0 0 1-2 2"
+        fill={c}
+        stroke={c}
+      />
+      <path d="M10 15h4M12 15v3M9 21h6M10.5 21v-3h3v3" stroke={c} />
+    </>
+  ),
   globe: () => (
     <>
       <circle cx="12" cy="12" r="10" />

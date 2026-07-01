@@ -12,7 +12,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -136,12 +135,9 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
   const [questLastDay, setQuestLastDay] = useState(-1);
   const [questStreak, setQuestStreak] = useState(0);
 
-  const { session } = useAuth();
+  const { session, loading: authLoading } = useAuth();
   const userId = session?.user?.id ?? null;
   const { isPremium } = useSubscription();
-  // Текущие карточки в ref — чтобы эффект синхронизации не перезапускался на каждое изменение.
-  const cardsRef = useRef<WordCard[]>([]);
-  cardsRef.current = cards;
 
   // Первичная загрузка: настройки + карточки (при пустой БД заливаем стартовые).
   useEffect(() => {
@@ -155,9 +151,6 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
         db.getPref(PREF_QUEST_LAST_DAY),
         db.getPref(PREF_QUEST_STREAK),
       ]);
-      // 2) Карточки: демо-словами НЕ засеваем — новый пользователь начинает с
-      //    ПУСТОЙ коллекции и ловит первые слова сам.
-      const all = await db.getAllCards();
       if (!alive) return;
       setPrefs({
         learningLang: learning ?? DEFAULT_PREFS.learningLang,
@@ -166,8 +159,8 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       });
       setQuestLastDay(questDayStr ? parseInt(questDayStr, 10) : -1);
       setQuestStreak(questStreakStr ? parseInt(questStreakStr, 10) : 0);
-      setCards(all);
-      setLoading(false);
+      // Карточки загружаются отдельным эффектом ниже — СТРОГО по владельцу (аккаунту),
+      // чтобы новый аккаунт не видел карточки прошлого юзера/старые локальные данные.
     })().catch((e) => {
       console.warn('Не удалось загрузить коллекцию:', e);
       if (alive) setLoading(false);
@@ -179,8 +172,9 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
 
   const addCard = useCallback(
     async (card: WordCard) => {
-      // Гарантируем, что у новой карточки есть SRS-поля (если экран их не задал).
-      const withSrs: WordCard = card.dueAt == null ? { ...card, ...freshSrs(card.createdAt) } : card;
+      // Гарантируем SRS-поля (если экран их не задал) + помечаем владельцем-аккаунтом.
+      const base: WordCard = card.dueAt == null ? { ...card, ...freshSrs(card.createdAt) } : card;
+      const withSrs: WordCard = { ...base, ownerId: userId };
       // МГНОВЕННО: сохраняем локально и показываем карточку (с локальной картинкой).
       // Раньше тут ЖДАЛИ загрузку стикера в облако (сеть) — из-за этого «Сохранить
       // в коллекцию» тормозило. Теперь заливаем в фоне, UI не блокируется.
@@ -221,42 +215,48 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
 
   const getById = useCallback((id: string) => cards.find((c) => c.id === id), [cards]);
 
-  // При входе: подтянуть облако, слить с локальным; локальные-уникальные — залить.
+  // Карточки — СТРОГО по владельцу. Показываем только карточки текущего аккаунта
+  // (или гостевые null-owner, если не вошёл). Для вошедшего облако — источник правды.
+  // Ждём восстановления сессии (authLoading), чтобы при старте не мигнуть чужими/легаси
+  // карточками. Перезапускается при смене аккаунта: новый аккаунт стартует с пустой коллекции.
   useEffect(() => {
-    if (!userId) return;
+    if (authLoading) return;
     let alive = true;
     (async () => {
+      // 1) Быстро показываем локальные карточки ТЕКУЩЕГО владельца.
+      const localOwned = await db.getCardsForOwner(userId);
+      if (!alive) return;
+      setCards(localOwned);
+      setLoading(false);
+
+      // 2) Гость (не вошёл) — облака нет, показываем только локальные гостевые.
+      if (!userId) return;
+
+      // 3) Вошёл — облако этого аккаунта ЕДИНСТВЕННЫЙ источник правды.
       try {
         const cloud = await pullCards(userId);
         if (!alive) return;
-        const cloudById = new Map(cloud.map((c) => [c.id, c] as const));
-        const local = cardsRef.current;
-        // Локальные «реальные» карточки (не демо-сиды), которых нет в облаке — заливаем.
-        for (const c of local) {
-          if (c.id.startsWith('seed-') || cloudById.has(c.id)) continue;
-          let card = c;
-          if (needsUpload(card.imageUri)) {
-            const url = await uploadSticker(card.imageUri, userId, card.id);
-            if (url) card = { ...card, imageUri: url };
-          }
-          await pushCard(userId, card);
-          cloudById.set(card.id, card);
+        const cloudIds = new Set(cloud.map((c) => c.id));
+        // Локальные карточки владельца, которых НЕТ в облаке (удалены/почищены в
+        // Supabase), убираем из локального кэша — иначе они «воскресали» бы при
+        // каждом входе. Новые карточки заливает сам addCard в момент сохранения.
+        for (const c of localOwned) {
+          if (!cloudIds.has(c.id)) await db.deleteCard(c.id);
         }
-        // Облачные карточки сохраняем локально (облако — источник правды).
-        for (const c of cloud) await db.insertCard(c);
+        // Облачные карточки кладём локально с пометкой владельца (скоуп аккаунта).
+        for (const c of cloud) await db.insertCard({ ...c, ownerId: userId });
         if (!alive) return;
-        const merged = new Map<string, WordCard>();
-        for (const c of local) merged.set(c.id, c);
-        for (const [id, c] of cloudById) merged.set(id, c);
-        setCards(Array.from(merged.values()).sort((a, b) => b.createdAt - a.createdAt));
+        setCards(cloud.map((c) => ({ ...c, ownerId: userId })).sort((a, b) => b.createdAt - a.createdAt));
       } catch (e) {
         console.warn('Синхронизация при входе не удалась:', e);
       }
-    })();
+    })().catch(() => {
+      if (alive) setLoading(false);
+    });
     return () => {
       alive = false;
     };
-  }, [userId]);
+  }, [userId, authLoading]);
 
   const tryScan = useCallback(() => {
     if (isPremium) return true;

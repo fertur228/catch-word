@@ -15,11 +15,20 @@
  * Данные — мок (см. src/lib/mock-data.ts). Бэкенда и реального SRS-сервера нет.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import type { SFSymbol } from 'expo-symbols';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 
+import { CelebrationModal } from '@/components/anim/celebration-modal';
+import { Confetti } from '@/components/anim/confetti';
+import { SwipeToRate } from '@/components/anim/swipe-to-rate';
 import { Button } from '@/components/button';
 import { EmptyState } from '@/components/empty-state';
 import { FlashCard } from '@/components/flash-card';
@@ -89,9 +98,10 @@ export function ReviewSessionScreen() {
   const [queue, setQueue] = useState<WordCard[] | null>(null);
   const [practice, setPractice] = useState(false);
 
-  // Текущий этап сессии и выбранный режим.
+  // Текущий этап сессии. Режим один — единый адаптивный тест (mode оставлен для
+  // совместимости со сводкой/расписанием, всегда 'test').
   const [phase, setPhase] = useState<Phase>('intro');
-  const [mode, setMode] = useState<Mode>('flashcards');
+  const [mode, setMode] = useState<Mode>('test');
 
   // --- Состояние режима «Флеш-карточки» ---
   const [index, setIndex] = useState(0);
@@ -106,6 +116,9 @@ export function ReviewSessionScreen() {
   const [selected, setSelected] = useState<number | null>(null);
   const [answered, setAnswered] = useState(false);
   const [score, setScore] = useState(0);
+  // Ввод для «Впиши слово»: текст + результат проверки (null — ещё не проверяли).
+  const [typed, setTyped] = useState('');
+  const [typeChecked, setTypeChecked] = useState<boolean | null>(null);
 
   // Слова, которые не дались в этой сессии (тест — неверный ответ, карточки —
   // оценка «Забыл»). Используем для блока «Разбор ошибок» и кнопки «Повторить
@@ -114,6 +127,13 @@ export function ReviewSessionScreen() {
   const addMissed = useCallback((card: WordCard) => {
     setMissed((prev) => (prev.some((c) => c.id === card.id) ? prev : [...prev, card]));
   }, []);
+
+  // Салют при верном ответе, шейк промпта при неверном, празднование идеальной сессии.
+  const [burst, setBurst] = useState(0);
+  const [showCelebration, setShowCelebration] = useState(false);
+  const celebratedRef = useRef(false);
+  const promptShake = useSharedValue(0);
+  const promptShakeStyle = useAnimatedStyle(() => ({ transform: [{ translateX: promptShake.value }] }));
 
   // Повторение — строго по активной паре языков (курсу): сменили пару в
   // Настройках → начинаем сессию заново по её словам (cards/dueCards уже scoped).
@@ -157,6 +177,20 @@ export function ReviewSessionScreen() {
     const q = quiz[qIndex];
     if (q && q.promptMode === 'audio') speakWord(q.card.word, q.card.learningLang);
   }, [phase, qIndex, quiz]);
+
+  // Идеальная сессия (без ошибок) достаточной длины → празднование-модалка.
+  useEffect(() => {
+    if (phase !== 'summary') {
+      celebratedRef.current = false;
+      return;
+    }
+    if (celebratedRef.current || missed.length > 0) return;
+    const enough = mode === 'test' ? (quiz?.length ?? 0) >= 5 : reviewedCount >= 5;
+    if (enough) {
+      celebratedRef.current = true;
+      setShowCelebration(true);
+    }
+  }, [phase, missed.length, mode, quiz, reviewedCount]);
 
   // Подписи «когда повторим снова» под кнопками оценки (для текущей карточки).
   const intervals = useMemo(() => {
@@ -265,15 +299,23 @@ export function ReviewSessionScreen() {
       if (opt.correct) {
         setScore((s) => s + 1);
         feedbackCorrect();
+        setBurst((b) => b + 1); // мини-салют за верный ответ
       } else {
         addMissed(q.card);
         feedbackWrong();
+        // Красный шейк промпта — сразу видно, что мимо.
+        promptShake.value = withSequence(
+          withTiming(-9, { duration: 55 }),
+          withTiming(9, { duration: 55 }),
+          withTiming(-5, { duration: 55 }),
+          withTiming(0, { duration: 55 }),
+        );
       }
       speakWord(q.card.word, q.card.learningLang);
       // Верно → «вспомнил» (good), неверно → «забыл» (again): двигаем SRS.
       await reviewCard(q.card.id, opt.correct ? 'good' : 'again');
     },
-    [answered, quiz, qIndex, reviewCard, addMissed],
+    [answered, quiz, qIndex, reviewCard, addMissed, promptShake],
   );
 
   // --- Переход к следующему вопросу теста / к итогу ---
@@ -287,7 +329,57 @@ export function ReviewSessionScreen() {
     setQIndex(next);
     setSelected(null);
     setAnswered(false);
+    setTyped('');
+    setTypeChecked(null);
   }, [quiz, qIndex]);
+
+  // --- «Знакомство» (новое слово): показали → мягко планируем и идём дальше ---
+  const onIntroNext = useCallback(async () => {
+    if (!quiz) return;
+    const q = quiz[qIndex];
+    if (q) await reviewCard(q.card.id, 'good'); // экспозиция → назначить скорый повтор
+    onNextQuestion();
+  }, [quiz, qIndex, reviewCard, onNextQuestion]);
+
+  // --- «Впиши слово»: проверка ввода (регистр/пробелы не важны) ---
+  const onTypeSubmit = useCallback(async () => {
+    if (typeChecked !== null || !quiz) return;
+    const q = quiz[qIndex];
+    if (!q) return;
+    const norm = (s: string) => s.trim().toLowerCase();
+    const correct = norm(typed) === norm(q.card.word);
+    setTypeChecked(correct);
+    if (correct) {
+      setScore((s) => s + 1);
+      feedbackCorrect();
+      setBurst((b) => b + 1);
+    } else {
+      addMissed(q.card);
+      feedbackWrong();
+      promptShake.value = withSequence(
+        withTiming(-9, { duration: 55 }),
+        withTiming(9, { duration: 55 }),
+        withTiming(-5, { duration: 55 }),
+        withTiming(0, { duration: 55 }),
+      );
+    }
+    speakWord(q.card.word, q.card.learningLang);
+    await reviewCard(q.card.id, correct ? 'good' : 'again');
+  }, [typeChecked, typed, quiz, qIndex, reviewCard, addMissed, promptShake]);
+
+  // --- «Скажи вслух»: самооценка (нет объективной проверки до ASR) ---
+  const onSpeakRate = useCallback(
+    async (rating: SrsRating) => {
+      if (!quiz) return;
+      const q = quiz[qIndex];
+      if (q) {
+        if (rating === 'again') addMissed(q.card);
+        await reviewCard(q.card.id, rating);
+      }
+      onNextQuestion();
+    },
+    [quiz, qIndex, reviewCard, addMissed, onNextQuestion],
+  );
 
   // --- Состояние: ждём загрузку коллекции ---
   if (loading || queue === null) {
@@ -344,21 +436,11 @@ export function ReviewSessionScreen() {
             </ThemedText>
           </Reveal>
 
-          <Reveal delay={170} style={styles.modeList}>
-            <ModeCard
-              icon="rectangle.stack.fill"
-              title="Флеш-карточки"
-              subtitle="Переворачивай и вспоминай"
-              selected={mode === 'flashcards'}
-              onPress={() => setMode('flashcards')}
-            />
-            <ModeCard
-              icon="checklist"
-              title="Тест"
-              subtitle="Выбери правильный ответ"
-              selected={mode === 'test'}
-              onPress={() => setMode('test')}
-            />
+          <Reveal delay={170}>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.centerText}>
+              Новые слова знакомим, знакомые — проверяем: выбор, на слух, впиши, скажи вслух.
+              Формат подстраивается под то, насколько ты уже освоил слово.
+            </ThemedText>
           </Reveal>
 
           <Reveal delay={240} style={styles.introAction}>
@@ -371,15 +453,17 @@ export function ReviewSessionScreen() {
 
   // ===================== ИТОГ =====================
   if (phase === 'summary') {
-    const isTest = mode === 'test';
-    const total = quiz?.length ?? 0;
-    const accuracy = isTest && total > 0 ? Math.round((score / total) * 100) : null;
-    // «Идеально» — тест без ошибок или карточки без единого «Забыл».
+    // Точность считаем только по «объективным» вопросам (выбор + впиши):
+    // знакомство и «скажи вслух» не имеют объективного «верно/неверно».
+    const objTotal = quiz?.filter((q) => q.answerMode === 'choice' || q.answerMode === 'type').length ?? 0;
+    const accuracy = objTotal > 0 ? Math.round((score / objTotal) * 100) : null;
+    // «Идеально» — сессия без единой ошибки.
     const perfect = missed.length === 0;
-    const modeLabel = isTest ? 'тест' : 'флеш-карточки';
 
     return (
       <Screen scroll>
+        {/* Салют, если сессия без единой ошибки. */}
+        <Confetti trigger={perfect ? 1 : 0} count={28} originTop="22%" />
         <View style={styles.summary}>
           <Reveal distance={0}>
             <Sticker
@@ -395,26 +479,24 @@ export function ReviewSessionScreen() {
           </Reveal>
           <Reveal delay={140}>
             <ThemedText type="default" themeColor="textSecondary" style={styles.centerText}>
-              {isTest
-                ? perfect
-                  ? `Все ${total} верно — без единой ошибки!`
-                  : `Верно ${score} из ${total}. Разберём промахи ниже.`
-                : perfect
-                  ? `Повторено ${reviewedCount} ${pluralWords(reviewedCount)} — всё вспомнил!`
-                  : `Повторено ${reviewedCount} ${pluralWords(reviewedCount)}. Так держать!`}
+              {perfect
+                ? 'Без единой ошибки — так держать!'
+                : objTotal > 0
+                  ? `Верно ${score} из ${objTotal}. Разберём промахи ниже.`
+                  : 'Готово. Разберём промахи ниже.'}
             </ThemedText>
           </Reveal>
 
           <Reveal delay={200} style={styles.summaryStats}>
-            {isTest ? (
+            {accuracy !== null ? (
               <StatCard
                 icon="target"
-                value={accuracy !== null ? `${accuracy}%` : '—'}
+                value={`${accuracy}%`}
                 label="Точность"
-                tone={accuracy !== null && accuracy >= 80 ? 'success' : 'primary'}
+                tone={accuracy >= 80 ? 'success' : 'primary'}
               />
             ) : (
-              <StatCard icon="checkmark" value={reviewedCount} label="Повторено" tone="primary" />
+              <StatCard icon="checkmark" value={objTotal} label="Проверок" tone="primary" />
             )}
             {missed.length > 0 ? (
               <StatCard icon="xmark.circle.fill" value={missed.length} label="Ошибок" tone="warning" />
@@ -459,12 +541,6 @@ export function ReviewSessionScreen() {
 
           <Reveal delay={300} style={styles.summaryActions}>
             <Button title="Пройти ещё раз" icon="play.fill" onPress={onRestart} />
-            <Button
-              title={`Сменить режим (сейчас: ${modeLabel})`}
-              icon="arrow.triangle.2.circlepath"
-              variant="secondary"
-              onPress={onChangeMode}
-            />
             <View style={styles.summaryNavRow}>
               <View style={styles.summaryNavItem}>
                 <Button
@@ -485,6 +561,20 @@ export function ReviewSessionScreen() {
             </View>
           </Reveal>
         </View>
+
+        {/* Празднование идеальной сессии. */}
+        <CelebrationModal
+          visible={showCelebration}
+          title="Идеальная сессия!"
+          subtitle={
+            objTotal > 0
+              ? `Все ${objTotal} проверок верны — блестяще!`
+              : 'Ни одной ошибки — блестяще!'
+          }
+          icon="trophy.fill"
+          tone="gold"
+          onClose={() => setShowCelebration(false)}
+        />
       </Screen>
     );
   }
@@ -517,10 +607,33 @@ export function ReviewSessionScreen() {
           <ProgressBar progress={qIndex / total} tone="primary" />
         </View>
 
-        {/* Вопрос + варианты (новый key → плавная смена) */}
+        {/* Салют за верный ответ (поверх всего, не ловит нажатия). */}
+        <Confetti trigger={burst} originTop="26%" count={16} />
+
+        {/* Знакомство / впиши слово / скажи вслух — свои тела. */}
+        {q.answerMode === 'intro' ? (
+          <IntroBody card={q.card} onNext={onIntroNext} />
+        ) : q.answerMode === 'type' ? (
+          <TypeBody
+            card={q.card}
+            typed={typed}
+            onChange={setTyped}
+            checked={typeChecked}
+            onSubmit={onTypeSubmit}
+            onNext={onNextQuestion}
+            last={qIndex + 1 >= total}
+            shakeStyle={promptShakeStyle}
+          />
+        ) : q.answerMode === 'speak' ? (
+          <SpeakBody key={q.id} card={q.card} onRate={onSpeakRate} />
+        ) : null}
+
+        {/* Вопрос + варианты — только для выбора (choice). */}
+        {q.answerMode === 'choice' ? (
+          <>
         <Reveal key={q.id} distance={16} style={styles.testBody}>
-          {/* Карточка-вопрос (формат зависит от promptMode) */}
-          <View style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          {/* Карточка-вопрос (формат зависит от promptMode) — красный шейк при ошибке */}
+          <Animated.View style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }, promptShakeStyle]}>
             <View style={[styles.promptTag, { backgroundColor: theme.primarySoft }]}>
               <ThemedText type="smallBold" style={{ color: theme.primary }}>
                 {q.label}
@@ -556,7 +669,7 @@ export function ReviewSessionScreen() {
                 ) : null}
               </View>
             )}
-          </View>
+          </Animated.View>
 
           {/* Варианты ответа: текстом или картинками (сетка 2×2) */}
           {q.optionMode === 'image' ? (
@@ -614,6 +727,8 @@ export function ReviewSessionScreen() {
             </FadeIn>
           ) : null}
         </View>
+          </>
+        ) : null}
       </Screen>
     );
   }
@@ -655,9 +770,18 @@ export function ReviewSessionScreen() {
           <ProgressBar progress={index / total} tone="primary" />
         </View>
 
-        {/* Сама карточка с переворотом (новый key → плавное появление) */}
+        {/* Сама карточка с переворотом (новый key → плавное появление).
+            После показа её можно оценить свайпом: ← Забыл · ↑ Вспомнил · Легко → */}
         <View style={styles.cardArea}>
           <Reveal key={current.id} distance={16} style={styles.cardWrap}>
+            <SwipeToRate
+              enabled={revealed}
+              left={{ label: 'Забыл', color: theme.danger }}
+              up={{ label: 'Вспомнил', color: theme.primary }}
+              right={{ label: 'Легко', color: theme.success }}
+              onLeft={() => onRate('again')}
+              onUp={() => onRate('good')}
+              onRight={() => onRate('easy')}>
             <FlashCard
               flipped={revealed}
               onPress={() => setRevealed(true)}
@@ -709,6 +833,7 @@ export function ReviewSessionScreen() {
                 </View>
               }
             />
+            </SwipeToRate>
           </Reveal>
         </View>
 
@@ -991,6 +1116,180 @@ function RatingButton({
   );
 }
 
+/** «Знакомство»: показываем новое слово целиком (без теста) → «Далее». */
+function IntroBody({ card, onNext }: { card: WordCard; onNext: () => void }) {
+  const theme = useTheme();
+  return (
+    <>
+      <Reveal key={card.id} distance={16} style={styles.testBody}>
+        <View style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={[styles.promptTag, { backgroundColor: theme.accentSoft }]}>
+            <ThemedText type="smallBold" style={{ color: theme.accent }}>
+              Новое слово
+            </ThemedText>
+          </View>
+          <Sticker imageUri={card.imageUri} category={card.category} size={132} />
+          <View style={styles.promptWordRow}>
+            <ThemedText type="title" numberOfLines={2} adjustsFontSizeToFit style={styles.promptWord}>
+              {card.word}
+            </ThemedText>
+            <SpeakButton text={card.word} language={card.learningLang} />
+          </View>
+          {card.ipa ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              /{card.ipa}/
+            </ThemedText>
+          ) : null}
+          <ThemedText type="subtitle" style={styles.centerText}>
+            {card.translation}
+          </ThemedText>
+          {card.examples[0] ? (
+            <View style={[styles.example, { backgroundColor: theme.backgroundElement }]}>
+              <ThemedText type="default" style={styles.centerText}>
+                {card.examples[0]}
+              </ThemedText>
+            </View>
+          ) : null}
+        </View>
+      </Reveal>
+      <View style={styles.footer}>
+        <Button title="Далее" icon="arrow.right" onPress={onNext} />
+      </View>
+    </>
+  );
+}
+
+/** «Впиши слово»: ввод L2-слова (регистр/пробелы не важны) + проверка. */
+function TypeBody({
+  card,
+  typed,
+  onChange,
+  checked,
+  onSubmit,
+  onNext,
+  last,
+  shakeStyle,
+}: {
+  card: WordCard;
+  typed: string;
+  onChange: (s: string) => void;
+  checked: boolean | null;
+  onSubmit: () => void;
+  onNext: () => void;
+  last: boolean;
+  shakeStyle: any; // eslint-disable-line @typescript-eslint/no-explicit-any -- animated style
+}) {
+  const theme = useTheme();
+  const answered = checked !== null;
+  const correct = checked === true;
+  const borderColor = answered ? (correct ? theme.success : theme.danger) : theme.border;
+  return (
+    <>
+      <Reveal distance={16} style={styles.testBody}>
+        <Animated.View style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }, shakeStyle]}>
+          <View style={[styles.promptTag, { backgroundColor: theme.primarySoft }]}>
+            <ThemedText type="smallBold" style={{ color: theme.primary }}>
+              Впиши слово
+            </ThemedText>
+          </View>
+          <Sticker imageUri={card.imageUri} category={card.category} size={110} />
+          <ThemedText type="subtitle" style={styles.centerText}>
+            {card.translation}
+          </ThemedText>
+          <TextInput
+            value={typed}
+            onChangeText={onChange}
+            editable={!answered}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+            placeholder="Впиши слово"
+            placeholderTextColor={theme.textSecondary}
+            returnKeyType="done"
+            onSubmitEditing={() => {
+              if (!answered && typed.trim()) onSubmit();
+            }}
+            style={[styles.typeInput, { borderColor, color: theme.text, backgroundColor: theme.backgroundElement }]}
+          />
+          {answered ? (
+            <View style={styles.typeResultRow}>
+              <Icon
+                name={correct ? 'checkmark.circle.fill' : 'xmark.circle.fill'}
+                size={18}
+                color={correct ? theme.success : theme.danger}
+              />
+              <ThemedText type="smallBold" style={{ color: correct ? theme.success : theme.danger }}>
+                {correct ? 'Верно!' : card.word}
+              </ThemedText>
+              <SpeakButton text={card.word} language={card.learningLang} size={38} />
+            </View>
+          ) : null}
+        </Animated.View>
+      </Reveal>
+      <View style={styles.footer}>
+        {answered ? (
+          <Button title={last ? 'Завершить' : 'Дальше'} icon="arrow.right" onPress={onNext} />
+        ) : (
+          <Button title="Проверить" icon="checkmark" onPress={onSubmit} disabled={!typed.trim()} />
+        )}
+      </View>
+    </>
+  );
+}
+
+/** «Скажи вслух»: произнести → показать ответ → самооценка (до ASR — на честность). */
+function SpeakBody({ card, onRate }: { card: WordCard; onRate: (r: SrsRating) => void }) {
+  const theme = useTheme();
+  const [shown, setShown] = useState(false);
+  return (
+    <>
+      <Reveal distance={16} style={styles.testBody}>
+        <View style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={[styles.promptTag, { backgroundColor: theme.primarySoft }]}>
+            <ThemedText type="smallBold" style={{ color: theme.primary }}>
+              Скажи вслух
+            </ThemedText>
+          </View>
+          <Sticker imageUri={card.imageUri} category={card.category} size={120} />
+          <ThemedText type="subtitle" style={styles.centerText}>
+            {card.translation}
+          </ThemedText>
+          {shown ? (
+            <View style={styles.promptWordRow}>
+              <ThemedText type="title" numberOfLines={2} adjustsFontSizeToFit style={styles.promptWord}>
+                {card.word}
+              </ThemedText>
+              <SpeakButton text={card.word} language={card.learningLang} />
+            </View>
+          ) : (
+            <ThemedText type="small" themeColor="textSecondary" style={styles.centerText}>
+              Произнеси слово вслух, потом проверь себя.
+            </ThemedText>
+          )}
+        </View>
+      </Reveal>
+      <View style={styles.footer}>
+        {!shown ? (
+          <Button
+            title="Показать ответ"
+            icon="eye.fill"
+            onPress={() => {
+              setShown(true);
+              speakWord(card.word, card.learningLang);
+            }}
+          />
+        ) : (
+          <View style={styles.ratingRow}>
+            <RatingButton icon="arrow.counterclockwise" label="Забыл" sub="" bg={theme.dangerSoft} fg={theme.danger} onPress={() => onRate('again')} />
+            <RatingButton icon="checkmark" label="Норм" sub="" bg={theme.primarySoft} fg={theme.primary} onPress={() => onRate('good')} />
+            <RatingButton icon="star.fill" label="Легко" sub="" bg={theme.successSoft} fg={theme.success} onPress={() => onRate('easy')} />
+          </View>
+        )}
+      </View>
+    </>
+  );
+}
+
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three },
   centerText: { textAlign: 'center' },
@@ -1128,6 +1427,18 @@ const styles = StyleSheet.create({
     minHeight: 56,
   },
   optionText: { flex: 1, fontWeight: '600' },
+  // «Впиши слово»
+  typeInput: {
+    alignSelf: 'stretch',
+    minHeight: 52,
+    borderRadius: Radius.md,
+    borderWidth: 2,
+    paddingHorizontal: Spacing.three,
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  typeResultRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
 
   // Низ
   footer: { minHeight: 92, justifyContent: 'center' },

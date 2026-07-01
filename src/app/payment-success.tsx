@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { Confetti } from '@/components/anim/confetti';
 import { Button } from '@/components/button';
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { feedbackCorrect } from '@/lib/feedback';
 import { useSubscription } from '@/lib/subscription';
 
 // Polar отправляет ?checkout_id=... в Success URL.
@@ -23,6 +25,7 @@ export default function PaymentSuccess() {
   const { isPremium, refresh } = useSubscription();
 
   const [checking, setChecking] = useState(true);
+  const [burst, setBurst] = useState(0);
   const attemptsRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -50,16 +53,20 @@ export default function PaymentSuccess() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Как только isPremium стал true — сразу останавливаем опрос.
+  // Как только isPremium стал true — останавливаем опрос и празднуем.
   useEffect(() => {
     if (isPremium) {
       if (timerRef.current) clearTimeout(timerRef.current);
       setChecking(false);
+      setBurst((b) => b + 1);
+      feedbackCorrect();
     }
   }, [isPremium]);
 
   return (
     <ThemedView style={styles.root}>
+      {/* Салют при активации Premium. */}
+      <Confetti trigger={burst} originTop="34%" count={28} />
       <View style={styles.card}>
         {checking ? (
           <>

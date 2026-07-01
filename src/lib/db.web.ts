@@ -69,6 +69,16 @@ export async function getAllCards(): Promise<WordCard[]> {
   return readCards().sort((a, b) => b.createdAt - a.createdAt);
 }
 
+/**
+ * Карточки одного владельца (аккаунта) — тот же контракт, что в нативном db.ts.
+ * localStorage общий на браузер, поэтому фильтруем по owner; `null` — гостевые.
+ */
+export async function getCardsForOwner(ownerId: string | null): Promise<WordCard[]> {
+  return readCards()
+    .filter((c) => (ownerId == null ? c.ownerId == null : c.ownerId === ownerId))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
 export async function getCardById(id: string): Promise<WordCard | null> {
   return readCards().find((c) => c.id === id) ?? null;
 }

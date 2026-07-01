@@ -17,7 +17,7 @@
  * размонтировании; повторный переход защищён флагом-рефом.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Dimensions, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -41,9 +41,8 @@ import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
-import { getScanJob, SCAN_FRAME, updateScanJob, type ScanResult, type SceneItem } from '@/lib/scan-job';
+import { getScanJob, updateScanJob, type ScanResult, type SceneItem } from '@/lib/scan-job';
 import {
-  cropToFrame,
   cropToSticker,
   isRecognitionConfigured,
   persistImage,
@@ -82,6 +81,7 @@ export function ScanningScreen() {
   const pulse = useSharedValue(0); // «дыхание» визира-фокуса
   const spin = useSharedValue(0); // вращение кольца-спиннера
   const ken = useSharedValue(0); // медленный зум кадра (ken burns)
+  const prog = useSharedValue(0); // полоса прогресса распознавания (чувство продвижения)
 
   // Старт анимаций + реальное распознавание и вырезка стикера, затем переход на
   // Результат. Reduce Motion → без зацикленных анимаций. Реальная ошибка
@@ -89,12 +89,15 @@ export function ScanningScreen() {
   useEffect(() => {
     if (reduceMotion) {
       enter.value = 1;
+      prog.value = 1;
     } else {
       enter.value = withTiming(1, { duration: Motion.duration.base, easing: Easing.out(Easing.ease) });
       scan.value = withRepeat(withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.ease) }), -1, true);
       pulse.value = withRepeat(withTiming(1, { duration: Motion.duration.lazy, easing: Easing.inOut(Easing.ease) }), -1, true);
       spin.value = withRepeat(withTiming(1, { duration: 1000, easing: Easing.linear }), -1, false);
       ken.value = withRepeat(withTiming(1, { duration: 4000, easing: Easing.inOut(Easing.ease) }), -1, true);
+      // Полоса прогресса плавно доходит до конца за время «распознавания».
+      prog.value = withTiming(1, { duration: 1000, easing: Easing.out(Easing.ease) });
     }
 
     let active = true;
@@ -125,14 +128,9 @@ export function ScanningScreen() {
       let cutoutUri: string | null = null;
       let items: SceneItem[] | undefined;
 
-      // single: кропаем по «визиру» (только то, что в рамке). scene: берём весь
-      // кадр — там должно быть несколько предметов.
-      let photoUri = job?.photoUri;
-      if (photoUri && mode === 'single') {
-        const { width: winW, height: winH } = Dimensions.get('window');
-        const framed = await cropToFrame(photoUri, winW, winH, SCAN_FRAME).catch(() => null);
-        if (framed?.uri) photoUri = framed.uri;
-      }
+      // Скан по ВСЕМУ кадру (без рамки). В single берём предмет ближе к центру
+      // (см. ниже), в scene — все предметы.
+      const photoUri = job?.photoUri;
 
       if (photoUri) {
         const configured = isRecognitionConfigured();
@@ -175,7 +173,8 @@ export function ScanningScreen() {
           const liftP = liftToPNG(photoUri).catch(() => null);
           let reco: Awaited<ReturnType<typeof recognizePhoto>> = null;
           try {
-            reco = await recognizePhoto(photoUri, prefs.learningLang, prefs.nativeLang, 1);
+            // Просим несколько кандидатов по всему кадру, чтобы выбрать предмет по центру.
+            reco = await recognizePhoto(photoUri, prefs.learningLang, prefs.nativeLang, 5);
           } catch (e) {
             if (e instanceof ScanLimitError) { onLimitReached(); return; }
             reco = null;
@@ -192,7 +191,14 @@ export function ScanningScreen() {
             return;
           }
 
-          const primary = reco && reco.objects.length > 0 ? reco.objects[0] : null;
+          // Берём предмет, чей центр bbox ближе всего к центру кадра (0.5, 0.5).
+          // Объекты без bbox считаем «далёкими», чтобы не перебивали центральный.
+          const centerDist = (b: number[] | null) =>
+            b && b.length === 4 ? (b[0] + b[2] / 2 - 0.5) ** 2 + (b[1] + b[3] / 2 - 0.5) ** 2 : 2;
+          const primary =
+            reco && reco.objects.length > 0
+              ? reco.objects.reduce((best, o) => (centerDist(o.bbox) < centerDist(best.bbox) ? o : best), reco.objects[0])
+              : null;
           if (primary) result = toScanResult(primary, prefs.learningLang);
 
           if (liftedUri) {
@@ -221,8 +227,9 @@ export function ScanningScreen() {
       cancelAnimation(pulse);
       cancelAnimation(spin);
       cancelAnimation(ken);
+      cancelAnimation(prog);
     };
-  }, [enter, scan, pulse, spin, ken, router, jobId, prefs.learningLang, prefs.nativeLang, reduceMotion, refundScan, markScansExhausted]);
+  }, [enter, scan, pulse, spin, ken, prog, router, jobId, prefs.learningLang, prefs.nativeLang, reduceMotion, refundScan, markScansExhausted]);
 
   // Скрим: theme.background (морозная подложка) + theme.overlay (затемнение).
   const bgStyle = useAnimatedStyle(() => ({ opacity: enter.value * 0.82 }));
@@ -250,6 +257,7 @@ export function ScanningScreen() {
     transform: [{ translateY: interpolate(scan.value, [0, 1], [0, height]) }],
     opacity: interpolate(scan.value, [0, 0.1, 0.9, 1], [0, 0.9, 0.9, 0]),
   }));
+  const progStyle = useAnimatedStyle(() => ({ width: `${interpolate(prog.value, [0, 1], [0, 100])}%` }));
 
   return (
     <View style={styles.flex}>
@@ -348,6 +356,10 @@ export function ScanningScreen() {
               <Dot delay={0} color={theme.accent} reduce={reduceMotion} />
               <Dot delay={160} color={theme.accent} reduce={reduceMotion} />
               <Dot delay={320} color={theme.accent} reduce={reduceMotion} />
+            </View>
+            {/* Полоса прогресса распознавания. */}
+            <View style={[styles.progTrack, { backgroundColor: photoUri ? 'rgba(255,255,255,0.22)' : theme.primarySoft }]}>
+              <Animated.View style={[styles.progFill, { backgroundColor: theme.accent }, progStyle]} />
             </View>
           </Animated.View>
         </Animated.View>
@@ -464,6 +476,8 @@ const styles = StyleSheet.create({
   errorBtn: { alignSelf: 'stretch', marginTop: Spacing.two },
   dots: { flexDirection: 'row', gap: Spacing.one + 2 },
   dot: { width: 7, height: 7, borderRadius: 4 },
+  progTrack: { width: 160, height: 4, borderRadius: 2, overflow: 'hidden', marginTop: Spacing.one },
+  progFill: { height: '100%', borderRadius: 2 },
 });
 
 export default ScanningScreen;

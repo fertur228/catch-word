@@ -23,7 +23,8 @@ interface ProgressBarProps {
 export function ProgressBar({ progress, height = 10, tone = 'primary', style }: ProgressBarProps) {
   const theme = useTheme();
   const clamped = Math.max(0, Math.min(1, progress));
-  const p = useSharedValue(clamped);
+  // Стартуем с нуля — полоса красиво «наливается» при появлении и при изменениях.
+  const p = useSharedValue(0);
 
   useEffect(() => {
     p.value = withTiming(clamped, { duration: Motion.duration.slow });

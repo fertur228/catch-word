@@ -54,14 +54,18 @@ export function Sticker({
           backgroundColor: imageUri ? theme.backgroundElement : bg,
           borderColor: theme.border,
           shadowColor: theme.shadow,
+          // Отступ вокруг фото, чтобы предмет отошёл от краёв и был виден с воздухом.
+          padding: imageUri ? size * 0.12 : 0,
         },
         style,
       ]}>
       {imageUri ? (
         <Image
           source={{ uri: imageUri }}
-          style={{ width: '100%', height: '100%', borderRadius: radius }}
-          contentFit="cover"
+          style={{ width: '100%', height: '100%', borderRadius: radius * 0.7 }}
+          // «contain» — фото вписывается ЦЕЛИКОМ и авто-масштабируется под любой
+          // размер (маленькая плитка / большая карточка), ничего не обрезается.
+          contentFit="contain"
           transition={150}
         />
       ) : (
