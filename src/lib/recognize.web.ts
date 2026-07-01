@@ -5,11 +5,20 @@
  * data URL и грузится в Storage при входе (см. sticker-upload.web.ts).
  */
 import { lookupWord } from '@/lib/dictionary';
+import { supabase } from '@/lib/supabase';
 import type { ScanResult } from '@/lib/scan-job';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 const RECOGNIZE_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/recognize` : '';
+
+/** Сервер вернул 402 — бесплатные сканы кончились. Экран показывает пейволл. */
+export class ScanLimitError extends Error {
+  constructor() {
+    super('scan_limit_reached');
+    this.name = 'ScanLimitError';
+  }
+}
 
 const MAX_EDGE = 1024;
 const TIMEOUT_MS = 15000;
@@ -79,6 +88,10 @@ export async function recognizePhoto(
   const prepared = await prepare(photoUri);
   if (!prepared) return null;
 
+  // Токен вошедшего пользователя — чтобы сервер посчитал лимит именно ему.
+  // Гость → anon-ключ (серверный лимит к нему не применяется).
+  const token = (await supabase.auth.getSession()).data.session?.access_token;
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -88,10 +101,11 @@ export async function recognizePhoto(
       headers: {
         'Content-Type': 'application/json',
         apikey: SUPABASE_ANON,
-        Authorization: `Bearer ${SUPABASE_ANON}`,
+        Authorization: `Bearer ${token ?? SUPABASE_ANON}`,
       },
       body: JSON.stringify({ image: prepared.dataUrl, learningLang, nativeLang, maxObjects }),
     });
+    if (res.status === 402) throw new ScanLimitError(); // лимит бесплатных сканов
     if (!res.ok) {
       console.warn('recognize HTTP', res.status, (await res.text()).slice(0, 200));
       return null;
@@ -102,6 +116,7 @@ export async function recognizePhoto(
       prepared: { uri: prepared.dataUrl, width: prepared.width, height: prepared.height },
     };
   } catch (e) {
+    if (e instanceof ScanLimitError) throw e; // пробрасываем — экран покажет пейволл
     console.warn('recognize failed:', e);
     return null;
   } finally {

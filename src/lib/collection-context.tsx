@@ -19,6 +19,7 @@ import {
 
 import { useAuth } from '@/lib/auth-context';
 import { useSubscription } from '@/lib/subscription';
+import { supabase } from '@/lib/supabase';
 import * as db from '@/lib/db';
 import {
   clearCloudCardsForPair,
@@ -66,6 +67,8 @@ interface CollectionContextValue {
   tryScan: () => boolean;
   /** Вернуть один скан (если распознавание не удалось — не «сжигаем» на ошибке). */
   refundScan: () => void;
+  /** Пометить лимит исчерпанным (сервер вернул 402) — заблокировать до пейволла. */
+  markScansExhausted: () => void;
 
   // --- Настройки пользователя (онбординг/языки) ---
   prefs: UserPrefs;
@@ -258,6 +261,33 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     setScansLeft((n) => Math.min(FREE_SCAN_LIMIT, n + 1));
   }, [isPremium]);
 
+  const markScansExhausted = useCallback(() => setScansLeft(0), []);
+
+  // Серверный остаток бесплатных сканов для ВОШЕДШЕГО free-пользователя.
+  // (Гость — счётчик локальный; premium — безлимит.) Делает счётчик устойчивым к
+  // рефрешу и синхронным между устройствами. Authoritative-проверка всё равно на
+  // сервере (edge `recognize` + RPC `consume_scan`) — это лишь точное отображение.
+  useEffect(() => {
+    if (!userId || isPremium) return;
+    let alive = true;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('scan_usage')
+          .select('used')
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (!alive || !data) return;
+        setScansLeft(Math.max(0, FREE_SCAN_LIMIT - (data.used ?? 0)));
+      } catch {
+        /* сеть недоступна — оставляем текущее значение */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [userId, isPremium]);
+
   // Очистить коллекцию ТЕКУЩЕГО курса (активной пары языков). Слова других
   // пар остаются. Стартовые после этого не пересоздаются.
   const clearCollection = useCallback(async () => {
@@ -355,6 +385,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       getById,
       tryScan,
       refundScan,
+      markScansExhausted,
       prefs,
       setLanguages,
       completeOnboarding,
@@ -378,6 +409,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     getById,
     tryScan,
     refundScan,
+    markScansExhausted,
     prefs,
     setLanguages,
     completeOnboarding,

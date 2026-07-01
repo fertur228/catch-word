@@ -48,6 +48,7 @@ import {
   isRecognitionConfigured,
   persistImage,
   recognizePhoto,
+  ScanLimitError,
   toScanResult,
 } from '@/lib/recognize';
 import { liftToPNG } from '@/lib/subject-lift';
@@ -63,7 +64,7 @@ const RETICLE = 84;
 export function ScanningScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { prefs, refundScan } = useCollection();
+  const { prefs, refundScan, markScansExhausted } = useCollection();
   const { jobId } = useLocalSearchParams<{ jobId?: string }>();
   const { height } = useWindowDimensions();
   const reduceMotion = useReduceMotion();
@@ -107,6 +108,14 @@ export function ScanningScreen() {
       refundScan();
       setError({ title, message });
     };
+    // Сервер вернул 402 — бесплатные сканы кончились → на пейволл. Оптимистичный
+    // клиентский скан НЕ возвращаем (лимит реально исчерпан), фиксируем 0.
+    const onLimitReached = () => {
+      if (!active || navigated.current) return;
+      navigated.current = true;
+      markScansExhausted();
+      router.replace('/paywall');
+    };
 
     (async () => {
       const started = Date.now();
@@ -130,9 +139,13 @@ export function ScanningScreen() {
 
         if (mode === 'scene') {
           // «Поймай всю сцену»: до 8 предметов, у каждого — свой вырез по bbox.
-          const reco = await recognizePhoto(
-            photoUri, prefs.learningLang, prefs.nativeLang, 8,
-          ).catch(() => null);
+          let reco: Awaited<ReturnType<typeof recognizePhoto>> = null;
+          try {
+            reco = await recognizePhoto(photoUri, prefs.learningLang, prefs.nativeLang, 8);
+          } catch (e) {
+            if (e instanceof ScanLimitError) { onLimitReached(); return; }
+            reco = null;
+          }
           if (!active) return;
           if (configured && !reco) {
             fail('Не получилось распознать', 'Проверь интернет и попробуй ещё раз. Скан не списан.');
@@ -157,10 +170,17 @@ export function ScanningScreen() {
           }
         } else {
           // single: распознавание (1 предмет) + нативная вырезка фона (iOS 17+).
-          const [reco, liftedUri] = await Promise.all([
-            recognizePhoto(photoUri, prefs.learningLang, prefs.nativeLang, 1).catch(() => null),
-            liftToPNG(photoUri).catch(() => null),
-          ]);
+          // Вырезку запускаем параллельно, но распознавание ждём отдельно, чтобы
+          // поймать ScanLimitError (402) и уйти на пейволл, не «сжигая» вырезку.
+          const liftP = liftToPNG(photoUri).catch(() => null);
+          let reco: Awaited<ReturnType<typeof recognizePhoto>> = null;
+          try {
+            reco = await recognizePhoto(photoUri, prefs.learningLang, prefs.nativeLang, 1);
+          } catch (e) {
+            if (e instanceof ScanLimitError) { onLimitReached(); return; }
+            reco = null;
+          }
+          const liftedUri = await liftP;
           if (!active) return;
 
           if (configured && !reco) {
@@ -202,7 +222,7 @@ export function ScanningScreen() {
       cancelAnimation(spin);
       cancelAnimation(ken);
     };
-  }, [enter, scan, pulse, spin, ken, router, jobId, prefs.learningLang, prefs.nativeLang, reduceMotion, refundScan]);
+  }, [enter, scan, pulse, spin, ken, router, jobId, prefs.learningLang, prefs.nativeLang, reduceMotion, refundScan, markScansExhausted]);
 
   // Скрим: theme.background (морозная подложка) + theme.overlay (затемнение).
   const bgStyle = useAnimatedStyle(() => ({ opacity: enter.value * 0.82 }));

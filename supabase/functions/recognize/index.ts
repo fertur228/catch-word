@@ -19,11 +19,37 @@
 // «поймай всю сцену» (до 8 предметов вместо 3).
 // ─────────────────────────────────────────────────────────────────────────
 
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
 // Провайдеро-нейтрально (OpenAI-совместимо). По умолчанию — OpenRouter: работает
 // из Казахстана и сам ходит к Google; модель Gemini Flash-Lite доступна там как
 // google/gemini-2.5-flash-lite. Можно навести на OpenAI (api.openai.com/v1) и т.п.
 const BASE_URL = Deno.env.get('RECOGNIZE_BASE_URL') ?? 'https://openrouter.ai/api/v1';
 const MODEL = Deno.env.get('RECOGNIZE_MODEL') ?? 'google/gemini-2.5-flash-lite';
+
+// Для серверного лимита бесплатных сканов (см. миграцию scan_usage + RPC).
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
+const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+
+/**
+ * ID вошедшего пользователя из JWT. Функция задеплоена с verify_jwt=true, поэтому
+ * подпись токена уже проверена шлюзом — здесь достаточно декодировать payload.
+ * Гость шлёт anon-ключ (role !== 'authenticated') → null (серверный лимит не про
+ * него, ему остаётся клиентский). Реальный пользователь → его UUID (role/sub).
+ */
+function userIdFromJwt(token: string): string | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    b64 += '='.repeat((4 - (b64.length % 4)) % 4);
+    const payload = JSON.parse(atob(b64));
+    if (payload.role !== 'authenticated') return null;
+    return typeof payload.sub === 'string' ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
 
 const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -118,6 +144,39 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const maxObjects = Math.max(1, Math.min(8, Math.round(Number(body.maxObjects) || 3)));
   const dataUrl = image.startsWith('data:') ? image : `data:image/jpeg;base64,${image}`;
 
+  // --- Серверный лимит бесплатных сканов (антифрод) ---
+  // Списываем скан ЗАРАНЕЕ (до дорогого вызова модели): превышение → 402 без
+  // обращения к провайдеру. Если модель потом упадёт — возвращаем скан (refund).
+  // Гость (anon-токен) → userId=null → серверный лимит не применяется (клиентский).
+  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+  const userId = token ? userIdFromJwt(token) : null;
+  const admin = userId && SUPABASE_URL && SERVICE_ROLE
+    ? createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } })
+    : null;
+
+  let scanInfo: { used: number; limit: number; unlimited: boolean } | null = null;
+  let consumed = false;
+  if (admin && userId) {
+    const { data: gate, error } = await admin.rpc('consume_scan', { p_user: userId });
+    if (error) {
+      // Не блокируем распознавание из-за сбоя учёта (fail-open) — только логируем.
+      console.error('[recognize] consume_scan error:', error.message);
+    } else if (gate) {
+      scanInfo = { used: gate.used, limit: gate.limit, unlimited: gate.unlimited };
+      if (gate.allowed === false) {
+        return json({ error: 'scan_limit_reached', used: gate.used, limit: gate.limit }, 402);
+      }
+      consumed = gate.unlimited === false; // счётчик увеличен только для free-пользователя
+    }
+  }
+
+  // Вернуть скан, если распознавание не удалось (не «сжигаем» на ошибке).
+  const refund = async () => {
+    if (consumed && admin && userId) {
+      try { await admin.rpc('refund_scan', { p_user: userId }); } catch { /* best-effort */ }
+    }
+  };
+
   let resp: Response;
   try {
     resp = await fetch(`${BASE_URL}/chat/completions`, {
@@ -149,22 +208,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }),
     });
   } catch (e) {
+    await refund();
     return json({ error: 'upstream_unreachable', message: String(e) }, 502);
   }
 
   if (!resp.ok) {
+    await refund();
     const detail = (await resp.text()).slice(0, 600);
     return json({ error: 'upstream_error', status: resp.status, detail }, 502);
   }
 
   const data = await resp.json();
   const content = data?.choices?.[0]?.message?.content;
-  if (!content) return json({ error: 'empty_response' }, 502);
+  if (!content) {
+    await refund();
+    return json({ error: 'empty_response' }, 502);
+  }
 
   let parsed: { objects?: unknown };
   try {
     parsed = typeof content === 'string' ? JSON.parse(content) : content;
   } catch {
+    await refund();
     return json({ error: 'parse_failed', detail: String(content).slice(0, 400) }, 502);
   }
 
@@ -197,5 +262,5 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .filter((o: { word: string }) => o.word.length > 0)
     .slice(0, maxObjects);
 
-  return json({ objects, model: MODEL });
+  return json({ objects, model: MODEL, scan: scanInfo });
 });
