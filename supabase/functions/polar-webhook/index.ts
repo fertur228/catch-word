@@ -1,15 +1,25 @@
 // Supabase Edge Function: /polar-webhook
 // ─────────────────────────────────────────────────────────────────────────────
-// Принимает вебхуки от Polar (polar.sh), верифицирует подпись по стандарту
-// Standard Webhooks (HMAC-SHA256), обновляет таблицу `subscriptions`.
+// Принимает вебхуки от Polar (polar.sh), верифицирует HMAC-SHA256 подпись и
+// обновляет таблицу `subscriptions`.
 //
-// Нужные секреты (supabase secrets set …):
-//   POLAR_WEBHOOK_SECRET      — Signing Secret из Polar → Webhooks → эндпоинт
-//   SUPABASE_URL              — Project URL (обычно уже есть в Edge Runtime)
-//   SUPABASE_SERVICE_ROLE_KEY — service_role key (обычно уже есть в Edge Runtime)
+// Секреты (supabase secrets set …):
+//   POLAR_WEBHOOK_SECRET      — Signing Secret из Polar → Webhooks → эндпоинт (вид whsec_…)
+//   SUPABASE_URL              — Project URL (есть в Edge Runtime по умолчанию)
+//   SUPABASE_SERVICE_ROLE_KEY — service_role key (есть по умолчанию)
 //
-// События, на которые подписываемся в Polar:
-//   subscription.created / updated / active / canceled / uncanceled / revoked / past_due
+// ВАЖНО ПРИ ДЕПЛОЕ: verify_jwt=false (config.toml [functions.polar-webhook] +
+// флаг --no-verify-jwt). У Polar своя HMAC-подпись, а не Supabase-JWT; при
+// verify_jwt=true шлюз отбивает КАЖДЫЙ запрос Polar с 401 ещё до кода функции.
+//
+// ПОДПИСЬ: этот эндпоинт Polar подписывает СЫРОЙ строкой секрета (вместе с
+// префиксом whsec_) как UTF-8 ключом — это НЕ канонический Standard Webhooks
+// (там ключ = base64-decode части после whsec_). Чтобы не зависеть от этой
+// детали и пережить смену секрета/формата, принимаем подпись, совпавшую по
+// ЛЮБОМУ из известных способов вывода ключа (каждый требует знания секрета).
+//
+// Подписываемых событий в Polar:
+//   subscription.created / active / updated / uncanceled / canceled / past_due / revoked
 //   order.refunded
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -26,9 +36,15 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-// Standard Webhooks signature verification.
-// Signed content: `{webhook-id}.{webhook-timestamp}.{raw-body}`
-// Secret из Polar — уже base64-encoded, декодируем перед использованием.
+async function hmacSig(keyBytes: Uint8Array, content: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+  );
+  const s = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(content));
+  return 'v1,' + btoa(String.fromCharCode(...new Uint8Array(s)));
+}
+
+// Standard Webhooks: подписываемый контент = `{webhook-id}.{webhook-timestamp}.{raw-body}`.
 async function verifySignature(req: Request, rawBody: string): Promise<boolean> {
   try {
     const msgId     = req.headers.get('webhook-id');
@@ -36,49 +52,36 @@ async function verifySignature(req: Request, rawBody: string): Promise<boolean> 
     const sigHeader = req.headers.get('webhook-signature');
 
     if (!msgId || !timestamp || !sigHeader) return false;
+    // Только базовая валидация формата. Раньше здесь стояла проверка «отклонять
+    // события старше 5 минут» — она ломала повторные доставки Polar (retry/redeliver
+    // несёт ИСХОДНЫЙ timestamp, и через 5 минут любая повторная доставка получала
+    // 401 навсегда). Подпись HMAC подтверждает подлинность, upsert идемпотентен —
+    // по возрасту события больше НЕ отклоняем.
+    if (!/^\d+$/.test(timestamp)) return false;
 
-    // Защита от replay-атак: отклоняем запросы старше 5 минут.
-    const ts = parseInt(timestamp, 10);
-    if (isNaN(ts) || Math.abs(Date.now() / 1000 - ts) > 300) return false;
+    const content  = `${msgId}.${timestamp}.${rawBody}`;
+    const trimmed  = POLAR_WEBHOOK_SECRET.trim();
+    const noPrefix = trimmed.startsWith('whsec_') ? trimmed.slice('whsec_'.length) : trimmed;
 
-    const signedContent = `${msgId}.${timestamp}.${rawBody}`;
-
-    // Standard Webhooks: секрет имеет вид `whsec_<base64>`. Polar (и большинство
-    // дашбордов) показывают его с префиксом — если его случайно скопировали в
-    // секрет целиком, atob падает на `_`. Снимаем префикс перед декодом.
-    const rawSecret = POLAR_WEBHOOK_SECRET.startsWith('whsec_')
-      ? POLAR_WEBHOOK_SECRET.slice('whsec_'.length)
-      : POLAR_WEBHOOK_SECRET;
-    const secretBytes = Uint8Array.from(atob(rawSecret), (c) => c.charCodeAt(0));
-
-    const key = await crypto.subtle.importKey(
-      'raw',
-      secretBytes,
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign'],
-    );
-
-    const sigBytes = await crypto.subtle.sign(
-      'HMAC',
-      key,
-      new TextEncoder().encode(signedContent),
-    );
-    const expected = `v1,${btoa(String.fromCharCode(...new Uint8Array(sigBytes)))}`;
+    // Кандидаты ключа (по убыванию вероятности для текущего эндпоинта Polar):
+    //   1) сырая строка секрета С префиксом whsec_ (так подписывает наш Polar)
+    //   2) сырая строка без префикса
+    //   3) base64-decode без префикса (канонический Standard Webhooks)
+    const keys: Uint8Array[] = [
+      new TextEncoder().encode(trimmed),
+      new TextEncoder().encode(noPrefix),
+    ];
+    try { keys.push(Uint8Array.from(atob(noPrefix), (c) => c.charCodeAt(0))); } catch { /* не base64 */ }
 
     // Заголовок может содержать несколько подписей через пробел (ротация секретов).
-    // Сравниваем за константное время, чтобы исключить timing-атаки.
-    return sigHeader.split(' ').some((sig) => {
-      if (sig.length !== expected.length) return false;
-      let diff = 0;
-      for (let i = 0; i < sig.length; i++) {
-        diff |= sig.charCodeAt(i) ^ expected.charCodeAt(i);
-      }
-      return diff === 0;
-    });
+    const parts = sigHeader.split(' ');
+    for (const k of keys) {
+      const expected = await hmacSig(k, content);
+      if (parts.some((p) => p === expected)) return true;
+    }
+    return false;
   } catch (e) {
-    // Никогда не роняем функцию в 500 из-за формата секрета — иначе Polar
-    // будет бесконечно ретраить, а мы не увидим причину. Логируем и отбиваем 401.
+    // Никогда не роняем функцию в 500 из-за формата секрета — иначе Polar ретраит бесконечно.
     console.error('[polar-webhook] verifySignature error:', e);
     return false;
   }
@@ -87,9 +90,18 @@ async function verifySignature(req: Request, rawBody: string): Promise<boolean> 
 // deno-lint-ignore no-explicit-any
 type AnyRecord = Record<string, any>;
 
-// Резервная привязка: если Polar не передал reference_id в metadata (напр. купили
-// без него), находим пользователя Supabase по email из чек-аута. Так подписка
-// всё равно свяжется с аккаунтом.
+// Polar recurring_interval → наш plan (weekly | monthly | yearly).
+function mapPlan(data: AnyRecord): string | null {
+  const iv = (data.recurring_interval ?? data.product?.recurring_interval ?? '')
+    .toString()
+    .toLowerCase();
+  if (iv === 'week')  return 'weekly';
+  if (iv === 'month') return 'monthly';
+  if (iv === 'year')  return 'yearly';
+  return null;
+}
+
+// Резервная привязка по email, если reference_id не пришёл в metadata.
 async function findUserIdByEmail(
   admin: ReturnType<typeof createClient>,
   email: string,
@@ -97,7 +109,6 @@ async function findUserIdByEmail(
   if (!email) return null;
   try {
     const target = email.toLowerCase();
-    // Небольшая база (MVP) — одной страницы достаточно.
     const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
     if (error) return null;
     const u = data.users.find((x) => (x.email ?? '').toLowerCase() === target);
@@ -120,12 +131,9 @@ async function handleSubscriptionEvent(
   const customerId = (data.customer_id ?? data.customer?.id ?? '') as string;
 
   // Основной путь — reference_id (Supabase UUID) из checkout-метаданных.
-  // Запасной — поиск по email, если reference_id не пришёл.
+  // Запасной — поиск по email.
   const userId = metadata.reference_id ?? (await findUserIdByEmail(admin, email));
 
-  // Polar присылает status в поле data.status для большинства событий.
-  // Для subscription.revoked принудительно ставим 'revoked' (на случай если
-  // статус в payload ещё не обновился).
   const status: string = eventType === 'subscription.revoked'
     ? 'revoked'
     : (data.status as string) ?? 'active';
@@ -135,9 +143,10 @@ async function handleSubscriptionEvent(
   const cancelledAt      = status === 'canceled'
     ? ((data.ended_at as string | null) ?? new Date().toISOString())
     : null;
+  const plan = mapPlan(data);
 
   if (userId) {
-    // Полный upsert — знаем пользователя через reference_id из checkout.
+    // Знаем пользователя — полный upsert по polar_subscription_id.
     const { error } = await admin.from('subscriptions').upsert(
       {
         user_id:               userId,
@@ -145,6 +154,7 @@ async function handleSubscriptionEvent(
         polar_subscription_id: subId,
         polar_customer_id:     customerId,
         status,
+        plan,
         current_period_end:    currentPeriodEnd,
         trial_end:             trialEnd,
         cancelled_at:          cancelledAt,
@@ -154,19 +164,28 @@ async function handleSubscriptionEvent(
     );
     if (error) throw new Error(`upsert failed: ${error.message}`);
   } else {
-    // reference_id отсутствует (edge case) — обновляем только статус по subId.
-    const { error } = await admin
+    // Не определили пользователя (нет reference_id и email не совпал). Вставить
+    // новую строку нельзя (user_id NOT NULL). Обновляем существующую по subId,
+    // если её нет — ГРОМКО логируем, чтобы оплата не терялась молча.
+    const { data: upd, error } = await admin
       .from('subscriptions')
       .update({
         status,
+        plan,
         current_period_end: currentPeriodEnd,
         trial_end:          trialEnd,
         cancelled_at:       cancelledAt,
         updated_at:         new Date().toISOString(),
       })
-      .eq('polar_subscription_id', subId);
+      .eq('polar_subscription_id', subId)
+      .select('id');
     if (error) throw new Error(`update failed: ${error.message}`);
-    if (!subId) console.warn('subscription event missing both reference_id and id — skipped');
+    if (!upd || upd.length === 0) {
+      console.error(
+        `[polar-webhook] UNBOUND paid subscription id=${subId} email=${email}: ` +
+        `нет reference_id и email не найден среди пользователей — доступ НЕ выдан.`,
+      );
+    }
   }
 }
 
@@ -192,8 +211,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const rawBody = await req.text();
 
-  const valid = await verifySignature(req, rawBody);
-  if (!valid) return json({ error: 'invalid_signature' }, 401);
+  if (!(await verifySignature(req, rawBody))) {
+    return json({ error: 'invalid_signature' }, 401);
+  }
 
   let event: { type: string; data: AnyRecord };
   try {
@@ -214,7 +234,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     } else if (type === 'order.refunded') {
       await handleOrderRefunded(admin, data);
     }
-    // Остальные события (checkout.*, customer.*, etc.) игнорируем — возвращаем 200.
+    // Остальные события (checkout.*, customer.*, …) игнорируем — возвращаем 200.
   } catch (e) {
     console.error(`[polar-webhook] handler error for ${type}:`, e);
     return json({ error: 'handler_error', message: String(e) }, 500);
