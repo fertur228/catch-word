@@ -1,6 +1,7 @@
 /**
  * Страница тарифов (/pricing) — сравнение Free и Premium + CTA на вход.
- * Веб-оплата (Stripe) подключается отдельным этапом; пока кнопка ведёт на вход.
+ * Веб-оплата идёт через Polar (после входа — экран пейволла в приложении).
+ * Цены должны совпадать с реальными продуктами Polar и paywall-screen.tsx.
  */
 import { StyleSheet, View } from 'react-native';
 import Head from 'expo-router/head';
@@ -11,7 +12,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
-const FREE = ['15 сканов всего', 'Коллекция и повторение (SRS)', 'Озвучка слов', 'Квест дня', '1 пара языков'];
+const FREE = ['10 сканов всего', 'Коллекция и повторение (SRS)', 'Озвучка слов', 'Квест дня', '1 пара языков'];
 const PREMIUM = [
   'Безлимит сканов',
   'Все языковые пары',
@@ -38,14 +39,15 @@ export default function Pricing() {
       </Container>
 
       <Container style={[styles.plans, wide && styles.row2]}>
-        <PlanCard name="Free" price="0 ₸" note="навсегда" features={FREE} />
-        <PlanCard name="Premium" price="990 ₸" note="в месяц" highlighted features={PREMIUM} />
+        <PlanCard name="Free" price="$0" note="навсегда" features={FREE} />
+        <PlanCard name="Premium" price="$6.99" note="в месяц" highlighted features={PREMIUM} />
       </Container>
 
       <Container style={styles.noteWrap}>
         <ThemedText type="small" themeColor="textSecondary" style={styles.note}>
-          Оплата Premium в браузере появится скоро. Пока оформить подписку можно в мобильном
-          приложении CatchWord. Войди, чтобы перенести прогресс между устройствами.
+          Есть тарифы на неделю ($4.99) и год ($39.99 — выгоднее всего). Оформить Premium можно
+          прямо в браузере: войди через Google — подписка привяжется к аккаунту и будет доступна
+          на всех устройствах.
         </ThemedText>
       </Container>
     </MarketingShell>
