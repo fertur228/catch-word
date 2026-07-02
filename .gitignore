@@ -47,3 +47,8 @@ example
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Локальные материалы (скриншоты/примеры/аудио) — не в репозиторий
+/landing/
+/logo.png
+/2026-*.jpg
