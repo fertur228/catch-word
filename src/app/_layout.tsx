@@ -59,10 +59,12 @@ function RootNavigator() {
     first === 'forgot-password' ||
     first === 'reset-password';
   const needsProfile = !!session && !session.user.user_metadata?.profile_completed;
-  let authRedirect: '/sign-in' | '/complete-profile' | '/onboarding' | null = null;
+  let authRedirect: '/sign-in' | '/welcome' | '/complete-profile' | '/onboarding' | null = null;
   if (!onPublic) {
     if (!session) {
-      if (!onAuthRoute) authRedirect = '/sign-in';
+      // Веб: аноним → публичный лендинг (индексируется, для SEO/GEO).
+      // Натив: сразу login-wall (вход).
+      if (!onAuthRoute) authRedirect = isWeb ? '/welcome' : '/sign-in';
     } else if (needsProfile) authRedirect = '/complete-profile';
     else if (!prefs.onboarded) authRedirect = '/onboarding';
   }

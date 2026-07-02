@@ -1,0 +1,20 @@
+User-agent: *
+Allow: /
+
+# AI / GEO — разрешаем ассистентам читать сайт (видимость в ChatGPT, Perplexity, Google AI и т.п.)
+User-agent: GPTBot
+Allow: /
+User-agent: OAI-SearchBot
+Allow: /
+User-agent: ChatGPT-User
+Allow: /
+User-agent: PerplexityBot
+Allow: /
+User-agent: ClaudeBot
+Allow: /
+User-agent: Claude-Web
+Allow: /
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://catch-word-web.pages.dev/sitemap.xml

@@ -8,6 +8,7 @@ import Head from 'expo-router/head';
 
 import { Icon } from '@/components/icon';
 import { Container, GoogleButton, MarketingShell, useIsWide } from '@/components/marketing';
+import { SITE_URL } from '@/constants/links';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -27,8 +28,13 @@ export default function Pricing() {
   return (
     <MarketingShell>
       <Head>
-        <title>Тарифы — CatchWord</title>
-        <meta name="description" content="Free навсегда или Premium с безлимитом сканов и синхронизацией. Сравните тарифы CatchWord." />
+        <title>Тарифы CatchWord — Free навсегда или Premium с безлимитом</title>
+        <meta name="description" content="Free навсегда: 10 сканов, коллекция и повторение. Premium — безлимит сканов, все языки, синхронизация и AI-примеры. От $4.99. Сравните тарифы CatchWord." />
+        <link rel="canonical" href={`${SITE_URL}/pricing`} />
+        <meta property="og:title" content="Тарифы CatchWord — Free и Premium" />
+        <meta property="og:description" content="Начни бесплатно. Premium снимает лимит сканов и открывает все языки. От $4.99." />
+        <meta property="og:url" content={`${SITE_URL}/pricing`} />
+        <meta property="og:image" content={`${SITE_URL}/og.png`} />
       </Head>
 
       <Container style={styles.header}>

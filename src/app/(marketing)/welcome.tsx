@@ -21,9 +21,7 @@ import Head from 'expo-router/head';
 import type { SFSymbol } from 'expo-symbols';
 
 import { Icon } from '@/components/icon';
-import { PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from '@/constants/links';
-import { useAuth } from '@/lib/auth-context';
-import { setGuest } from '@/lib/web-guest';
+import { PRIVACY_URL, SITE_URL, SUPPORT_EMAIL, TERMS_URL } from '@/constants/links';
 
 /** Фиксированная тёмно-серая палитра (Apple-like). Один тон — без ярких акцентов. */
 const C = {
@@ -66,24 +64,27 @@ const FAQ: { q: string; a: string }[] = [
 
 export default function Welcome() {
   const router = useRouter();
-  const { signInWithGoogle } = useAuth();
   const { width } = useWindowDimensions();
   const big = width >= 700;
 
-  const onStart = () => void signInWithGoogle().catch(() => {});
-  const onGuest = () => {
-    setGuest(true);
-    router.replace('/');
-  };
+  const onStart = () => router.push('/sign-in');
 
   return (
     <View style={styles.page}>
       <Head>
-        <title>CatchWord — учи язык через камеру</title>
+        <title>CatchWord — учи английский по фото: наведи камеру и лови слова</title>
         <meta
           name="description"
-          content="Наведи камеру на любой предмет — получи слово, перевод, произношение и карточку для запоминания. 10 сканов бесплатно."
+          content="CatchWord превращает мир вокруг в словарь: наведи камеру на предмет — получи слово, перевод, произношение и карточку с интервальным повторением. 10 сканов бесплатно, без карты."
         />
+        <link rel="canonical" href={`${SITE_URL}/welcome`} />
+        <meta property="og:title" content="CatchWord — учи язык через камеру" />
+        <meta
+          property="og:description"
+          content="Наведи камеру на предмет — поймай слово, перевод, произношение и карточку для повторения. 10 сканов бесплатно."
+        />
+        <meta property="og:url" content={`${SITE_URL}/welcome`} />
+        <meta property="og:image" content={`${SITE_URL}/og.png`} />
       </Head>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
@@ -101,8 +102,8 @@ export default function Welcome() {
             </Text>
             <View style={styles.heroCtas}>
               <Cta label="Начать бесплатно" onPress={onStart} />
-              <Pressable onPress={onGuest} hitSlop={8}>
-                <Text style={styles.link}>Осмотреться →</Text>
+              <Pressable onPress={onStart} hitSlop={8}>
+                <Text style={styles.link}>Войти →</Text>
               </Pressable>
             </View>
             <Text style={styles.heroNote}>10 сканов бесплатно · без карты</Text>
@@ -166,7 +167,6 @@ export default function Welcome() {
 
 function TopBar() {
   const router = useRouter();
-  const { signInWithGoogle } = useAuth();
   return (
     <View style={styles.topbar}>
       <View style={styles.topbarInner}>
@@ -177,7 +177,7 @@ function TopBar() {
           <Pressable onPress={() => router.push('/pricing')} hitSlop={8}>
             <Text style={styles.navLink}>Тарифы</Text>
           </Pressable>
-          <Pressable onPress={() => void signInWithGoogle().catch(() => {})} hitSlop={8}>
+          <Pressable onPress={() => router.push('/sign-in')} hitSlop={8}>
             <Text style={styles.navSignIn}>Войти</Text>
           </Pressable>
         </View>

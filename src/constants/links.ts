@@ -13,3 +13,5 @@ export const SUPPORT_EMAIL = 'nodes.kazakhstan@gmail.com';
 export const CONTACT_EMAIL = 'almaz.bukayev@narxoz.kz';
 export const GITHUB_USER = 'fertur228';
 export const GITHUB_URL = 'https://github.com/fertur228';
+/** Базовый URL веб-версии (для canonical / OG / sitemap). */
+export const SITE_URL = 'https://catch-word-web.pages.dev';

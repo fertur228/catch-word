@@ -31,8 +31,58 @@ export default function Root({ children }: PropsWithChildren) {
           content="Наведи камеру на предмет — поймай слово и карточку для повторения."
         />
         <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="CatchWord" />
+        <meta property="og:url" content="https://catch-word-web.pages.dev/" />
+        <meta property="og:image" content="https://catch-word-web.pages.dev/og.png" />
+        <meta property="og:locale" content="ru_RU" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="CatchWord — учи язык через камеру" />
+        <meta
+          name="twitter:description"
+          content="Наведи камеру на предмет — поймай слово, перевод, произношение и карточку."
+        />
+        <meta name="twitter:image" content="https://catch-word-web.pages.dev/og.png" />
+        <meta name="robots" content="index, follow, max-image-preview:large" />
+        <meta
+          name="keywords"
+          content="учить английский по фото, приложение для изучения слов, учить язык через камеру, интервальные повторения, флеш-карточки, распознавание предметов, CatchWord"
+        />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="CatchWord" />
+        <link rel="apple-touch-icon" href="/favicon.png" />
 
         {/* Шрифт — системный (как в нативной аппке), внешние веб-шрифты не грузим. */}
+
+        {/* Структурированные данные (JSON-LD) — для rich-результатов и GEO/AI-поиска.
+            Это настоящий DOM-<script>, поэтому попадает в статический HTML (в отличие
+            от <script> внутри expo-router/head). Сайт-wide: приложение + организация. */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@graph': [
+                {
+                  '@type': 'Organization',
+                  name: 'CatchWord',
+                  url: 'https://catch-word-web.pages.dev/',
+                  logo: 'https://catch-word-web.pages.dev/og.png',
+                },
+                {
+                  '@type': 'SoftwareApplication',
+                  name: 'CatchWord',
+                  applicationCategory: 'EducationalApplication',
+                  operatingSystem: 'iOS, Web',
+                  url: 'https://catch-word-web.pages.dev/',
+                  inLanguage: 'ru',
+                  description:
+                    'Учи язык через камеру: наведи на предмет — получи слово, перевод, произношение и карточку с интервальным повторением.',
+                  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+                },
+              ],
+            }),
+          }}
+        />
 
         {/* Сбрасывает скролл-поведение, чтобы body скроллился как в нативе. */}
         <ScrollViewStyleReset />
