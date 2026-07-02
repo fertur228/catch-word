@@ -1,9 +1,9 @@
 /**
  * Карточка ежедневного квеста для экрана Коллекции (на токенах темы).
  *
- * Показывает, что сегодня найти и сфотографировать, обратный отсчёт до смены
- * квеста (живой таймер ЧЧ:ММ:СС) и серию 🔥. Тап → Камера. Когда квест выполнен —
- * «зелёное» состояние с галочкой, а таймер превращается в «новый через …».
+ * Квест = найти 3 предмета за день. Показывает три цели-эмодзи (пойманные —
+ * с зелёной галочкой), прогресс X/3, обратный отсчёт до смены квеста (живой
+ * таймер ЧЧ:ММ:СС) и серию 🔥. Тап → Камера. Все 3 найдены — «зелёное» состояние.
  *
  * Данные и статус берём из useCollection() (см. collection-context / daily-quest).
  */
@@ -31,7 +31,8 @@ function formatCountdown(ms: number): string {
 export function DailyQuestCard() {
   const theme = useTheme();
   const router = useRouter();
-  const { dailyQuest, questDoneToday, questStreak } = useCollection();
+  const { dailyQuests, questFoundWords, questProgress, questDoneToday, questStreak } = useCollection();
+  const total = dailyQuests.length;
 
   // Живой обратный отсчёт — тикает раз в секунду, пока экран смонтирован.
   const [remaining, setRemaining] = useState(() => msUntilQuestReset());
@@ -41,22 +42,24 @@ export function DailyQuestCard() {
   }, []);
 
   const done = questDoneToday;
-  // Акцентный цвет карточки: зелёный (выполнено) или фирменный (в процессе).
   const tint = done ? theme.success : theme.primary;
   const tintSoft = done ? theme.successSoft : theme.primarySoft;
+  const isFound = (w: string) => questFoundWords.some((f) => f.toLowerCase() === w.toLowerCase());
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={done ? 'Квест дня выполнен' : `Квест дня: найди ${dailyQuest.translation}`}
+      accessibilityLabel={done ? 'Квест дня выполнен' : `Квест дня: найдено ${questProgress} из ${total}`}
       onPress={() => router.navigate('/(tabs)')}
       style={({ pressed }) => ({ opacity: pressed ? 0.9 : 1 })}>
       <View style={[styles.card, { backgroundColor: theme.card, borderColor: tint }]}>
-        {/* Шапка: ярлык «Квест дня» + таймер обратного отсчёта */}
+        {/* Шапка: «Квест дня · X/3» + таймер обратного отсчёта */}
         <View style={styles.top}>
           <View style={styles.labelRow}>
             <Icon name="target" size={14} color={tint} />
-            <Text style={[styles.label, { color: tint }]}>Квест дня</Text>
+            <Text style={[styles.label, { color: tint }]}>
+              Квест дня · {questProgress}/{total}
+            </Text>
           </View>
           <View style={[styles.timer, { backgroundColor: tintSoft }]}>
             <Icon name="clock.fill" size={12} color={tint} />
@@ -64,25 +67,32 @@ export function DailyQuestCard() {
           </View>
         </View>
 
-        {/* Тело: предмет-цель + призыв сфотографировать */}
+        {/* Тело: призыв + три цели-эмодзи */}
         <View style={styles.body}>
-          <View style={[styles.emojiWrap, { backgroundColor: tintSoft }]}>
-            {done ? (
-              <Icon name="checkmark" size={24} color={tint} />
-            ) : (
-              <Text style={styles.emoji}>{dailyQuest.emoji}</Text>
-            )}
-          </View>
-
           <View style={styles.texts}>
             <ThemedText type="small" themeColor="textSecondary">
-              {done ? 'Выполнено — отличная работа!' : 'Найди и сфотографируй'}
+              {done ? 'Выполнено — отличная работа!' : 'Найди и сфотографируй 3 предмета'}
             </ThemedText>
-            <ThemedText type="default" style={styles.target} numberOfLines={1}>
-              {done
-                ? `Новый квест через ${formatCountdown(remaining)}`
-                : `${dailyQuest.translation} · ${dailyQuest.word}`}
-            </ThemedText>
+            <View style={styles.emojiRow}>
+              {dailyQuests.map((q) => {
+                const got = isFound(q.word);
+                return (
+                  <View
+                    key={q.word}
+                    style={[
+                      styles.chip,
+                      { backgroundColor: got ? theme.successSoft : theme.backgroundElement },
+                    ]}>
+                    <Text style={styles.chipEmoji}>{q.emoji}</Text>
+                    {got ? (
+                      <View style={styles.chipCheck}>
+                        <Icon name="checkmark.circle.fill" size={15} color={theme.success} />
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
           </View>
 
           {questStreak > 0 ? (
@@ -128,16 +138,17 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   body: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
-  emojiWrap: {
-    width: 48,
-    height: 48,
+  texts: { flex: 1, gap: Spacing.two },
+  emojiRow: { flexDirection: 'row', gap: Spacing.two },
+  chip: {
+    width: 44,
+    height: 44,
     borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emoji: { fontSize: 26 },
-  texts: { flex: 1, gap: Spacing.half },
-  target: { fontWeight: '700' },
+  chipEmoji: { fontSize: 24 },
+  chipCheck: { position: 'absolute', top: -4, right: -4 },
   streak: {
     flexDirection: 'row',
     alignItems: 'center',

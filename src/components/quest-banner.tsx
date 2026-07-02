@@ -1,8 +1,8 @@
 /**
  * Баннер ежедневного квеста для оверлея камеры (поверх живого видео).
- * Показывает, что сегодня найти и сфотографировать, серию 🔥, и «выполнено» —
- * когда цель поймана. Тап по баннеру открывает подробное окно-объяснение
- * (как работают квесты — в духе игр). Цвета — белые/полупрозрачные.
+ * Квест дня = найти 3 предмета. Баннер показывает прогресс X/3, серию 🔥 и
+ * «выполнено», когда найдены все 3. Тап открывает подробное окно со списком
+ * трёх целей (какие уже пойманы) — в духе игр. Цвета — белые/полупрозрачные.
  */
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -32,8 +32,9 @@ const ON = '#FFFFFF';
 export function QuestBanner() {
   const theme = useTheme();
   const reduce = useReduceMotion();
-  const { dailyQuest, questDoneToday, questStreak } = useCollection();
+  const { dailyQuests, questFoundWords, questProgress, questDoneToday, questStreak } = useCollection();
   const [open, setOpen] = useState(false);
+  const total = dailyQuests.length;
 
   const bob = useSharedValue(0); // лёгкое покачивание, пока квест не выполнен
   const flame = useSharedValue(1); // пульс огонька серии
@@ -85,16 +86,16 @@ export function QuestBanner() {
           {questDoneToday ? (
             <Icon name="checkmark" size={18} color={ON} />
           ) : (
-            <Text style={styles.emoji}>{dailyQuest.emoji}</Text>
+            <Text style={styles.progress}>
+              {questProgress}/{total}
+            </Text>
           )}
         </Animated.View>
 
         <View style={styles.texts}>
           <Text style={styles.label}>{questDoneToday ? 'Квест выполнен' : 'Квест дня'}</Text>
           <Text style={styles.title} numberOfLines={1}>
-            {questDoneToday
-              ? 'Отличная работа!'
-              : `Найди и поймай: ${dailyQuest.translation} · ${dailyQuest.word}`}
+            {questDoneToday ? `Найдены все ${total}!` : `Найди ${total} предмета сегодня`}
           </Text>
         </View>
 
@@ -113,7 +114,10 @@ export function QuestBanner() {
       <QuestDetailSheet
         visible={open}
         onClose={() => setOpen(false)}
-        quest={dailyQuest}
+        quests={dailyQuests}
+        found={questFoundWords}
+        progress={questProgress}
+        total={total}
         done={questDoneToday}
         streak={questStreak}
       />
@@ -129,53 +133,79 @@ function formatLeft(ms: number): string {
   return `${m} мин`;
 }
 
-/** Подробное окно-объяснение квеста (снизу, как игровая подсказка). */
+/** Подробное окно квеста: три цели (какие пойманы) + объяснение (в духе игр). */
 function QuestDetailSheet({
   visible,
   onClose,
-  quest,
+  quests,
+  found,
+  progress,
+  total,
   done,
   streak,
 }: {
   visible: boolean;
   onClose: () => void;
-  quest: DailyQuest;
+  quests: DailyQuest[];
+  found: string[];
+  progress: number;
+  total: number;
   done: boolean;
   streak: number;
 }) {
   const theme = useTheme();
+  const isFound = (w: string) => found.some((f) => f.toLowerCase() === w.toLowerCase());
 
   return (
     <Modal visible={visible} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable
-          style={[styles.sheet, { backgroundColor: theme.card }]}
-          onPress={(e) => e.stopPropagation()}>
+        <Pressable style={[styles.sheet, { backgroundColor: theme.card }]} onPress={(e) => e.stopPropagation()}>
           <View style={[styles.grabber, { backgroundColor: theme.border }]} />
 
           <View style={styles.hero}>
-            <View
-              style={[
-                styles.heroIcon,
-                { backgroundColor: done ? theme.successSoft : theme.primarySoft },
-              ]}>
+            <View style={[styles.heroIcon, { backgroundColor: done ? theme.successSoft : theme.primarySoft }]}>
               {done ? (
                 <Icon name="checkmark.seal.fill" size={40} color={theme.success} />
               ) : (
-                <Text style={styles.heroEmoji}>{quest.emoji}</Text>
+                <Icon name="target" size={38} color={theme.primary} />
               )}
             </View>
             <ThemedText type="small" themeColor="textSecondary" style={styles.eyebrow}>
               {done ? 'КВЕСТ ВЫПОЛНЕН' : 'КВЕСТ ДНЯ'}
             </ThemedText>
             <ThemedText type="subtitle" style={styles.qTitle}>
-              {done ? 'Отличная работа!' : `Найди и поймай ${quest.translation}`}
+              {done ? 'Отличная работа!' : `Найди ${total} предмета`}
             </ThemedText>
-            {!done ? (
-              <ThemedText type="small" themeColor="textSecondary">
-                {quest.word} · {quest.ipa}
-              </ThemedText>
-            ) : null}
+            <ThemedText type="small" themeColor="textSecondary">
+              Прогресс: {progress}/{total}
+            </ThemedText>
+          </View>
+
+          {/* Три цели: эмодзи + перевод/слово + галочка, если поймана. */}
+          <View style={styles.targets}>
+            {quests.map((q) => {
+              const got = isFound(q.word);
+              return (
+                <View key={q.word} style={styles.targetRow}>
+                  <View
+                    style={[styles.targetIcon, { backgroundColor: got ? theme.successSoft : theme.backgroundElement }]}>
+                    <Text style={styles.targetEmoji}>{q.emoji}</Text>
+                  </View>
+                  <View style={styles.targetBody}>
+                    <ThemedText type="smallBold">{q.translation}</ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {q.word}
+                      {q.ipa ? ` · ${q.ipa}` : ''}
+                    </ThemedText>
+                  </View>
+                  <Icon
+                    name={got ? 'checkmark.circle.fill' : 'circle'}
+                    size={24}
+                    color={got ? theme.success : theme.border}
+                  />
+                </View>
+              );
+            })}
           </View>
 
           <View style={styles.rows}>
@@ -185,7 +215,7 @@ function QuestDetailSheet({
                 tone={theme.primary}
                 soft={theme.primarySoft}
                 title="Как выполнить"
-                text="Наведи камеру на этот предмет и поймай слово — квест засчитается автоматически."
+                text="Наведи камеру на любой из этих предметов и поймай слово — цель засчитается сама."
               />
             ) : null}
             <Row
@@ -195,8 +225,8 @@ function QuestDetailSheet({
               title={streak > 0 ? `Серия: ${streak} дн. подряд` : 'Серия дней'}
               text={
                 streak > 0
-                  ? 'Выполняй квест каждый день, чтобы серия росла и не сгорала.'
-                  : 'Выполни квест — начнётся серия 🔥. Заходи каждый день, чтобы её держать.'
+                  ? 'Находи все 3 предмета каждый день, чтобы серия росла и не сгорала.'
+                  : 'Найди все 3 — начнётся серия 🔥. Заходи каждый день, чтобы её держать.'
               }
             />
             <Row
@@ -204,7 +234,7 @@ function QuestDetailSheet({
               tone={theme.accent2}
               soft={theme.accent2Soft}
               title="Новый квест"
-              text={`Обновится через ${formatLeft(msUntilQuestReset())} — новая цель на завтра.`}
+              text={`Обновится через ${formatLeft(msUntilQuestReset())} — три новые цели на завтра.`}
             />
           </View>
 
@@ -263,7 +293,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.16)',
   },
-  emoji: { fontSize: 22 },
+  progress: { color: ON, fontSize: 15, fontWeight: '800' },
   texts: { flex: 1, gap: 1 },
   label: {
     color: 'rgba(255,255,255,0.75)',
@@ -304,9 +334,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: Spacing.one,
   },
-  heroEmoji: { fontSize: 44 },
   eyebrow: { letterSpacing: 0.6, fontWeight: '700' },
   qTitle: { textAlign: 'center' },
+
+  targets: { gap: Spacing.two },
+  targetRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  targetIcon: { width: 44, height: 44, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
+  targetEmoji: { fontSize: 24 },
+  targetBody: { flex: 1, gap: 1 },
+
   rows: { gap: Spacing.three },
   row: { flexDirection: 'row', gap: Spacing.three, alignItems: 'flex-start' },
   rowIcon: { width: 38, height: 38, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },

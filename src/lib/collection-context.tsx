@@ -27,7 +27,7 @@ import {
   pushCard,
   uploadSticker,
 } from '@/lib/cloud-sync';
-import { getDailyQuest, matchesQuest, todayIndex, type DailyQuest } from '@/lib/daily-quest';
+import { getDailyQuests, matchesQuest, todayIndex, type DailyQuest } from '@/lib/daily-quest';
 import { LEARNING_LANG, NATIVE_LANG } from '@/lib/mock-data';
 import { computeNextReview, freshSrs, isDue, isMastered } from '@/lib/srs';
 import type { CollectionStats, SrsRating, UserPrefs, WordCard } from '@/types';
@@ -40,6 +40,7 @@ const PREF_NATIVE = 'native_lang';
 const PREF_ONBOARDED = 'onboarded';
 const PREF_QUEST_LAST_DAY = 'quest_last_done_day';
 const PREF_QUEST_STREAK = 'quest_streak';
+const PREF_QUEST_FOUND = 'quest_found_today';
 
 /** Дефолтные настройки до загрузки/первого запуска (демо: English ← Русский). */
 const DEFAULT_PREFS: UserPrefs = {
@@ -83,14 +84,18 @@ interface CollectionContextValue {
   /** Оценить карточку в сессии повтора — пересчитать SRS и сохранить. */
   reviewCard: (id: string, rating: SrsRating) => Promise<void>;
 
-  // --- Ежедневный квест ---
-  /** Сегодняшний квест (что найти и сфотографировать). */
-  dailyQuest: DailyQuest;
-  /** Выполнен ли квест сегодня. */
+  // --- Ежедневный квест (найти 3 предмета за день) ---
+  /** Три сегодняшние цели (что найти и сфотографировать). */
+  dailyQuests: DailyQuest[];
+  /** Слова целей, которые уже найдены сегодня. */
+  questFoundWords: string[];
+  /** Сколько из целей найдено сегодня (0..3). */
+  questProgress: number;
+  /** Выполнен ли квест сегодня (найдены все цели). */
   questDoneToday: boolean;
   /** Текущая серия выполненных квестов (дней подряд). */
   questStreak: number;
-  /** Засчитать квест, если слово совпало с целью. true — если только что выполнен. */
+  /** Засчитать цель, если слово совпало. true — если цель только что поймана. */
   completeQuestForWord: (word: string) => Promise<boolean>;
 }
 
@@ -134,6 +139,8 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
   const [prefs, setPrefs] = useState<UserPrefs>(DEFAULT_PREFS);
   const [questLastDay, setQuestLastDay] = useState(-1);
   const [questStreak, setQuestStreak] = useState(0);
+  // Прогресс за день: какие из целей уже найдены (и к какому дню относится).
+  const [questFound, setQuestFound] = useState<{ day: number; words: string[] }>({ day: -1, words: [] });
 
   const { session, loading: authLoading } = useAuth();
   const userId = session?.user?.id ?? null;
@@ -144,12 +151,13 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     let alive = true;
     (async () => {
       // 1) Настройки + статус ежедневного квеста.
-      const [learning, native, onboarded, questDayStr, questStreakStr] = await Promise.all([
+      const [learning, native, onboarded, questDayStr, questStreakStr, questFoundStr] = await Promise.all([
         db.getPref(PREF_LEARNING),
         db.getPref(PREF_NATIVE),
         db.getPref(PREF_ONBOARDED),
         db.getPref(PREF_QUEST_LAST_DAY),
         db.getPref(PREF_QUEST_STREAK),
+        db.getPref(PREF_QUEST_FOUND),
       ]);
       if (!alive) return;
       setPrefs({
@@ -159,6 +167,16 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       });
       setQuestLastDay(questDayStr ? parseInt(questDayStr, 10) : -1);
       setQuestStreak(questStreakStr ? parseInt(questStreakStr, 10) : 0);
+      if (questFoundStr) {
+        try {
+          const parsed = JSON.parse(questFoundStr);
+          if (parsed && typeof parsed.day === 'number' && Array.isArray(parsed.words)) {
+            setQuestFound({ day: parsed.day, words: parsed.words.map(String) });
+          }
+        } catch {
+          /* игнорируем битый json */
+        }
+      }
       // Карточки загружаются отдельным эффектом ниже — СТРОГО по владельцу (аккаунту),
       // чтобы новый аккаунт не видел карточки прошлого юзера/старые локальные данные.
     })().catch((e) => {
@@ -331,25 +349,34 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     [cards, userId],
   );
 
-  // Ежедневный квест: что сегодня найти и сфотографировать (стабилен в течение сессии).
-  const dailyQuest = useMemo(() => getDailyQuest(), []);
+  // Три сегодняшние цели квеста (стабильны в течение сессии).
+  const dailyQuests = useMemo(() => getDailyQuests(), []);
 
   const completeQuestForWord = useCallback(
     async (word: string): Promise<boolean> => {
       const today = todayIndex();
-      if (questLastDay === today) return false; // уже выполнен сегодня
-      if (!matchesQuest(word, dailyQuest)) return false;
-      // Серия: если предыдущий квест был вчера — продолжаем, иначе начинаем заново.
-      const newStreak = questLastDay === today - 1 ? questStreak + 1 : 1;
-      await Promise.all([
-        db.setPref(PREF_QUEST_LAST_DAY, String(today)),
-        db.setPref(PREF_QUEST_STREAK, String(newStreak)),
-      ]);
-      setQuestLastDay(today);
-      setQuestStreak(newStreak);
+      // Какая из целей совпала со словом.
+      const target = dailyQuests.find((q) => matchesQuest(word, q));
+      if (!target) return false;
+      // Что уже найдено сегодня (при смене дня прогресс обнуляется).
+      const foundToday = questFound.day === today ? questFound.words : [];
+      if (foundToday.some((w) => w.toLowerCase() === target.word.toLowerCase())) return false; // уже поймана
+      const newFound = [...foundToday, target.word];
+      await db.setPref(PREF_QUEST_FOUND, JSON.stringify({ day: today, words: newFound }));
+      setQuestFound({ day: today, words: newFound });
+      // Все цели найдены и день ещё не отмечен выполненным → засчитываем квест + серию.
+      if (newFound.length >= dailyQuests.length && questLastDay !== today) {
+        const newStreak = questLastDay === today - 1 ? questStreak + 1 : 1;
+        await Promise.all([
+          db.setPref(PREF_QUEST_LAST_DAY, String(today)),
+          db.setPref(PREF_QUEST_STREAK, String(newStreak)),
+        ]);
+        setQuestLastDay(today);
+        setQuestStreak(newStreak);
+      }
       return true;
     },
-    [questLastDay, questStreak, dailyQuest],
+    [dailyQuests, questFound, questLastDay, questStreak],
   );
 
   // «Курс» = активная пара языков. Внутри `cards` лежат карточки ВСЕХ пар
@@ -401,7 +428,9 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       stats,
       dueCards,
       reviewCard,
-      dailyQuest,
+      dailyQuests,
+      questFoundWords: questFound.day === today ? questFound.words : [],
+      questProgress: questFound.day === today ? questFound.words.length : 0,
       questDoneToday: questLastDay === today,
       // Серия активна, если квест выполняли сегодня или вчера; иначе обнулена.
       questStreak: questLastDay >= today - 1 ? questStreak : 0,
@@ -425,7 +454,8 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     stats,
     dueCards,
     reviewCard,
-    dailyQuest,
+    dailyQuests,
+    questFound,
     questLastDay,
     questStreak,
     completeQuestForWord,
