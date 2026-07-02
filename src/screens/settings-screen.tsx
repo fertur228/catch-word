@@ -11,7 +11,7 @@
  */
 import { Children, Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Image, Linking, Modal, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
-import Animated, { SlideInDown, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { Easing, SlideInDown, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import * as Speech from 'expo-speech';
@@ -31,7 +31,14 @@ import { useCollection } from '@/lib/collection-context';
 import { useSubscription } from '@/lib/subscription';
 import { alertAsync, confirmAsync } from '@/lib/dialog';
 import { LANGUAGES, getLanguage } from '@/lib/mock-data';
-import { MANAGE_SUBSCRIPTION_URL, PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from '@/constants/links';
+import {
+  CONTACT_EMAIL,
+  GITHUB_URL,
+  GITHUB_USER,
+  MANAGE_SUBSCRIPTION_URL,
+  PRIVACY_URL,
+  TERMS_URL,
+} from '@/constants/links';
 import { setGuest } from '@/lib/web-guest';
 
 // --- Палитра «цветных кружков» под иконку строки (мягкий фон + насыщенная иконка) ---
@@ -191,6 +198,7 @@ export function SettingsScreen() {
   const [voicesLoading, setVoicesLoading] = useState(true);
   const [selectedVoice, setSelectedVoice] = useState<string | null>(null); // null = системный по умолчанию
   const [voiceOpen, setVoiceOpen] = useState(false); // открыт ли лист выбора голоса
+  const [contactOpen, setContactOpen] = useState(false); // открыт ли лист «Связаться с нами»
   const [toast, setToast] = useState<string | null>(null); // короткое подтверждение действий
 
   // Образец для пред-прослушки — название языка на нём самом (реальное слово).
@@ -449,7 +457,7 @@ export function SettingsScreen() {
               <SettingRow
                 icon="envelope.fill"
                 label="Связаться с нами"
-                onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=CatchWord`)}
+                onPress={() => setContactOpen(true)}
               />
             </Group>
           </Section>
@@ -502,6 +510,9 @@ export function SettingsScreen() {
         onSelect={chooseVoice}
         onClose={() => setVoiceOpen(false)}
       />
+
+      {/* Лист «Связаться с нами» (почта + GitHub) */}
+      <ContactSheet visible={contactOpen} bottomInset={insets.bottom} onClose={() => setContactOpen(false)} />
 
       {/* Тост-подтверждение (смена языка и т.п.) */}
       <Toast message={toast} onHide={() => setToast(null)} />
@@ -564,7 +575,7 @@ function LanguagePicker({ visible, title, currentCode, bottomInset, onSelect, on
         {/* Затемнение фона: тап вне листа — закрыть */}
         <Pressable style={[styles.backdrop, { backgroundColor: theme.overlay }]} onPress={onClose} />
         <Animated.View
-          entering={SlideInDown.springify().damping(20).stiffness(180)}
+          entering={SlideInDown.duration(300).easing(Easing.out(Easing.cubic))}
           style={[styles.sheet, { backgroundColor: theme.card, paddingBottom: bottomInset + Spacing.three }]}>
           <View style={[styles.grabber, { backgroundColor: theme.border }]} />
           <ThemedText type="default" style={styles.sheetTitle}>
@@ -644,7 +655,7 @@ function VoicePicker({ visible, voices, voicesLoading, selected, bottomInset, on
       <View style={styles.modalRoot}>
         <Pressable style={[styles.backdrop, { backgroundColor: theme.overlay }]} onPress={onClose} />
         <Animated.View
-          entering={SlideInDown.springify().damping(20).stiffness(180)}
+          entering={SlideInDown.duration(300).easing(Easing.out(Easing.cubic))}
           style={[styles.sheet, { backgroundColor: theme.card, paddingBottom: bottomInset + Spacing.three }]}>
           <View style={[styles.grabber, { backgroundColor: theme.border }]} />
           <ThemedText type="default" style={styles.sheetTitle}>
@@ -719,7 +730,92 @@ function VoiceOption({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Нижний лист «Связаться с нами» — почта и GitHub
+// ---------------------------------------------------------------------------
+
+function ContactSheet({
+  visible,
+  bottomInset,
+  onClose,
+}: {
+  visible: boolean;
+  bottomInset: number;
+  onClose: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalRoot}>
+        <Pressable style={[styles.backdrop, { backgroundColor: theme.overlay }]} onPress={onClose} />
+        <Animated.View
+          entering={SlideInDown.duration(300).easing(Easing.out(Easing.cubic))}
+          style={[styles.sheet, { backgroundColor: theme.card, paddingBottom: bottomInset + Spacing.three }]}>
+          <View style={[styles.grabber, { backgroundColor: theme.border }]} />
+          <ThemedText type="default" style={styles.sheetTitle}>
+            Связаться с нами
+          </ThemedText>
+          <View style={styles.sheetList}>
+            <ContactRow
+              icon="envelope.fill"
+              label="Почта"
+              value={CONTACT_EMAIL}
+              onPress={() => Linking.openURL(`mailto:${CONTACT_EMAIL}?subject=CatchWord`)}
+            />
+            <ContactRow
+              icon="chevron.left.forwardslash.chevron.right"
+              label="GitHub"
+              value={`@${GITHUB_USER}`}
+              onPress={() => Linking.openURL(GITHUB_URL)}
+            />
+          </View>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+function ContactRow({
+  icon,
+  label,
+  value,
+  onPress,
+}: {
+  icon: Parameters<typeof Icon>[0]['name'];
+  label: string;
+  value: string;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  const press = usePressScale(0.97);
+  return (
+    <Pressable onPress={onPress} onPressIn={press.onPressIn} onPressOut={press.onPressOut}>
+      {({ pressed }) => (
+        <Animated.View
+          style={[
+            styles.option,
+            press.animStyle,
+            { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' },
+          ]}>
+          <View style={[styles.contactIcon, { backgroundColor: theme.primarySoft }]}>
+            <Icon name={icon} size={18} color={theme.primary} />
+          </View>
+          <View style={styles.contactBody}>
+            <ThemedText type="smallBold">{label}</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {value}
+            </ThemedText>
+          </View>
+          <Icon name="arrow.up.right" size={15} color={theme.textSecondary} />
+        </Animated.View>
+      )}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  contactIcon: { width: 36, height: 36, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
+  contactBody: { flex: 1, gap: 1 },
   // Герой
   hero: {
     flexDirection: 'row',

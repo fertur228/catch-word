@@ -9,3 +9,7 @@ export const PRIVACY_URL = 'https://catch-words.com/privacy';
 export const MANAGE_SUBSCRIPTION_URL = 'https://apps.apple.com/account/subscriptions';
 /** Почта поддержки (mailto). */
 export const SUPPORT_EMAIL = 'nodes.kazakhstan@gmail.com';
+/** Контакты для раздела «Связаться с нами». */
+export const CONTACT_EMAIL = 'almaz.bukayev@narxoz.kz';
+export const GITHUB_USER = 'fertur228';
+export const GITHUB_URL = 'https://github.com/fertur228';
