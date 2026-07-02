@@ -34,6 +34,18 @@ import type { CollectionStats, SrsRating, UserPrefs, WordCard } from '@/types';
 
 const FREE_SCAN_LIMIT = 10;
 
+/** Результат попытки засчитать слово в квест дня. */
+export interface QuestCatch {
+  /** Поймана НОВАЯ цель квеста этим словом. */
+  caught: boolean;
+  /** Сколько целей найдено сегодня (0..3). */
+  progress: number;
+  /** Всего целей на день. */
+  total: number;
+  /** Этим уловом квест выполнен полностью (все цели). */
+  completed: boolean;
+}
+
 /** Ключи настроек в таблице key_value. */
 const PREF_LEARNING = 'learning_lang';
 const PREF_NATIVE = 'native_lang';
@@ -95,8 +107,8 @@ interface CollectionContextValue {
   questDoneToday: boolean;
   /** Текущая серия выполненных квестов (дней подряд). */
   questStreak: number;
-  /** Засчитать цель, если слово совпало. true — если цель только что поймана. */
-  completeQuestForWord: (word: string) => Promise<boolean>;
+  /** Засчитать цель, если слово совпало. Возвращает прогресс квеста (X/3). */
+  completeQuestForWord: (word: string) => Promise<QuestCatch>;
 }
 
 const CollectionContext = createContext<CollectionContextValue | null>(null);
@@ -353,19 +365,25 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
   const dailyQuests = useMemo(() => getDailyQuests(), []);
 
   const completeQuestForWord = useCallback(
-    async (word: string): Promise<boolean> => {
+    async (word: string): Promise<QuestCatch> => {
       const today = todayIndex();
-      // Какая из целей совпала со словом.
-      const target = dailyQuests.find((q) => matchesQuest(word, q));
-      if (!target) return false;
+      const total = dailyQuests.length;
       // Что уже найдено сегодня (при смене дня прогресс обнуляется).
       const foundToday = questFound.day === today ? questFound.words : [];
-      if (foundToday.some((w) => w.toLowerCase() === target.word.toLowerCase())) return false; // уже поймана
+      const alreadyDone = questLastDay === today;
+      // Какая из целей совпала со словом — и не поймана ли уже.
+      const target = dailyQuests.find((q) => matchesQuest(word, q));
+      const already =
+        target && foundToday.some((w) => w.toLowerCase() === target.word.toLowerCase());
+      if (!target || already) {
+        return { caught: false, progress: foundToday.length, total, completed: alreadyDone };
+      }
       const newFound = [...foundToday, target.word];
       await db.setPref(PREF_QUEST_FOUND, JSON.stringify({ day: today, words: newFound }));
       setQuestFound({ day: today, words: newFound });
       // Все цели найдены и день ещё не отмечен выполненным → засчитываем квест + серию.
-      if (newFound.length >= dailyQuests.length && questLastDay !== today) {
+      let completed = alreadyDone;
+      if (newFound.length >= total && !alreadyDone) {
         const newStreak = questLastDay === today - 1 ? questStreak + 1 : 1;
         await Promise.all([
           db.setPref(PREF_QUEST_LAST_DAY, String(today)),
@@ -373,8 +391,9 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
         ]);
         setQuestLastDay(today);
         setQuestStreak(newStreak);
+        completed = true;
       }
-      return true;
+      return { caught: true, progress: newFound.length, total, completed };
     },
     [dailyQuests, questFound, questLastDay, questStreak],
   );

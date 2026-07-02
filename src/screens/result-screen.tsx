@@ -136,8 +136,8 @@ export function ResultScreen() {
   const [content, setContent] = useState<CardContent>(() => fromRecognized(recognized));
   // Маленький «успех» после сохранения (зелёная печать на стикере) перед закрытием.
   const [saved, setSaved] = useState(false);
-  // Сегодняшний квест выполнен этим сохранением — показываем поздравление.
-  const [questCompleted, setQuestCompleted] = useState(false);
+  // Сообщение о квесте после сохранения: «Квест дня: 1 из 3» или «выполнен!».
+  const [questMsg, setQuestMsg] = useState<string | null>(null);
   // Слово уже было в коллекции — не плодим дубликат.
   const [alreadyHave, setAlreadyHave] = useState(false);
   const backTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -198,8 +198,8 @@ export function ResultScreen() {
       setSaved(true);
       feedbackWrong(); // мягкий «бзз» — уже поймано
       const q = await completeQuestForWord(content.word);
-      if (q) setQuestCompleted(true);
-      backTimer.current = setTimeout(() => router.back(), q ? 1900 : 1100);
+      if (q.caught) setQuestMsg(q.completed ? 'Квест дня выполнен!' : `Квест дня: ${q.progress} из ${q.total}`);
+      backTimer.current = setTimeout(() => router.back(), q.caught ? 1900 : 1100);
       return;
     }
     const sameWord = content.word === recognized.word;
@@ -226,10 +226,10 @@ export function ResultScreen() {
     setBurst((b) => b + 1); // ещё один салют на сохранение
     setFlyTs(Date.now()); // стикер «улетает» в коллекцию
     // Квест дня: если поймали целевой предмет — засчитываем и показываем дольше.
-    const questDone = await completeQuestForWord(card.word);
-    if (questDone) setQuestCompleted(true);
+    const q = await completeQuestForWord(card.word);
+    if (q.caught) setQuestMsg(q.completed ? 'Квест дня выполнен!' : `Квест дня: ${q.progress} из ${q.total}`);
     // Даём увидеть «печать» успеха (и квест), затем закрываем модалку.
-    backTimer.current = setTimeout(() => router.back(), questDone ? 1900 : 760);
+    backTimer.current = setTimeout(() => router.back(), q.caught ? 1900 : 760);
   }, [saved, content, recognized, addCard, router, completeQuestForWord, cards]);
 
   // «Переснять» — закрываем результат и возвращаемся к камере снять новый кадр.
@@ -345,13 +345,13 @@ export function ResultScreen() {
     <Screen scroll>
       {/* Группа появления. */}
       <View style={styles.reveal}>
-        {questCompleted ? (
+        {questMsg ? (
           <Animated.View
             entering={ZoomIn.springify().damping(13).stiffness(180)}
             style={[styles.questDone, { backgroundColor: theme.accentSoft }]}>
             <Icon name="sparkles" size={15} color={theme.accent} />
             <ThemedText type="smallBold" style={{ color: theme.accent }}>
-              Квест дня выполнен!
+              {questMsg}
             </ThemedText>
           </Animated.View>
         ) : null}
