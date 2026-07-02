@@ -174,7 +174,7 @@ export function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { prefs, setLanguages, cards, clearCollection, scansLeft, scanLimit } = useCollection();
   const { user, signInWithGoogle, signOut } = useAuth();
-  const { isPremium, status } = useSubscription();
+  const { isPremium, status, loading: subLoading } = useSubscription();
 
   // Ярлык тарифа для «пилюли»: Premium (активен/пробный) или Free.
   const planLabel = isPremium ? (status === 'trialing' ? 'Premium · пробный' : 'Premium') : 'Free';
@@ -393,7 +393,9 @@ export function SettingsScreen() {
         {/* PREMIUM: апселл + сканы + управление подпиской */}
         <Reveal delay={120}>
           <Section label="PREMIUM">
-            {!isPremium ? <PremiumBanner onPress={() => router.push('/paywall')} /> : null}
+            {/* Баннер апселла — только когда статус подписки уже известен,
+                иначе Premium-юзер на первом старте увидит его на миг. */}
+            {!isPremium && !subLoading ? <PremiumBanner onPress={() => router.push('/paywall')} /> : null}
             <Group>
               <SettingRow
                 icon="bolt.fill"

@@ -46,7 +46,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
 import { feedbackCorrect, feedbackTap, feedbackWrong } from '@/lib/feedback';
 import { speakWord } from '@/lib/speech';
-import { buildQuiz, type QuizQuestion } from '@/lib/quiz';
+import { buildQuiz, type QuizKind, type QuizQuestion } from '@/lib/quiz';
 import { computeNextReview } from '@/lib/srs';
 import type { SrsRating, WordCard } from '@/types';
 
@@ -58,7 +58,14 @@ const PRACTICE_COUNT = 5;
 /** Этапы сессии. */
 type Phase = 'intro' | 'flashcards' | 'test' | 'summary';
 /** Режим тренировки, выбранный на интро-экране. */
-type Mode = 'flashcards' | 'test';
+type Mode = 'flashcards' | 'smart' | 'listen' | 'sentence';
+
+/** Фиксированный формат вопроса для режима (undefined = адаптивный «Умный тест»). */
+function forceKindFor(m: Mode): QuizKind | undefined {
+  if (m === 'listen') return 'audioToWord';
+  if (m === 'sentence') return 'clozeExample';
+  return undefined;
+}
 
 /** Склонение слова «слово» по числу (1 слово / 2 слова / 5 слов). */
 function pluralWords(n: number): string {
@@ -101,7 +108,7 @@ export function ReviewSessionScreen() {
   // Текущий этап сессии. Режим один — единый адаптивный тест (mode оставлен для
   // совместимости со сводкой/расписанием, всегда 'test').
   const [phase, setPhase] = useState<Phase>('intro');
-  const [mode, setMode] = useState<Mode>('test');
+  const [mode, setMode] = useState<Mode>('smart');
 
   // --- Состояние режима «Флеш-карточки» ---
   const [index, setIndex] = useState(0);
@@ -146,11 +153,14 @@ export function ReviewSessionScreen() {
     setMissed([]);
   }, [prefs.learningLang, prefs.nativeLang]);
 
-  // Сборка очереди после загрузки коллекции (срабатывает один раз).
+  // Сборка очереди. Пересобираем, ПОКА не начата сессия (phase 'intro') и очередь
+  // ещё пустая/не собрана — чтобы подхватить карточки, подгрузившиеся из облака
+  // позже (частый кейс на вебе: раздел открыли раньше, чем синк вернул слова).
   useEffect(() => {
-    if (loading || queue !== null) return;
+    if (loading || phase !== 'intro') return;
+    if (queue && queue.length > 0) return; // валидная очередь уже собрана — не трогаем
     if (cards.length === 0) {
-      setQueue([]);
+      if (queue === null) setQueue([]);
       return;
     }
     if (dueCards.length > 0) {
@@ -160,7 +170,7 @@ export function ReviewSessionScreen() {
       setQueue(pickRandom(cards, Math.min(PRACTICE_COUNT, cards.length)));
       setPractice(true);
     }
-  }, [loading, queue, dueCards, cards]);
+  }, [loading, queue, dueCards, cards, phase]);
 
   const current = queue && index < queue.length ? queue[index] : undefined;
 
@@ -185,7 +195,7 @@ export function ReviewSessionScreen() {
       return;
     }
     if (celebratedRef.current || missed.length > 0) return;
-    const enough = mode === 'test' ? (quiz?.length ?? 0) >= 5 : reviewedCount >= 5;
+    const enough = mode !== 'flashcards' ? (quiz?.length ?? 0) >= 5 : reviewedCount >= 5;
     if (enough) {
       celebratedRef.current = true;
       setShowCelebration(true);
@@ -222,28 +232,24 @@ export function ReviewSessionScreen() {
       setQueue(q);
       setMode(m);
       setMissed([]);
-      if (m === 'test') {
+      if (m === 'flashcards') {
+        setIndex(0);
+        setRevealed(false);
+        setReviewedCount(0);
+        setPhase('flashcards');
+      } else {
         // Вопросы из очереди; дистракторы/картинки — из всей коллекции (пула).
-        setQuiz(buildQuiz(q, q.length, cards));
+        // «На слух» и «Слово в предложение» фиксируют формат через forceKindFor.
+        setQuiz(buildQuiz(q, q.length, cards, forceKindFor(m)));
         setQIndex(0);
         setSelected(null);
         setAnswered(false);
         setScore(0);
         setPhase('test');
-      } else {
-        setIndex(0);
-        setRevealed(false);
-        setReviewedCount(0);
-        setPhase('flashcards');
       }
     },
     [cards],
   );
-
-  // --- Старт выбранного режима с интро-экрана ---
-  const onStart = useCallback(() => {
-    if (queue) startWith(mode, queue);
-  }, [queue, mode, startWith]);
 
   // --- Пройти ещё раз тем же режимом (свежая очередь) ---
   const onRestart = useCallback(() => {
@@ -263,7 +269,7 @@ export function ReviewSessionScreen() {
   const onRetryMissed = useCallback(() => {
     if (missed.length === 0) return;
     feedbackTap();
-    startWith('test', missed);
+    startWith('smart', missed);
   }, [missed, startWith]);
 
   // --- Оценка карточки (режим флеш-карточек) ---
@@ -416,36 +422,62 @@ export function ReviewSessionScreen() {
     return (
       <Screen scroll>
         <View style={styles.intro}>
-          <Reveal distance={0}>
-            <Sticker
-              symbol={practice ? 'sparkles' : 'brain.head.profile'}
-              tone={practice ? 'accent2' : 'primary'}
-              size={120}
-            />
-          </Reveal>
           <Reveal delay={60}>
             <ThemedText type="subtitle" style={styles.centerText}>
               Повторение
             </ThemedText>
           </Reveal>
+          <Reveal delay={90}>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.centerText}>
+              Ежедневная практика помогает лучше запоминать слова
+            </ThemedText>
+          </Reveal>
           <Reveal delay={110}>
             <ThemedText type="default" themeColor="textSecondary" style={styles.centerText}>
               {practice
-                ? `На сегодня всё выучено! Потренируемся на ${n} ${pluralWords(n)}.`
-                : `Готово к повторению: ${n} ${pluralWords(n)}.`}
+                ? `На сегодня всё выучено — потренируемся на ${n} ${pluralWords(n)}.`
+                : `${n} ${pluralWords(n)} ждут повторения. Выбери режим:`}
             </ThemedText>
           </Reveal>
 
-          <Reveal delay={170}>
-            <ThemedText type="small" themeColor="textSecondary" style={styles.centerText}>
-              Новые слова знакомим, знакомые — проверяем: выбор, на слух, впиши, скажи вслух.
-              Формат подстраивается под то, насколько ты уже освоил слово.
-            </ThemedText>
-          </Reveal>
-
-          <Reveal delay={240} style={styles.introAction}>
-            <Button title="Начать" icon="play.fill" onPress={onStart} />
-          </Reveal>
+          <View style={styles.modeList}>
+            <Reveal delay={170}>
+              <ModeCard
+                icon="rectangle.on.rectangle.angled"
+                title="Карточки"
+                subtitle="Фото → слово, перевод и звук"
+                selected={false}
+                onPress={() => startWith('flashcards', queue)}
+              />
+            </Reveal>
+            <Reveal delay={210}>
+              <ModeCard
+                icon="brain.head.profile"
+                title="Умный тест"
+                subtitle="Разные форматы под твой уровень"
+                selected={false}
+                onPress={() => startWith('smart', queue)}
+              />
+            </Reveal>
+            <Reveal delay={250}>
+              <ModeCard
+                icon="ear"
+                title="На слух"
+                subtitle="Слушай слово — выбери ответ"
+                selected={false}
+                onPress={() => startWith('listen', queue)}
+              />
+            </Reveal>
+            <Reveal delay={290}>
+              <ModeCard
+                icon="text.insert"
+                title="Слово в предложение"
+                subtitle="Вставь пропущенное слово"
+                selected={false}
+                onPress={() => startWith('sentence', queue)}
+              />
+            </Reveal>
+          </View>
         </View>
       </Screen>
     );
@@ -541,24 +573,7 @@ export function ReviewSessionScreen() {
 
           <Reveal delay={300} style={styles.summaryActions}>
             <Button title="Пройти ещё раз" icon="play.fill" onPress={onRestart} />
-            <View style={styles.summaryNavRow}>
-              <View style={styles.summaryNavItem}>
-                <Button
-                  title="В коллекцию"
-                  icon="square.grid.2x2.fill"
-                  variant="ghost"
-                  onPress={() => router.replace('/(tabs)/collection')}
-                />
-              </View>
-              <View style={styles.summaryNavItem}>
-                <Button
-                  title="К камере"
-                  icon="camera.fill"
-                  variant="ghost"
-                  onPress={() => router.replace('/(tabs)')}
-                />
-              </View>
-            </View>
+            <Button title="К режимам" icon="chevron.left" variant="ghost" onPress={onChangeMode} />
           </Reveal>
         </View>
 
@@ -596,6 +611,7 @@ export function ReviewSessionScreen() {
 
     return (
       <Screen scroll>
+        <BackToModes onPress={onChangeMode} />
         {/* Шапка прогресса */}
         <View style={styles.progressBlock}>
           <View style={styles.progressRow}>
@@ -750,6 +766,7 @@ export function ReviewSessionScreen() {
   return (
     <Screen>
       <View style={styles.container}>
+        <BackToModes onPress={onChangeMode} />
         {/* Шапка прогресса */}
         <View style={styles.progressBlock}>
           {practice ? (
@@ -877,6 +894,24 @@ export function ReviewSessionScreen() {
   );
 }
 
+/** Компактная кнопка «‹ К режимам» — вернуться к выбору режима из активной сессии. */
+function BackToModes({ onPress }: { onPress: () => void }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel="Назад к режимам"
+      style={styles.backToModes}>
+      <Icon name="chevron.left" size={18} color={theme.textSecondary} />
+      <ThemedText type="small" themeColor="textSecondary">
+        К режимам
+      </ThemedText>
+    </Pressable>
+  );
+}
+
 /**
  * Карточка выбора режима на интро-экране — мягкий блок с иконкой, заголовком и
  * подписью. Выбранный обведён основным цветом и помечен галочкой. Лёгкая
@@ -932,11 +967,7 @@ function ModeCard({
             {subtitle}
           </ThemedText>
         </View>
-        <Icon
-          name={selected ? 'checkmark.circle.fill' : 'circle'}
-          size={24}
-          color={selected ? theme.primary : theme.border}
-        />
+        <Icon name="chevron.right" size={20} color={theme.textSecondary} />
       </Animated.View>
     </Pressable>
   );
@@ -1297,6 +1328,14 @@ const styles = StyleSheet.create({
   // Интро (выбор режима)
   intro: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three },
   modeList: { alignSelf: 'stretch', gap: Spacing.two, marginTop: Spacing.two },
+  backToModes: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
+    alignSelf: 'flex-start',
+    paddingVertical: Spacing.one,
+    marginBottom: Spacing.one,
+  },
   modeCard: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -105,6 +105,7 @@ function seedRecognized(
       category: r.category ?? null,
       notes: r.note || undefined,
       distractors: r.distractors ?? [],
+      synonyms: r.synonyms ?? [],
       learningLang: prefs.learningLang,
       nativeLang: prefs.nativeLang,
     };
@@ -215,6 +216,7 @@ export function ResultScreen() {
       examples: sameWord ? recognized.examples : [],
       notes: sameWord ? recognized.notes : undefined,
       distractors: sameWord ? recognized.distractors : undefined,
+      synonyms: sameWord ? recognized.synonyms : undefined,
       id: `${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
       createdAt: Date.now(),
     };
@@ -329,6 +331,7 @@ export function ResultScreen() {
   const sameWord = content.word === recognized.word;
   const examples = sameWord ? recognized.examples.slice(0, 3) : [];
   const note = sameWord ? recognized.notes : undefined;
+  const synonyms = sameWord ? (recognized.synonyms ?? []).slice(0, 3) : [];
   // Честная подсказка в редакторе: слово введено, но автоперевода нет.
   const showBackendHint = !draftAuto && draftWord.trim().length > 0;
 
@@ -563,6 +566,35 @@ export function ResultScreen() {
               </Reveal>
             ) : null}
 
+            {/* Синонимы (AI, до 3) — «ещё так говорят». */}
+            {synonyms.length > 0 ? (
+              <Reveal delay={320}>
+                <View
+                  style={[styles.exampleCard, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
+                  <View style={styles.exampleHeader}>
+                    <Icon name="arrow.left.arrow.right" size={15} color={theme.accent2} />
+                    <ThemedText type="smallBold" themeColor="textSecondary">
+                      Синонимы
+                    </ThemedText>
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.one }}>
+                    {synonyms.map((s, i) => (
+                      <View
+                        key={i}
+                        style={{
+                          paddingHorizontal: Spacing.three,
+                          paddingVertical: Spacing.one,
+                          borderRadius: Radius.pill,
+                          backgroundColor: theme.backgroundElement,
+                        }}>
+                        <ThemedText type="small">{s}</ThemedText>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              </Reveal>
+            ) : null}
+
             {/* Заметка-мнемоника (AI) — «как запомнить». */}
             {note ? (
               <Reveal delay={340}>
@@ -755,6 +787,7 @@ function SceneCatch({
         examples: r.examples ?? [],
         notes: r.note,
         distractors: r.distractors,
+        synonyms: r.synonyms,
         learningLang: prefs.learningLang,
         nativeLang: prefs.nativeLang,
         createdAt: Date.now() + i,

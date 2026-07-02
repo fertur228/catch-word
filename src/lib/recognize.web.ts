@@ -35,6 +35,7 @@ export interface RecognizedObject {
   examples?: string[];
   note?: string;
   distractors?: string[];
+  synonyms?: string[];
 }
 
 export function isRecognitionConfigured(): boolean {
@@ -205,6 +206,7 @@ export function toScanResult(obj: RecognizedObject, learningLang: string): ScanR
     examples: obj.examples ?? [],
     note: obj.note || undefined,
     distractors: obj.distractors ?? [],
+    synonyms: obj.synonyms ?? [],
     auto: true,
   };
 }

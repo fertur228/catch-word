@@ -50,6 +50,8 @@ export interface RecognizedObject {
   note?: string;
   /** Правдоподобные неправильные переводы — для умного теста. */
   distractors?: string[];
+  /** До 3 синонимов/близких по значению слов на изучаемом языке. */
+  synonyms?: string[];
 }
 
 /** Готов ли бэкенд распознавания (есть URL и ключ). */
@@ -257,6 +259,7 @@ export function toScanResult(obj: RecognizedObject, learningLang: string): ScanR
     examples: obj.examples ?? [],
     note: obj.note || undefined,
     distractors: obj.distractors ?? [],
+    synonyms: obj.synonyms ?? [],
     auto: true,
   };
 }

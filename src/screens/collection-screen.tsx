@@ -48,8 +48,10 @@ import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { feedbackSelection } from '@/lib/feedback';
+import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
 import { groupCardsByDay } from '@/lib/dates';
+import { firstNameOf, greetingByHour } from '@/lib/greeting';
 import { CATEGORIES } from '@/lib/mock-data';
 import { pluralWords } from '@/lib/plural';
 import { isMastered } from '@/lib/srs';
@@ -163,6 +165,8 @@ export function CollectionScreen() {
   const router = useRouter();
   const theme = useTheme();
   const { cards, loading, stats, removeCard } = useCollection();
+  const { user } = useAuth();
+  const firstName = firstNameOf(user);
 
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string>(ALL);
@@ -255,6 +259,14 @@ export function CollectionScreen() {
   // Передаём элементом (не функцией-компонентом), чтобы поле поиска не теряло фокус.
   const listHeader = (
     <View style={styles.header}>
+      {/* Приветствие по имени — приложение «общается» с пользователем */}
+      {firstName ? (
+        <Reveal distance={0}>
+          <ThemedText type="subtitle" style={styles.greeting}>
+            {greetingByHour(new Date().getHours())}, {firstName}!
+          </ThemedText>
+        </Reveal>
+      ) : null}
       {/* Статистика коллекции — единой сгруппированной карточкой (iOS-минимал) */}
       <Reveal delay={0}>
         <View style={[styles.statCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -399,6 +411,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   header: { gap: Spacing.three, marginBottom: Spacing.one },
+  greeting: { marginTop: Spacing.four, marginBottom: -Spacing.one },
   statCard: {
     flexDirection: 'row',
     alignItems: 'center',

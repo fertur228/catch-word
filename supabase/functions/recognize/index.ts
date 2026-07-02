@@ -78,7 +78,7 @@ const SCHEMA = {
         additionalProperties: false,
         required: [
           'word', 'translation', 'ipa', 'category', 'emoji', 'bbox', 'confidence',
-          'examples', 'note', 'distractors',
+          'examples', 'note', 'distractors', 'synonyms',
         ],
         properties: {
           word: { type: 'string' },
@@ -91,6 +91,7 @@ const SCHEMA = {
           examples: { type: 'array', items: { type: 'string' } },
           note: { type: 'string' },
           distractors: { type: 'array', items: { type: 'string' } },
+          synonyms: { type: 'array', items: { type: 'string' } },
         },
       },
     },
@@ -113,6 +114,7 @@ function buildPrompt(learningLang: string, nativeLang: string, maxObjects: numbe
     `- examples: array of 2 SHORT, natural example sentences in ${learningLang} that use the word, at a beginner (A1-A2) level.`,
     `- note: a SHORT memory hint in ${nativeLang} (a mnemonic, a false-friend warning, or a usage tip), at most ~12 words. Empty string "" if there is nothing useful.`,
     `- distractors: array of 3 plausible but INCORRECT ${nativeLang} translations — single words a learner might confuse with the correct translation (never equal to the correct translation).`,
+    `- synonyms: array of up to 3 common ${learningLang} synonyms or near-synonyms of the word (single words, never equal to the word itself). Empty array [] if there are none.`,
     `Order objects by prominence (main subject first). Return at most ${maxObjects} objects. If nothing recognizable, return an empty list.`,
     'Respond with ONLY a JSON object matching the schema — no prose, no markdown.',
   ].join('\n');
@@ -258,6 +260,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       examples: strList(o?.examples, 3),
       note: String(o?.note ?? '').trim(),
       distractors: strList(o?.distractors, 3),
+      synonyms: strList(o?.synonyms, 3),
     }))
     .filter((o: { word: string }) => o.word.length > 0)
     .slice(0, maxObjects);

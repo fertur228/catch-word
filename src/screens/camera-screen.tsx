@@ -393,7 +393,7 @@ const styles = StyleSheet.create({
   textCenter: { textAlign: 'center' },
 
   // --- Оверлей поверх камеры ---
-  overlay: { flex: 1, justifyContent: 'space-between' },
+  overlay: { flex: 1 },
   flash: { backgroundColor: ON_CAMERA },
 
   topRow: {
@@ -416,7 +416,9 @@ const styles = StyleSheet.create({
   },
 
   // --- Сканирующий визир (квадрат) ---
-  centerWrap: { alignItems: 'center', gap: Spacing.four },
+  // flex:1 + center — рамка ровно по центру между верхними и нижними контролами
+  // (раньше space-between «плавал» в зависимости от высоты блоков).
+  centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.four },
   frame: {
     width: FRAME,
     height: FRAME,

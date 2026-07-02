@@ -317,8 +317,22 @@ export function buildQuiz(
   cards: WordCard[],
   count: number = DEFAULT_COUNT,
   pool: WordCard[] = cards,
+  forceKind?: QuizKind,
 ): QuizQuestion[] {
   if (cards.length === 0) return [];
-  const chosen = shuffle([...cards]).slice(0, Math.max(1, Math.min(count, cards.length)));
-  return chosen.map((card, i) => makeQuestion(card, pool, kindForCard(card, pool, i), i));
+  let ordered = shuffle([...cards]);
+  // Режим с фиксированным форматом («на слух», «слово в предложение»): карточки,
+  // к которым формат применим, идут первыми — чтобы сессия была «чистой».
+  if (forceKind) {
+    ordered = ordered.sort(
+      (a, b) => Number(isValid(b, pool, forceKind)) - Number(isValid(a, pool, forceKind)),
+    );
+  }
+  const chosen = ordered.slice(0, Math.max(1, Math.min(count, cards.length)));
+  return chosen.map((card, i) => {
+    // В фиксированном режиме используем формат, если он применим к карточке;
+    // иначе — адаптивный выбор (не ломаем сессию для карточек без примера и т.п.).
+    const kind = forceKind && isValid(card, pool, forceKind) ? forceKind : kindForCard(card, pool, i);
+    return makeQuestion(card, pool, kind, i);
+  });
 }

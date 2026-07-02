@@ -10,45 +10,45 @@ export type SubscriptionStatus =
   | 'past_due'
   | 'revoked';
 
+// Кэш последнего известного статуса на время жизни приложения. Чтобы при
+// повторном открытии экрана (напр. Настроек) хук стартовал СРАЗУ с правильным
+// значением, а не мигал дефолтным «Free» до ответа Supabase.
+let cachedPremium = false;
+let cachedStatus: SubscriptionStatus = 'free';
+
 export function useSubscription() {
   const { session } = useAuth();
-  const [isPremium, setIsPremium] = useState(false);
-  const [status, setStatus] = useState<SubscriptionStatus>('free');
+  const [isPremium, setIsPremium] = useState(cachedPremium);
+  const [status, setStatus] = useState<SubscriptionStatus>(cachedStatus);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    if (!session?.user) {
-      setIsPremium(false);
-      setStatus('free');
-      setLoading(false);
-      return;
+    let premium = false;
+    let subStatus: SubscriptionStatus = 'free';
+
+    if (session?.user) {
+      const { data } = await supabase
+        .from('subscriptions')
+        .select('status, current_period_end')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (data) {
+        subStatus = (data.status as SubscriptionStatus) ?? 'free';
+        const periodEnd = data.current_period_end ? new Date(data.current_period_end) : null;
+        // Активен если: active, trialing, или canceled но ещё не истёк период.
+        premium =
+          subStatus === 'active' ||
+          subStatus === 'trialing' ||
+          (subStatus === 'canceled' && periodEnd !== null && periodEnd > new Date());
+      }
     }
 
-    const { data } = await supabase
-      .from('subscriptions')
-      .select('status, current_period_end')
-      .eq('user_id', session.user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (!data) {
-      setIsPremium(false);
-      setStatus('free');
-      setLoading(false);
-      return;
-    }
-
-    const subStatus = (data.status as SubscriptionStatus) ?? 'free';
-    const periodEnd = data.current_period_end ? new Date(data.current_period_end) : null;
-
-    // Активен если: active, trialing, или canceled но ещё не истёк период.
-    const active =
-      subStatus === 'active' ||
-      subStatus === 'trialing' ||
-      (subStatus === 'canceled' && periodEnd !== null && periodEnd > new Date());
-
-    setIsPremium(active);
+    cachedPremium = premium;
+    cachedStatus = subStatus;
+    setIsPremium(premium);
     setStatus(subStatus);
     setLoading(false);
   }, [session]);

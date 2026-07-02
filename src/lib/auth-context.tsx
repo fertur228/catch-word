@@ -20,6 +20,22 @@ interface AuthValue {
   loading: boolean;
   /** Войти через Google. Бросает ошибку при сбое. */
   signInWithGoogle: () => Promise<void>;
+  /** Вход по email и паролю. */
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  /** Регистрация по email/паролю (+ имя/фамилия в метаданных). Шлёт код на почту. */
+  signUpWithEmail: (email: string, password: string, firstName: string, lastName: string) => Promise<void>;
+  /** Подтвердить почту 6-значным кодом (после регистрации). Поднимает сессию. */
+  verifyEmailOtp: (email: string, token: string) => Promise<void>;
+  /** Отправить код подтверждения повторно. */
+  resendSignupOtp: (email: string) => Promise<void>;
+  /** Отправить письмо со 6-значным кодом для сброса пароля. */
+  sendPasswordReset: (email: string) => Promise<void>;
+  /** Подтвердить код сброса пароля (recovery OTP) — поднимает сессию. */
+  verifyRecoveryOtp: (email: string, token: string) => Promise<void>;
+  /** Задать новый пароль (в активной сессии). */
+  updatePassword: (newPassword: string) => Promise<void>;
+  /** Сохранить имя/фамилию в профиль аккаунта (шаг регистрации). */
+  updateProfileName: (firstName: string, lastName: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -62,13 +78,102 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const signInWithEmail = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    if (error) throw error;
+  };
+
+  const signUpWithEmail = async (
+    email: string,
+    password: string,
+    firstName: string,
+    lastName: string,
+  ) => {
+    const first = firstName.trim();
+    const last = lastName.trim();
+    const { error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: {
+        data: {
+          first_name: first,
+          last_name: last,
+          full_name: [first, last].filter(Boolean).join(' '),
+          profile_completed: true,
+        },
+      },
+    });
+    if (error) throw error;
+  };
+
+  const verifyEmailOtp = async (email: string, token: string) => {
+    const { error } = await supabase.auth.verifyOtp({
+      email: email.trim(),
+      token: token.trim(),
+      type: 'signup',
+    });
+    if (error) throw error;
+  };
+
+  const resendSignupOtp = async (email: string) => {
+    const { error } = await supabase.auth.resend({ type: 'signup', email: email.trim() });
+    if (error) throw error;
+  };
+
+  const sendPasswordReset = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+    if (error) throw error;
+  };
+
+  const verifyRecoveryOtp = async (email: string, token: string) => {
+    const { error } = await supabase.auth.verifyOtp({
+      email: email.trim(),
+      token: token.trim(),
+      type: 'recovery',
+    });
+    if (error) throw error;
+  };
+
+  const updatePassword = async (newPassword: string) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+  };
+
+  const updateProfileName = async (firstName: string, lastName: string) => {
+    const first = firstName.trim();
+    const last = lastName.trim();
+    const { error } = await supabase.auth.updateUser({
+      data: {
+        first_name: first,
+        last_name: last,
+        full_name: [first, last].filter(Boolean).join(' '),
+        profile_completed: true,
+      },
+    });
+    if (error) throw error;
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
   };
 
   return (
     <AuthContext.Provider
-      value={{ session, user: session?.user ?? null, loading, signInWithGoogle, signOut }}>
+      value={{
+        session,
+        user: session?.user ?? null,
+        loading,
+        signInWithGoogle,
+        signInWithEmail,
+        signUpWithEmail,
+        verifyEmailOtp,
+        resendSignupOtp,
+        sendPasswordReset,
+        verifyRecoveryOtp,
+        updatePassword,
+        updateProfileName,
+        signOut,
+      }}>
       {children}
     </AuthContext.Provider>
   );
