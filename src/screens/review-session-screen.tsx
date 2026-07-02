@@ -47,14 +47,11 @@ import { useCollection } from '@/lib/collection-context';
 import { feedbackCorrect, feedbackTap, feedbackWrong } from '@/lib/feedback';
 import { speakWord } from '@/lib/speech';
 import { buildQuiz, type QuizKind, type QuizQuestion } from '@/lib/quiz';
-import { computeNextReview } from '@/lib/srs';
+import { buildSessionQueue, computeNextReview, hasReviewWork } from '@/lib/srs';
 import type { SrsRating, WordCard } from '@/types';
 
 /** Сколько карточек максимум в одной сессии повтора. */
 const MAX_SESSION = 20;
-/** Сколько случайных слов брать для «тренировки», когда всё выучено. */
-const PRACTICE_COUNT = 5;
-
 /** Этапы сессии. */
 type Phase = 'intro' | 'flashcards' | 'test' | 'summary';
 /** Режим тренировки, выбранный на интро-экране. */
@@ -85,20 +82,10 @@ function formatInterval(minutes: number): string {
   return `${Math.round(hours / 24)} д`;
 }
 
-/** Перемешать и взять первые n элементов (Фишер–Йейтс). */
-function pickRandom<T>(arr: T[], n: number): T[] {
-  const copy = [...arr];
-  for (let i = copy.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy.slice(0, n);
-}
-
 export function ReviewSessionScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { loading, dueCards, cards, reviewCard, stats, prefs } = useCollection();
+  const { loading, cards, reviewCard, stats, prefs } = useCollection();
 
   // Очередь фиксируем один раз (снимок), чтобы она не «съезжала», когда
   // оценённые карточки покидают dueCards. null — ещё не собрана.
@@ -163,14 +150,10 @@ export function ReviewSessionScreen() {
       if (queue === null) setQueue([]);
       return;
     }
-    if (dueCards.length > 0) {
-      setQueue(dueCards.slice(0, MAX_SESSION));
-      setPractice(false);
-    } else {
-      setQueue(pickRandom(cards, Math.min(PRACTICE_COUNT, cards.length)));
-      setPractice(true);
-    }
-  }, [loading, queue, dueCards, cards, phase]);
+    // Немного новых слов + старые, которым пора (по забыванию), вперемешку.
+    setQueue(buildSessionQueue(cards, MAX_SESSION));
+    setPractice(!hasReviewWork(cards));
+  }, [loading, queue, cards, phase]);
 
   const current = queue && index < queue.length ? queue[index] : undefined;
 
@@ -216,13 +199,9 @@ export function ReviewSessionScreen() {
   // повторить, иначе — случайная тренировка. Тот же приоритет, что при первом входе.
   const buildFreshQueue = useCallback((): WordCard[] => {
     if (cards.length === 0) return [];
-    if (dueCards.length > 0) {
-      setPractice(false);
-      return dueCards.slice(0, MAX_SESSION);
-    }
-    setPractice(true);
-    return pickRandom(cards, Math.min(PRACTICE_COUNT, cards.length));
-  }, [cards, dueCards]);
+    setPractice(!hasReviewWork(cards));
+    return buildSessionQueue(cards, MAX_SESSION);
+  }, [cards]);
 
   // Запустить сессию заданного режима по заданной очереди. Сбрасывает всё
   // прогресс-состояние, поэтому годится и для старта, и для «пройти заново».

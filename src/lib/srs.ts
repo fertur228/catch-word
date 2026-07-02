@@ -110,6 +110,59 @@ export function isDue(card: Pick<WordCard, 'dueAt'>, now: number = Date.now()): 
   return (card.dueAt ?? 0) <= now;
 }
 
+/** Сколько НОВЫХ слов подмешивать в одну сессию. */
+const NEW_PER_SESSION = 6;
+
+/** Есть ли что учить/повторять: новые слова или просроченные по забыванию. */
+export function hasReviewWork(cards: WordCard[], now: number = Date.now()): boolean {
+  return cards.some((c) => (c.reps ?? 0) === 0 || isDue(c, now));
+}
+
+/** Перемешать копию массива (Фишер–Йейтс). */
+function shuffled<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/**
+ * Простая сборка сессии: к НОВЫМ словам (reps=0) подмешиваем СТАРЫЕ, которым уже
+ * пора (прошёл их «период полузабывания» — интервал), и всё перемешиваем. Если
+ * набралось мало — добираем слова, которые ближе всего к повтору (по dueAt).
+ * Так каждая сессия = немного нового + освежение старого, вперемешку.
+ */
+export function buildSessionQueue(
+  cards: WordCard[],
+  size = 20,
+  now: number = Date.now(),
+): WordCard[] {
+  const isNew = (c: WordCard) => (c.reps ?? 0) === 0;
+  const news = shuffled(cards.filter(isNew));
+  const dueOld = shuffled(cards.filter((c) => !isNew(c) && isDue(c, now)));
+
+  // Ядро: несколько новых + все просроченные старые.
+  const picked = [...news.slice(0, NEW_PER_SESSION), ...dueOld];
+  const inSession = new Set(picked.map((c) => c.id));
+
+  // Мало? Добираем словами, которые ближе всего к забыванию (раньше всех due).
+  if (picked.length < size) {
+    const rest = cards
+      .filter((c) => !inSession.has(c.id))
+      .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0));
+    for (const c of rest) {
+      if (picked.length >= size) break;
+      picked.push(c);
+      inSession.add(c.id);
+    }
+  }
+
+  // Перемешиваем новые и старые вместе и режем до размера сессии.
+  return shuffled(picked).slice(0, size);
+}
+
 /** Порог освоения: с этого уровня mastery слово считается «выученным». */
 export const MASTERY_LEARNED = 4;
 
