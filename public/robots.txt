@@ -17,4 +17,4 @@ Allow: /
 User-agent: Google-Extended
 Allow: /
 
-Sitemap: https://catch-word-web.pages.dev/sitemap.xml
+Sitemap: https://catch-words.com/sitemap.xml

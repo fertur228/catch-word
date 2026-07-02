@@ -32,8 +32,8 @@ export default function Root({ children }: PropsWithChildren) {
         />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="CatchWord" />
-        <meta property="og:url" content="https://catch-word-web.pages.dev/" />
-        <meta property="og:image" content="https://catch-word-web.pages.dev/og.png" />
+        <meta property="og:url" content="https://catch-words.com/" />
+        <meta property="og:image" content="https://catch-words.com/og.png" />
         <meta property="og:locale" content="ru_RU" />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content="CatchWord — учи язык через камеру" />
@@ -41,7 +41,7 @@ export default function Root({ children }: PropsWithChildren) {
           name="twitter:description"
           content="Наведи камеру на предмет — поймай слово, перевод, произношение и карточку."
         />
-        <meta name="twitter:image" content="https://catch-word-web.pages.dev/og.png" />
+        <meta name="twitter:image" content="https://catch-words.com/og.png" />
         <meta name="robots" content="index, follow, max-image-preview:large" />
         <meta
           name="keywords"
@@ -65,15 +65,15 @@ export default function Root({ children }: PropsWithChildren) {
                 {
                   '@type': 'Organization',
                   name: 'CatchWord',
-                  url: 'https://catch-word-web.pages.dev/',
-                  logo: 'https://catch-word-web.pages.dev/og.png',
+                  url: 'https://catch-words.com/',
+                  logo: 'https://catch-words.com/og.png',
                 },
                 {
                   '@type': 'SoftwareApplication',
                   name: 'CatchWord',
                   applicationCategory: 'EducationalApplication',
                   operatingSystem: 'iOS, Web',
-                  url: 'https://catch-word-web.pages.dev/',
+                  url: 'https://catch-words.com/',
                   inLanguage: 'ru',
                   description:
                     'Учи язык через камеру: наведи на предмет — получи слово, перевод, произношение и карточку с интервальным повторением.',
