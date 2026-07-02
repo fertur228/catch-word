@@ -1,9 +1,12 @@
 /**
- * Лендинг CatchWord (/welcome) — минималистичный, в духе нативных iOS/SwiftUI-
- * приложений: фиксированная тёмно-серая палитра (не зависит от темы), SF-
- * типографика, сгруппированные inset-списки с hairline-разделителями, крупный
- * тайтл, монохром, белая capsule-кнопка. Структура — по YC (hero → как работает
- * → возможности → тарифы → FAQ → CTA). Веб-first, но на RN-примитивах.
+ * Лендинг CatchWord (/welcome) — структура по образцу конкурента CapWords
+ * (герой → как работает → сценарии → карточка-сцена → умнее каждый день →
+ * возможности → приватность → тарифы → отзывы → манифест → FAQ → CTA → футер),
+ * но в нашей тёмной Apple-эстетике (фикс. графитовая палитра, SF-типографика,
+ * сгруппированные inset-карточки, белая capsule-кнопка). Веб-first, RN-примитивы.
+ *
+ * ЗАГЛУШКИ: где у CapWords живые демо/скриншоты — здесь <DemoPlaceholder/>
+ * (пунктирный бокс с иконкой play). Заменить на видео/скриншоты после съёмки.
  */
 import type { ReactNode } from 'react';
 import {
@@ -46,6 +49,14 @@ const HOW: { icon: SFSymbol; title: string; sub: string }[] = [
   { icon: 'arrow.triangle.2.circlepath', title: 'Запоминай', sub: 'Карточка вернётся на повтор ровно в нужный момент.' },
 ];
 
+const SCENARIOS: { icon: SFSymbol; title: string; sub: string }[] = [
+  { icon: 'house.fill', title: 'Дома', sub: 'Кухня, стол, полка — каждая вещь становится словом.' },
+  { icon: 'car.fill', title: 'В дороге и путешествии', sub: 'Меню, вывески, музеи — лови слова в поездке.' },
+  { icon: 'cup.and.saucer.fill', title: 'В городе', sub: 'Кафе, витрины, улицы — учись прямо на ходу.' },
+  { icon: 'graduationcap.fill', title: 'Учёба и работа', sub: 'Слова для кампуса, офиса и повседневной жизни.' },
+  { icon: 'bubble.left.and.bubble.right.fill', title: 'Вместе', sub: 'Дети и родители открывают язык в одной игре.' },
+];
+
 const FEATURES: { icon: SFSymbol; title: string; sub: string }[] = [
   { icon: 'sparkles', title: 'Умное распознавание', sub: 'Примеры, мнемоника и подсказки в одном касании.' },
   { icon: 'square.grid.2x2', title: 'Вся сцена', sub: 'До 8 предметов за один кадр.' },
@@ -55,11 +66,20 @@ const FEATURES: { icon: SFSymbol; title: string; sub: string }[] = [
   { icon: 'globe', title: 'Все языки', sub: 'Любая пара языков в Premium, на всех устройствах.' },
 ];
 
+const TESTIMONIALS = ['Отзыв появится здесь', 'Отзыв появится здесь', 'Отзыв появится здесь'];
+
+const MANIFESTO = [
+  'CatchWord построен на простой идее: любопытство — лучший учитель.',
+  'Мы превращаем повседневные моменты в то, что хочется запомнить.',
+  'Слова живут вокруг тебя — нужно лишь их поймать.',
+];
+
 const FAQ: { q: string; a: string }[] = [
+  { q: 'Что такое CatchWord?', a: 'Приложение, которое учит словам: наводишь камеру на предмет — получаешь слово, перевод, произношение и карточку для повторения.' },
+  { q: 'Как это работает?', a: 'Сфотографируй любой предмет — CatchWord распознаёт его и даёт слово, произношение и стикер на изучаемом языке.' },
   { q: 'CatchWord бесплатный?', a: '10 сканов бесплатно навсегда, без карты. Premium снимает лимит и открывает все языки.' },
   { q: 'Нужен интернет?', a: 'Для распознавания — да. Коллекция и повторение работают и офлайн.' },
-  { q: 'Где работает?', a: 'В браузере и как приложение — прогресс синхронизируется между устройствами.' },
-  { q: 'Как отменить Premium?', a: 'В любой момент, без скрытых списаний.' },
+  { q: 'Подойдёт детям?', a: 'Да: просто, наглядно и увлекательно — для любого возраста.' },
 ];
 
 export default function Welcome() {
@@ -93,12 +113,17 @@ export default function Welcome() {
         <View style={styles.container}>
           {/* ── HERO ── */}
           <View style={styles.hero}>
-            <Text style={[styles.h1, { fontSize: big ? 56 : 40, lineHeight: big ? 60 : 44, letterSpacing: big ? -1.4 : -1 }]}>
-              Мир вокруг —{'\n'}твой словарь.
+            <Badge icon="checkmark.seal.fill" label="Скоро в App Store" />
+            <Text
+              style={[
+                styles.h1,
+                { fontSize: big ? 56 : 40, lineHeight: big ? 60 : 44, letterSpacing: big ? -1.4 : -1 },
+              ]}>
+              Учи язык через{'\n'}знакомые вещи.
             </Text>
             <Text style={styles.heroSub}>
-              Наведи камеру на любой предмет — получи слово, перевод, произношение и карточку,
-              которая сама вернётся на повтор.
+              Учи языки через мир вокруг. CatchWord превращает повседневные предметы в твой
+              личный учебник.
             </Text>
             <View style={styles.heroCtas}>
               <Cta label="Начать бесплатно" onPress={onStart} />
@@ -108,10 +133,10 @@ export default function Welcome() {
             </View>
             <Text style={styles.heroNote}>10 сканов бесплатно · без карты</Text>
 
-            <WordCard />
+            <DemoPlaceholder label="Наведи камеру → поймай слово" tall />
           </View>
 
-          {/* ── HOW ── */}
+          {/* ── КАК ЭТО РАБОТАЕТ ── */}
           <Section header="Как это работает">
             <Group>
               {HOW.map((r, i) => (
@@ -120,7 +145,49 @@ export default function Welcome() {
             </Group>
           </Section>
 
-          {/* ── FEATURES ── */}
+          {/* ── СЦЕНАРИИ: где угодно, когда угодно ── */}
+          <Section header="Где угодно, когда угодно" intro="Дома, на улице или в путешествии — учись там, где живёшь.">
+            <View style={styles.scenarioWrap}>
+              {SCENARIOS.map((s) => (
+                <View key={s.title} style={[styles.scenario, { width: big ? '48%' : '100%' }]}>
+                  <DemoPlaceholder label={s.title} />
+                  <View style={styles.scenarioBody}>
+                    <View style={styles.tile}>
+                      <Icon name={s.icon} size={17} color={C.icon} />
+                    </View>
+                    <View style={styles.scenarioText}>
+                      <Text style={styles.rowTitle}>{s.title}</Text>
+                      <Text style={styles.rowSub}>{s.sub}</Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </Section>
+
+          {/* ── КАРТОЧКА-СЦЕНА ── */}
+          <Section header="Карточка-сцена">
+            <Statement big={big}>Сцена + картинка + слово = запоминается.</Statement>
+            <Text style={styles.blockText}>
+              Мозг цепляется за живые образы лучше, чем за сухие списки. Каждое слово —
+              это стикер настоящего предмета из твоего кадра.
+            </Text>
+            <WordCard />
+            <View style={styles.sciNote}>
+              <Icon name="lightbulb.fill" size={16} color={C.text2} />
+              <Text style={styles.sciText}>
+                Обучение с картинкой и контекстом запоминается заметно лучше, чем список слов.
+              </Text>
+            </View>
+          </Section>
+
+          {/* ── УМНЕЕ КАЖДЫЙ ДЕНЬ ── */}
+          <Section header="Учись умнее каждый день">
+            <Statement big={big}>Лови слова, повторяй карточки и строй свой язык — без усилий.</Statement>
+            <DemoPlaceholder label="Повторение: карточки, на слух, слово в предложение" />
+          </Section>
+
+          {/* ── ВОЗМОЖНОСТИ ── */}
           <Section header="Возможности">
             <Group>
               {FEATURES.map((r, i) => (
@@ -129,7 +196,19 @@ export default function Welcome() {
             </Group>
           </Section>
 
-          {/* ── PRICING ── */}
+          {/* ── ПРИВАТНОСТЬ ── */}
+          <Section header="Приватность">
+            <Group>
+              <Row
+                icon="lock.fill"
+                title="Твои данные под контролем"
+                sub="Фото используется только для распознавания предмета и не публикуется. Коллекцией управляешь ты — любое слово можно удалить в любой момент."
+                last
+              />
+            </Group>
+          </Section>
+
+          {/* ── ТАРИФЫ ── */}
           <Section header="Тарифы">
             <Group>
               <PriceRow name="Free" sub="10 сканов · один язык" price="$0" />
@@ -139,6 +218,30 @@ export default function Welcome() {
               <Text style={styles.link}>Все тарифы →</Text>
             </Pressable>
           </Section>
+
+          {/* ── ОТЗЫВЫ ── */}
+          <Section header="Нас любят" intro="Настоящие отзывы появятся после запуска — здесь будут реальные слова пользователей.">
+            <View style={styles.testWrap}>
+              {TESTIMONIALS.map((t, i) => (
+                <View key={i} style={[styles.testimonial, { width: big ? '31.5%' : '100%' }]}>
+                  <Text style={styles.stars}>★★★★★</Text>
+                  <Text style={styles.testTitle}>{t}</Text>
+                  <Text style={styles.testText}>После запуска здесь появится реальный отзыв из App Store.</Text>
+                  <Text style={styles.testAuthor}>— скоро</Text>
+                </View>
+              ))}
+            </View>
+            <DemoPlaceholder label="QR-код для скачивания приложения" />
+          </Section>
+
+          {/* ── МАНИФЕСТ ── */}
+          <View style={styles.manifesto}>
+            {MANIFESTO.map((line, i) => (
+              <Text key={i} style={[styles.manifestoLine, { color: i === 0 ? C.text : C.text2 }]}>
+                {line}
+              </Text>
+            ))}
+          </View>
 
           {/* ── FAQ ── */}
           <Section header="Вопросы">
@@ -186,6 +289,29 @@ function TopBar() {
   );
 }
 
+/** Небольшой пилюля-бейдж с иконкой (соц-доказательство / статус). */
+function Badge({ icon, label }: { icon: SFSymbol; label: string }) {
+  return (
+    <View style={styles.badge}>
+      <Icon name={icon} size={13} color={C.text2} />
+      <Text style={styles.badgeText}>{label}</Text>
+    </View>
+  );
+}
+
+/** Заглушка под видео/скриншот демонстрации. Заменить после съёмки. */
+function DemoPlaceholder({ label, tall }: { label: string; tall?: boolean }) {
+  return (
+    <View style={[styles.demo, { minHeight: tall ? 320 : 150 }]}>
+      <View style={styles.demoPlay}>
+        <Icon name="play.fill" size={18} color={C.text2} />
+      </View>
+      <Text style={styles.demoLabel}>{label}</Text>
+      <Text style={styles.demoHint}>заглушка · видео добавим после съёмки</Text>
+    </View>
+  );
+}
+
 /** Белая capsule-кнопка (Apple-like). */
 function Cta({ label, onPress }: { label: string; onPress: () => void }) {
   return (
@@ -195,13 +321,19 @@ function Cta({ label, onPress }: { label: string; onPress: () => void }) {
   );
 }
 
-function Section({ header, children }: { header: string; children: ReactNode }) {
+function Section({ header, intro, children }: { header: string; intro?: string; children: ReactNode }) {
   return (
     <View style={styles.section}>
       <Text style={styles.sectionHeader}>{header.toUpperCase()}</Text>
+      {intro ? <Text style={styles.sectionIntro}>{intro}</Text> : null}
       {children}
     </View>
   );
+}
+
+/** Крупное центрированное утверждение (как акцентные строки CapWords). */
+function Statement({ children, big }: { children: ReactNode; big?: boolean }) {
+  return <Text style={[styles.statement, { fontSize: big ? 28 : 23, lineHeight: big ? 36 : 30 }]}>{children}</Text>;
 }
 
 /** Сгруппированная inset-карточка (как секция iOS Settings). */
@@ -308,8 +440,24 @@ const styles = StyleSheet.create({
   navLink: { fontFamily: SF, fontSize: 15, fontWeight: '500', color: C.text2 },
   navSignIn: { fontFamily: SF, fontSize: 15, fontWeight: '600', color: C.text },
 
+  // Бейдж
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 980,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.hair,
+    backgroundColor: C.elev,
+    marginBottom: 22,
+  },
+  badgeText: { fontFamily: SF, fontSize: 13, fontWeight: '500', color: C.text2, letterSpacing: -0.1 },
+
   // Герой
-  hero: { paddingTop: 72 },
+  hero: { paddingTop: 60 },
   h1: { fontFamily: SF, fontWeight: '700', color: C.text },
   heroSub: { fontFamily: SF, fontSize: 18, lineHeight: 27, color: C.text2, maxWidth: 540, marginTop: 18 },
   heroCtas: { flexDirection: 'row', alignItems: 'center', gap: 22, marginTop: 30 },
@@ -327,12 +475,72 @@ const styles = StyleSheet.create({
   },
   ctaLabel: { fontFamily: SF, fontSize: 16, fontWeight: '600', color: C.ctaText, letterSpacing: -0.2 },
 
+  // Заглушка-демо
+  demo: {
+    width: '100%',
+    marginTop: 18,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: C.hair,
+    borderStyle: 'dashed',
+    backgroundColor: C.elev,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    padding: 20,
+  },
+  demoPlay: {
+    width: 44,
+    height: 44,
+    borderRadius: 980,
+    backgroundColor: C.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  demoLabel: { fontFamily: SF, fontSize: 15, fontWeight: '600', color: C.text, textAlign: 'center', letterSpacing: -0.2 },
+  demoHint: { fontFamily: SF, fontSize: 12, color: C.text3, textAlign: 'center' },
+
+  // Секции
+  section: { marginTop: 60 },
+  sectionHeader: { fontFamily: SF, fontSize: 12.5, fontWeight: '600', letterSpacing: 0.6, color: C.text3, marginLeft: 8, marginBottom: 12 },
+  sectionIntro: { fontFamily: SF, fontSize: 16, lineHeight: 23, color: C.text2, marginLeft: 8, marginBottom: 18, maxWidth: 560 },
+
+  // Утверждение
+  statement: { fontFamily: SF, fontWeight: '700', color: C.text, letterSpacing: -0.5, marginBottom: 14 },
+  blockText: { fontFamily: SF, fontSize: 16, lineHeight: 24, color: C.text2, maxWidth: 560, marginBottom: 20 },
+
+  // Сценарии
+  scenarioWrap: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 16 },
+  scenario: {
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.hair,
+    backgroundColor: C.elev,
+    padding: 14,
+    gap: 14,
+  },
+  scenarioBody: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  scenarioText: { flex: 1, gap: 3 },
+
+  // Наука-заметка
+  sciNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 18,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: C.elev,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.hair,
+  },
+  sciText: { flex: 1, fontFamily: SF, fontSize: 14, lineHeight: 20, color: C.text2 },
+
   // Карточка-визуал
   wordCard: {
     alignSelf: 'flex-start',
     width: '100%',
     maxWidth: 420,
-    marginTop: 40,
     padding: 20,
     borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
@@ -348,10 +556,6 @@ const styles = StyleSheet.create({
   wordSep: { height: StyleSheet.hairlineWidth, backgroundColor: C.hair },
   wordExample: { fontFamily: SF, fontSize: 14, color: C.text2 },
 
-  // Секции
-  section: { marginTop: 60 },
-  sectionHeader: { fontFamily: SF, fontSize: 12.5, fontWeight: '600', letterSpacing: 0.6, color: C.text3, marginLeft: 8, marginBottom: 12 },
-
   // Сгруппированный список
   group: { backgroundColor: C.elev, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: C.hair, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, paddingVertical: 14, paddingHorizontal: 16 },
@@ -362,6 +566,25 @@ const styles = StyleSheet.create({
   sep: { height: StyleSheet.hairlineWidth, backgroundColor: C.hair },
   price: { fontFamily: SF, fontSize: 16, fontWeight: '600', color: C.text, marginTop: 1 },
   moreLink: { alignSelf: 'flex-start', marginTop: 14, marginLeft: 4 },
+
+  // Отзывы
+  testWrap: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 16 },
+  testimonial: {
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.hair,
+    backgroundColor: C.elev,
+    padding: 16,
+    gap: 8,
+  },
+  stars: { fontFamily: SF, fontSize: 14, color: C.text2, letterSpacing: 2 },
+  testTitle: { fontFamily: SF, fontSize: 15, fontWeight: '600', color: C.text, letterSpacing: -0.2 },
+  testText: { fontFamily: SF, fontSize: 14, lineHeight: 20, color: C.text2 },
+  testAuthor: { fontFamily: SF, fontSize: 13, color: C.text3 },
+
+  // Манифест
+  manifesto: { marginTop: 72, gap: 12, alignItems: 'flex-start' },
+  manifestoLine: { fontFamily: SF, fontSize: 21, lineHeight: 30, fontWeight: '600', letterSpacing: -0.4, maxWidth: 600 },
 
   // Финальный CTA
   finalCta: { alignItems: 'center', marginTop: 72, gap: 14 },
