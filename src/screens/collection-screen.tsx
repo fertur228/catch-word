@@ -172,10 +172,11 @@ export function CollectionScreen() {
   const [category, setCategory] = useState<string>(ALL);
   const [mode, setMode] = useState<SortMode>('dates');
 
-  // Темы, реально присутствующие в коллекции (в порядке CATEGORIES) + «Все».
+  // Темы, реально присутствующие в коллекции (в порядке CATEGORIES). Без чипа «Все»:
+  // выбранная тема снимается повторным тапом (тогда снова видно все слова).
   const categories = useMemo(() => {
     const present = new Set(cards.map((c) => c.category).filter((c): c is string => !!c));
-    return [ALL, ...CATEGORIES.filter((c) => present.has(c))];
+    return CATEGORIES.filter((c) => present.has(c));
   }, [cards]);
 
   // Отфильтрованные карточки: тема + поиск по слову/переводу.
@@ -302,25 +303,28 @@ export function CollectionScreen() {
       </Reveal>
 
       {/* Чипы-темы (горизонтальная прокрутка, с выходом за поля) */}
-      <Reveal delay={120}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.chipsScroll}
-          contentContainerStyle={styles.chips}>
-          {categories.map((cat) => (
-            <Chip
-              key={cat}
-              label={cat}
-              selected={category === cat}
-              onPress={() => {
-                feedbackSelection();
-                setCategory(cat);
-              }}
-            />
-          ))}
-        </ScrollView>
-      </Reveal>
+      {categories.length > 0 ? (
+        <Reveal delay={120}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.chipsScroll}
+            contentContainerStyle={styles.chips}>
+            {categories.map((cat) => (
+              <Chip
+                key={cat}
+                label={cat}
+                selected={category === cat}
+                onPress={() => {
+                  feedbackSelection();
+                  // Повторный тап по выбранной теме снимает фильтр (снова все слова).
+                  setCategory((prev) => (prev === cat ? ALL : cat));
+                }}
+              />
+            ))}
+          </ScrollView>
+        </Reveal>
+      ) : null}
 
       {/* Сортировка: «По датам» | «По темам» */}
       <Reveal delay={150}>

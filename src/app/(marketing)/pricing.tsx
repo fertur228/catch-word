@@ -28,10 +28,10 @@ export default function Pricing() {
   return (
     <MarketingShell>
       <Head>
-        <title>Тарифы CatchWord — Free навсегда или Premium с безлимитом</title>
-        <meta name="description" content="Free навсегда: 10 сканов, коллекция и повторение. Premium — безлимит сканов, все языки, синхронизация и AI-примеры. От $4.99. Сравните тарифы CatchWord." />
+        <title>Тарифы TakeWord — Free навсегда или Premium с безлимитом</title>
+        <meta name="description" content="Free навсегда: 10 сканов, коллекция и повторение. Premium — безлимит сканов, все языки, синхронизация и AI-примеры. От $4.99. Сравните тарифы TakeWord." />
         <link rel="canonical" href={`${SITE_URL}/pricing`} />
-        <meta property="og:title" content="Тарифы CatchWord — Free и Premium" />
+        <meta property="og:title" content="Тарифы TakeWord — Free и Premium" />
         <meta property="og:description" content="Начни бесплатно. Premium снимает лимит сканов и открывает все языки. От $4.99." />
         <meta property="og:url" content={`${SITE_URL}/pricing`} />
         <meta property="og:image" content={`${SITE_URL}/og.png`} />

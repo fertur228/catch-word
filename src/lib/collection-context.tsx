@@ -32,7 +32,13 @@ import { LEARNING_LANG, NATIVE_LANG } from '@/lib/mock-data';
 import { computeNextReview, freshSrs, isDue, isMastered } from '@/lib/srs';
 import type { CollectionStats, SrsRating, UserPrefs, WordCard } from '@/types';
 
-const FREE_SCAN_LIMIT = 10;
+const FREE_SCAN_LIMIT = 3; // 3 бесплатных скана В ДЕНЬ (синхр. с RPC consume_scan)
+const FREE_TEST_LIMIT = 1; // 1 бесплатная попытка умного теста В ДЕНЬ
+const FREE_PAIR_LIMIT = 2; // free — максимум 2 пары языков (курса); 3-я → paywall
+
+const DAY_MS = 86_400_000;
+/** Индекс дня (UTC-сутки) из миллисекунд эпохи — как в computeStreak/квесте. */
+const dayIndexOf = (ms: number) => Math.floor(ms / DAY_MS);
 
 /** Результат попытки засчитать слово в квест дня. */
 export interface QuestCatch {
@@ -53,6 +59,8 @@ const PREF_ONBOARDED = 'onboarded';
 const PREF_QUEST_LAST_DAY = 'quest_last_done_day';
 const PREF_QUEST_STREAK = 'quest_streak';
 const PREF_QUEST_FOUND = 'quest_found_today';
+const PREF_TEST = 'test_attempts'; // {day, count} — попытки умного теста за день
+const PREF_ACTIVITY = 'activity_log'; // {dayIndex: testCount} — тесты по дням (для хитмапа)
 
 /** Дефолтные настройки до загрузки/первого запуска (демо: English ← Русский). */
 const DEFAULT_PREFS: UserPrefs = {
@@ -80,11 +88,27 @@ interface CollectionContextValue {
   refundScan: () => void;
   /** Пометить лимит исчерпанным (сервер вернул 402) — заблокировать до пейволла. */
   markScansExhausted: () => void;
+  /** Сколько попыток умного теста осталось сегодня (premium — без лимита). */
+  testsLeftToday: number;
+  /** Списать попытку теста. false — у free-пользователя лимит на сегодня исчерпан. */
+  useTestAttempt: () => boolean;
+  /** Активность по дням (dayIndex → сканы + тесты) — данные для хитмапа. */
+  activityByDay: Record<number, number>;
+  /** Серия дней подряд с активностью (сканы/тесты) — стрик повторений. */
+  reviewStreak: number;
+  /** Отметить пройденный тест в журнале активности (для хитмапа/стрика). */
+  recordTestSession: () => void;
 
   // --- Настройки пользователя (онбординг/языки) ---
   prefs: UserPrefs;
   /** Сохранить выбранные языки (изучения и родной). */
   setLanguages: (learning: string, native: string) => Promise<void>;
+  /** Можно ли free-пользователю выбрать эту пару языков (premium — всегда да). */
+  canUsePair: (learning: string, native: string) => boolean;
+  /** Сколько пар языков (курсов) уже начато — по карточкам. */
+  usedPairCount: number;
+  /** Лимит пар языков для free. */
+  pairLimit: number;
   /** Отметить онбординг пройденным (после выбора языка). */
   completeOnboarding: () => Promise<void>;
 
@@ -131,6 +155,22 @@ function computeStreak(cards: WordCard[]): number {
 }
 
 /**
+ * Тот же ли это UTC-день, что и сейчас. Дневной лимит сканов сбрасывается на
+ * сервере по current_date (UTC) — на клиенте сравниваем так же, чтобы остаток
+ * отображался согласованно с сервером.
+ */
+function isSameUtcDay(ts: string | null | undefined): boolean {
+  if (!ts) return false;
+  const d = new Date(ts);
+  const now = new Date();
+  return (
+    d.getUTCFullYear() === now.getUTCFullYear() &&
+    d.getUTCMonth() === now.getUTCMonth() &&
+    d.getUTCDate() === now.getUTCDate()
+  );
+}
+
+/**
  * Локальная картинка, которую нужно залить в Storage: нативный файл (file://, /)
  * или веб data/blob URL (вырез на вебе приходит как data URL).
  */
@@ -153,6 +193,11 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
   const [questStreak, setQuestStreak] = useState(0);
   // Прогресс за день: какие из целей уже найдены (и к какому дню относится).
   const [questFound, setQuestFound] = useState<{ day: number; words: string[] }>({ day: -1, words: [] });
+  // Попытки умного теста за день (локально — у теста нет серверной цены).
+  const [testAttempts, setTestAttempts] = useState<{ day: number; count: number }>({ day: -1, count: 0 });
+  // Журнал активности: тесты по дням (dayIndex → count). Сканы для хитмапа берём из
+  // cards.createdAt, поэтому здесь держим ТОЛЬКО тесты (чтобы не задваивать сканы).
+  const [testLog, setTestLog] = useState<Record<number, number>>({});
 
   const { session, loading: authLoading } = useAuth();
   const userId = session?.user?.id ?? null;
@@ -163,14 +208,16 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     let alive = true;
     (async () => {
       // 1) Настройки + статус ежедневного квеста.
-      const [learning, native, onboarded, questDayStr, questStreakStr, questFoundStr] = await Promise.all([
-        db.getPref(PREF_LEARNING),
-        db.getPref(PREF_NATIVE),
-        db.getPref(PREF_ONBOARDED),
-        db.getPref(PREF_QUEST_LAST_DAY),
-        db.getPref(PREF_QUEST_STREAK),
-        db.getPref(PREF_QUEST_FOUND),
-      ]);
+      const [learning, native, onboarded, questDayStr, questStreakStr, questFoundStr, testStr] =
+        await Promise.all([
+          db.getPref(PREF_LEARNING),
+          db.getPref(PREF_NATIVE),
+          db.getPref(PREF_ONBOARDED),
+          db.getPref(PREF_QUEST_LAST_DAY),
+          db.getPref(PREF_QUEST_STREAK),
+          db.getPref(PREF_QUEST_FOUND),
+          db.getPref(PREF_TEST),
+        ]);
       if (!alive) return;
       setPrefs({
         learningLang: learning ?? DEFAULT_PREFS.learningLang,
@@ -184,6 +231,16 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
           const parsed = JSON.parse(questFoundStr);
           if (parsed && typeof parsed.day === 'number' && Array.isArray(parsed.words)) {
             setQuestFound({ day: parsed.day, words: parsed.words.map(String) });
+          }
+        } catch {
+          /* игнорируем битый json */
+        }
+      }
+      if (testStr) {
+        try {
+          const parsed = JSON.parse(testStr);
+          if (parsed && typeof parsed.day === 'number' && typeof parsed.count === 'number') {
+            setTestAttempts({ day: parsed.day, count: parsed.count });
           }
         } catch {
           /* игнорируем битый json */
@@ -313,11 +370,14 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       try {
         const { data } = await supabase
           .from('scan_usage')
-          .select('used')
+          .select('used, updated_at')
           .eq('user_id', userId)
           .maybeSingle();
         if (!alive || !data) return;
-        setScansLeft(Math.max(0, FREE_SCAN_LIMIT - (data.used ?? 0)));
+        // Дневной лимит: если последняя активность была не сегодня (UTC) — счётчик
+        // уже «сброшен» (сервер обнулит при следующем скане), показываем полный остаток.
+        const usedToday = isSameUtcDay(data.updated_at as string | null) ? (data.used ?? 0) : 0;
+        setScansLeft(Math.max(0, FREE_SCAN_LIMIT - usedToday));
       } catch {
         /* сеть недоступна — оставляем текущее значение */
       }
@@ -347,6 +407,88 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     await db.setPref(PREF_ONBOARDED, 'true');
     setPrefs((p) => ({ ...p, onboarded: true }));
   }, []);
+
+  // Уникальные пары языков (курсы), которые у пользователя УЖЕ есть — по карточкам
+  // ВСЕХ пар (не только активной). На них завязан free-лимит в 2 пары.
+  const usedPairs = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of cards) set.add(`${c.learningLang}|${c.nativeLang}`);
+    return set;
+  }, [cards]);
+
+  // Может ли free-пользователь открыть эту пару. Premium — без ограничений. Уже
+  // начатую пару менять можно всегда; новую — только пока есть свободный слот (<2).
+  const canUsePair = useCallback(
+    (learning: string, native: string) => {
+      if (isPremium) return true;
+      if (usedPairs.has(`${learning}|${native}`)) return true;
+      return usedPairs.size < FREE_PAIR_LIMIT;
+    },
+    [isPremium, usedPairs],
+  );
+
+  // Журнал активности грузим один раз при монтировании.
+  useEffect(() => {
+    let alive = true;
+    db.getPref(PREF_ACTIVITY)
+      .then((raw) => {
+        if (!alive || !raw) return;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            const map: Record<number, number> = {};
+            for (const [k, v] of Object.entries(parsed)) {
+              const d = Number(k);
+              const n = Number(v);
+              if (Number.isFinite(d) && Number.isFinite(n)) map[d] = n;
+            }
+            setTestLog(map);
+          }
+        } catch {
+          /* битый json — игнорируем */
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Отметить пройденный тест: +1 к сегодняшнему дню в журнале активности.
+  const recordTestSession = useCallback(() => {
+    const d = dayIndexOf(Date.now());
+    setTestLog((prev) => {
+      const next = { ...prev, [d]: (prev[d] ?? 0) + 1 };
+      void db.setPref(PREF_ACTIVITY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  // Активность по дням: сканы (из createdAt всех карточек) + тесты (журнал).
+  const activityByDay = useMemo(() => {
+    const map: Record<number, number> = {};
+    for (const c of cards) {
+      const d = dayIndexOf(c.createdAt);
+      map[d] = (map[d] ?? 0) + 1;
+    }
+    for (const [k, v] of Object.entries(testLog)) {
+      const d = Number(k);
+      map[d] = (map[d] ?? 0) + v;
+    }
+    return map;
+  }, [cards, testLog]);
+
+  // Стрик повторений: сколько дней подряд (считая сегодня/вчера) была активность.
+  const reviewStreak = useMemo(() => {
+    const today = dayIndexOf(Date.now());
+    let cursor = (activityByDay[today] ?? 0) > 0 ? today : today - 1;
+    let streak = 0;
+    while ((activityByDay[cursor] ?? 0) > 0) {
+      streak += 1;
+      cursor -= 1;
+    }
+    return streak;
+  }, [activityByDay]);
 
   const reviewCard = useCallback(
     async (id: string, rating: SrsRating) => {
@@ -398,6 +540,18 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     [dailyQuests, questFound, questLastDay, questStreak],
   );
 
+  // Списать попытку умного теста (free = FREE_TEST_LIMIT в день). Premium — без лимита.
+  const useTestAttempt = useCallback((): boolean => {
+    if (isPremium) return true;
+    const today = todayIndex();
+    const count = testAttempts.day === today ? testAttempts.count : 0;
+    if (count >= FREE_TEST_LIMIT) return false;
+    const next = { day: today, count: count + 1 };
+    setTestAttempts(next);
+    void db.setPref(PREF_TEST, JSON.stringify(next));
+    return true;
+  }, [isPremium, testAttempts]);
+
   // «Курс» = активная пара языков. Внутри `cards` лежат карточки ВСЕХ пар
   // (так проще для облачной синхронизации), но наружу — на экраны, в статистику
   // и в очередь повтора — отдаём только слова текущей пары. Сменил пару в
@@ -441,8 +595,18 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       tryScan,
       refundScan,
       markScansExhausted,
+      testsLeftToday: isPremium
+        ? 9999
+        : Math.max(0, FREE_TEST_LIMIT - (testAttempts.day === today ? testAttempts.count : 0)),
+      useTestAttempt,
+      activityByDay,
+      reviewStreak,
+      recordTestSession,
       prefs,
       setLanguages,
+      canUsePair,
+      usedPairCount: usedPairs.size,
+      pairLimit: FREE_PAIR_LIMIT,
       completeOnboarding,
       stats,
       dueCards,
@@ -467,8 +631,15 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     tryScan,
     refundScan,
     markScansExhausted,
+    testAttempts,
+    useTestAttempt,
+    activityByDay,
+    reviewStreak,
+    recordTestSession,
     prefs,
     setLanguages,
+    canUsePair,
+    usedPairs,
     completeOnboarding,
     stats,
     dueCards,

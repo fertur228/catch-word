@@ -8,9 +8,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import type { Session, User } from '@supabase/supabase-js';
 
 import { supabase } from '@/lib/supabase';
+import { configureIap, iapLogIn, iapLogOut } from '@/lib/iap';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -20,6 +23,8 @@ interface AuthValue {
   loading: boolean;
   /** Войти через Google. Бросает ошибку при сбое. */
   signInWithGoogle: () => Promise<void>;
+  /** Войти через Apple (нативно, только iOS). Бросает ошибку или отмену. */
+  signInWithApple: () => Promise<void>;
   /** Вход по email и паролю. */
   signInWithEmail: (email: string, password: string) => Promise<void>;
   /** Регистрация по email/паролю (+ имя/фамилия в метаданных). Шлёт код на почту. */
@@ -37,6 +42,8 @@ interface AuthValue {
   /** Сохранить имя/фамилию в профиль аккаунта (шаг регистрации). */
   updateProfileName: (firstName: string, lastName: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** Полностью удалить аккаунт и все данные (edge-функция delete-account), затем выйти. */
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -54,6 +61,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  // RevenueCat (Apple IAP, iOS) — инициализация один раз на старте.
+  useEffect(() => {
+    configureIap();
+  }, []);
+
+  // Привязываем покупки к аккаунту: App User ID в RevenueCat = Supabase user.id
+  // (= Polar reference_id) → единая подписка на всех устройствах и платформах.
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (uid) void iapLogIn(uid);
+    else void iapLogOut();
+  }, [session?.user?.id]);
 
   const signInWithGoogle = async () => {
     const redirectTo = Linking.createURL('auth-callback');
@@ -75,6 +95,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const refresh_token = params.get('refresh_token');
     if (access_token && refresh_token) {
       await supabase.auth.setSession({ access_token, refresh_token });
+    }
+  };
+
+  const signInWithApple = async () => {
+    // nonce от replay-атак: сырой уходит в Supabase, его SHA-256 — в Apple.
+    const rawNonce = Crypto.randomUUID();
+    const hashedNonce = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      rawNonce,
+    );
+
+    const credential = await AppleAuthentication.signInAsync({
+      requestedScopes: [
+        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+      ],
+      nonce: hashedNonce,
+    });
+
+    if (!credential.identityToken) throw new Error('Apple не вернул identityToken');
+
+    const { error } = await supabase.auth.signInWithIdToken({
+      provider: 'apple',
+      token: credential.identityToken,
+      nonce: rawNonce,
+    });
+    if (error) throw error;
+
+    // Имя Apple отдаёт ТОЛЬКО при первом входе — сразу кладём в метаданные,
+    // чтобы не переспрашивать (Apple Guideline 4.0). profile_completed НЕ ставим:
+    // экран complete-profile предзаполнится этим именем, юзер подтвердит.
+    const first = credential.fullName?.givenName?.trim() ?? '';
+    const last = credential.fullName?.familyName?.trim() ?? '';
+    if (first || last) {
+      await supabase.auth.updateUser({
+        data: {
+          first_name: first,
+          last_name: last,
+          full_name: [first, last].filter(Boolean).join(' '),
+        },
+      });
     }
   };
 
@@ -157,6 +218,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   };
 
+  const deleteAccount = async () => {
+    // Серверное удаление аккаунта + всех данных (service_role, см. edge-функцию).
+    const { error } = await supabase.functions.invoke('delete-account', { method: 'POST' });
+    if (error) throw error;
+    // Аккаунта больше нет — гасим локальную сессию.
+    await supabase.auth.signOut();
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -164,6 +233,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user: session?.user ?? null,
         loading,
         signInWithGoogle,
+        signInWithApple,
         signInWithEmail,
         signUpWithEmail,
         verifyEmailOtp,
@@ -173,6 +243,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         updatePassword,
         updateProfileName,
         signOut,
+        deleteAccount,
       }}>
       {children}
     </AuthContext.Provider>

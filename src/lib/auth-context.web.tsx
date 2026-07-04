@@ -18,6 +18,8 @@ interface AuthValue {
   loading: boolean;
   /** Войти через Google. Уводит страницу на OAuth-провайдера. */
   signInWithGoogle: () => Promise<void>;
+  /** Войти через Apple — на web не поддерживается (нативная кнопка только iOS). */
+  signInWithApple: () => Promise<void>;
   /** Вход по email и паролю. */
   signInWithEmail: (email: string, password: string) => Promise<void>;
   /** Регистрация по email/паролю (+ имя/фамилия в метаданных). Шлёт код на почту. */
@@ -35,6 +37,8 @@ interface AuthValue {
   /** Сохранить имя/фамилию в профиль аккаунта (шаг регистрации). */
   updateProfileName: (firstName: string, lastName: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** Полностью удалить аккаунт и все данные (edge-функция delete-account), затем выйти. */
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -62,6 +66,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     if (error) throw error;
     // Дальше браузер сам уходит на Google и возвращается на /auth-callback.
+  };
+
+  // На web нативного Sign in with Apple нет; кнопку показываем только на iOS,
+  // поэтому сюда попасть не должны — но метод держим для совпадения интерфейса.
+  const signInWithApple = async () => {
+    throw new Error('Sign in with Apple доступен только на iOS');
   };
 
   const signInWithEmail = async (email: string, password: string) => {
@@ -143,6 +153,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   };
 
+  const deleteAccount = async () => {
+    // Серверное удаление аккаунта + всех данных (service_role, см. edge-функцию).
+    const { error } = await supabase.functions.invoke('delete-account', { method: 'POST' });
+    if (error) throw error;
+    // Аккаунта больше нет — гасим локальную сессию.
+    await supabase.auth.signOut();
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -150,6 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user: session?.user ?? null,
         loading,
         signInWithGoogle,
+        signInWithApple,
         signInWithEmail,
         signUpWithEmail,
         verifyEmailOtp,
@@ -159,6 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         updatePassword,
         updateProfileName,
         signOut,
+        deleteAccount,
       }}>
       {children}
     </AuthContext.Provider>

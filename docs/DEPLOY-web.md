@@ -1,4 +1,4 @@
-# Деплой веб-версии CatchWord (Cloudflare Pages + Supabase)
+# Деплой веб-версии TakeWord (Cloudflare Pages + Supabase)
 
 Веб — это тот же Expo-проект, собранный для браузера (`expo export -p web` →
 статический `dist/`). Бэкенд — тот же Supabase (auth, Postgres `word_cards`,

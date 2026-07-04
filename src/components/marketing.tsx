@@ -71,7 +71,7 @@ function TopBar() {
           <View style={[styles.brandMark, { backgroundColor: theme.primary }]}>
             <Icon name="camera.fill" size={18} color={theme.onPrimary} />
           </View>
-          <ThemedText style={styles.brandName}>CatchWord</ThemedText>
+          <ThemedText style={styles.brandName}>TakeWord</ThemedText>
         </Pressable>
 
         <View style={styles.topbarRight}>
@@ -107,7 +107,7 @@ function Footer() {
     <View style={[styles.footer, { borderTopColor: theme.border }]}>
       <Container style={styles.footerRow}>
         <ThemedText type="small" themeColor="textSecondary">
-          © {year} CatchWord
+          © {year} TakeWord
         </ThemedText>
         <View style={styles.footerLinks}>
           <Link href="/pricing" asChild>

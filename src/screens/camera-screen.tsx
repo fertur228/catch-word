@@ -262,14 +262,14 @@ export function CameraScreen() {
           </Reveal>
           <Reveal delay={140}>
             <ThemedText type="default" themeColor="textSecondary" style={styles.textCenter}>
-              CatchWord наводится на предметы вокруг и превращает их в слова. Для этого нужен доступ к камере.
+              TakeWord наводится на предметы вокруг и превращает их в слова. Для этого нужен доступ к камере.
             </ThemedText>
           </Reveal>
           <Reveal delay={200} style={styles.permissionAction}>
             <Button title="Разрешить камеру" icon="camera.fill" onPress={requestPermission} />
             {!permission.canAskAgain ? (
               <ThemedText type="small" themeColor="textSecondary" style={styles.textCenter}>
-                Доступ был запрещён. Включить можно в Настройках iOS → CatchWord → Камера.
+                Доступ был запрещён. Включить можно в Настройках iOS → TakeWord → Камера.
               </ThemedText>
             ) : null}
           </Reveal>
@@ -351,7 +351,7 @@ export function CameraScreen() {
         {/* Низ: переключатель режима + заметка про симулятор + кнопка съёмки */}
         <View style={styles.bottomRow} pointerEvents="box-none">
           <View style={styles.modeToggle} pointerEvents="auto">
-            <CameraModeToggle mode={mode} onChange={setMode} />
+            <CameraModeToggle mode={mode} onChange={(m) => (m === 'scene' && !isPremium ? router.push('/paywall') : setMode(m))} />
           </View>
 
           <View style={styles.shutterWrap}>

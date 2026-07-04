@@ -1,5 +1,5 @@
 /**
- * Лендинг CatchWord (/welcome) — структура по образцу конкурента CapWords
+ * Лендинг TakeWord (/welcome) — структура по образцу конкурента CapWords
  * (герой → как работает → сценарии → карточка-сцена → умнее каждый день →
  * возможности → приватность → тарифы → отзывы → манифест → FAQ → CTA → футер),
  * но в нашей тёмной Apple-эстетике (фикс. графитовая палитра, SF-типографика,
@@ -69,15 +69,15 @@ const FEATURES: { icon: SFSymbol; title: string; sub: string }[] = [
 const TESTIMONIALS = ['Отзыв появится здесь', 'Отзыв появится здесь', 'Отзыв появится здесь'];
 
 const MANIFESTO = [
-  'CatchWord построен на простой идее: любопытство — лучший учитель.',
+  'TakeWord построен на простой идее: любопытство — лучший учитель.',
   'Мы превращаем повседневные моменты в то, что хочется запомнить.',
   'Слова живут вокруг тебя — нужно лишь их поймать.',
 ];
 
 const FAQ: { q: string; a: string }[] = [
-  { q: 'Что такое CatchWord?', a: 'Приложение, которое учит словам: наводишь камеру на предмет — получаешь слово, перевод, произношение и карточку для повторения.' },
-  { q: 'Как это работает?', a: 'Сфотографируй любой предмет — CatchWord распознаёт его и даёт слово, произношение и стикер на изучаемом языке.' },
-  { q: 'CatchWord бесплатный?', a: '10 сканов бесплатно навсегда, без карты. Premium снимает лимит и открывает все языки.' },
+  { q: 'Что такое TakeWord?', a: 'Приложение, которое учит словам: наводишь камеру на предмет — получаешь слово, перевод, произношение и карточку для повторения.' },
+  { q: 'Как это работает?', a: 'Сфотографируй любой предмет — TakeWord распознаёт его и даёт слово, произношение и стикер на изучаемом языке.' },
+  { q: 'TakeWord бесплатный?', a: '10 сканов бесплатно навсегда, без карты. Premium снимает лимит и открывает все языки.' },
   { q: 'Нужен интернет?', a: 'Для распознавания — да. Коллекция и повторение работают и офлайн.' },
   { q: 'Подойдёт детям?', a: 'Да: просто, наглядно и увлекательно — для любого возраста.' },
 ];
@@ -92,13 +92,13 @@ export default function Welcome() {
   return (
     <View style={styles.page}>
       <Head>
-        <title>CatchWord — учи английский по фото: наведи камеру и лови слова</title>
+        <title>TakeWord — учи английский по фото: наведи камеру и лови слова</title>
         <meta
           name="description"
-          content="CatchWord превращает мир вокруг в словарь: наведи камеру на предмет — получи слово, перевод, произношение и карточку с интервальным повторением. 10 сканов бесплатно, без карты."
+          content="TakeWord превращает мир вокруг в словарь: наведи камеру на предмет — получи слово, перевод, произношение и карточку с интервальным повторением. 10 сканов бесплатно, без карты."
         />
         <link rel="canonical" href={`${SITE_URL}/welcome`} />
-        <meta property="og:title" content="CatchWord — учи язык через камеру" />
+        <meta property="og:title" content="TakeWord — учи язык через камеру" />
         <meta
           property="og:description"
           content="Наведи камеру на предмет — поймай слово, перевод, произношение и карточку для повторения. 10 сканов бесплатно."
@@ -122,7 +122,7 @@ export default function Welcome() {
               Учи язык через{'\n'}знакомые вещи.
             </Text>
             <Text style={styles.heroSub}>
-              Учи языки через мир вокруг. CatchWord превращает повседневные предметы в твой
+              Учи языки через мир вокруг. TakeWord превращает повседневные предметы в твой
               личный учебник.
             </Text>
             <View style={styles.heroCtas}>
@@ -274,7 +274,7 @@ function TopBar() {
     <View style={styles.topbar}>
       <View style={styles.topbarInner}>
         <Pressable onPress={() => router.push('/welcome')} hitSlop={6}>
-          <Text style={styles.brand}>CatchWord</Text>
+          <Text style={styles.brand}>TakeWord</Text>
         </Pressable>
         <View style={styles.topbarRight}>
           <Pressable onPress={() => router.push('/pricing')} hitSlop={8}>
@@ -399,7 +399,7 @@ function Footer() {
   const router = useRouter();
   return (
     <View style={styles.footer}>
-      <Text style={styles.footerCopy}>© CatchWord</Text>
+      <Text style={styles.footerCopy}>© TakeWord</Text>
       <View style={styles.footerLinks}>
         <FooterLink label="Тарифы" onPress={() => router.push('/pricing')} />
         <FooterLink label="Конфиденциальность" onPress={() => Linking.openURL(PRIVACY_URL)} />

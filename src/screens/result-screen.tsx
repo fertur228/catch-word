@@ -124,7 +124,7 @@ function emojiForWord(word: string): string {
 export function ResultScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { addCard, prefs, completeQuestForWord, cards } = useCollection();
+  const { addCard, prefs, completeQuestForWord, cards, isPremium } = useCollection();
   const { jobId } = useLocalSearchParams<{ jobId?: string }>();
 
   // Текущий скан (фото + результат распознавания + вырез). Читаем синхронно:
@@ -329,8 +329,11 @@ export function ResultScreen() {
 
   // Примеры/заметку показываем только для исходного слова (своё слово — без них).
   const sameWord = content.word === recognized.word;
-  const examples = sameWord ? recognized.examples.slice(0, 3) : [];
-  const note = sameWord ? recognized.notes : undefined;
+  // Free — 1 пример на слово; Premium — до 3 (+ грамматика/мнемоника).
+  const examples = sameWord ? recognized.examples.slice(0, isPremium ? 3 : 1) : [];
+  // Мнемонику «как запомнить» показываем только Premium; free видит тизер на paywall.
+  const note = sameWord && isPremium ? recognized.notes : undefined;
+  const noteLocked = sameWord && !isPremium && !!recognized.notes;
   const synonyms = sameWord ? (recognized.synonyms ?? []).slice(0, 3) : [];
   // Честная подсказка в редакторе: слово введено, но автоперевода нет.
   const showBackendHint = !draftAuto && draftWord.trim().length > 0;
@@ -595,7 +598,7 @@ export function ResultScreen() {
               </Reveal>
             ) : null}
 
-            {/* Заметка-мнемоника (AI) — «как запомнить». */}
+            {/* Заметка-мнемоника (AI) — «как запомнить» (Premium). */}
             {note ? (
               <Reveal delay={340}>
                 <View
@@ -608,6 +611,22 @@ export function ResultScreen() {
                   </View>
                   <ThemedText style={styles.exampleText}>{note}</ThemedText>
                 </View>
+              </Reveal>
+            ) : noteLocked ? (
+              <Reveal delay={340}>
+                <Pressable
+                  onPress={() => router.push('/paywall')}
+                  style={[styles.exampleCard, { backgroundColor: theme.goldSoft, borderColor: theme.border, shadowColor: theme.shadow }]}>
+                  <View style={styles.exampleHeader}>
+                    <Icon name="lock.fill" size={15} color={theme.gold} />
+                    <ThemedText type="smallBold" style={{ color: theme.gold }}>
+                      Запомни · Premium
+                    </ThemedText>
+                  </View>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    Мнемоника «как запомнить» — открой в Premium.
+                  </ThemedText>
+                </Pressable>
               </Reveal>
             ) : null}
           </>

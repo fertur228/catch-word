@@ -1,12 +1,12 @@
-# CatchWord — окружение, запуск и грабли (важно!)
+# TakeWord — окружение, запуск и грабли (важно!)
 
 > Здесь записаны все затыки, через которые мы прошли, и их лечение —
 > чтобы не наступать повторно. Среда: macOS Apple Silicon (M3), Xcode 26.5,
 > Node 22, npm 10.
 
 ## Ключевые факты окружения
-- **Проект:** `/Users/almazbukayev/CatchWord`
-- **bundle id:** `com.almazbukayev.catchword`
+- **Проект:** `/Users/almazbukayev/TakeWord`
+- **bundle id:** `com.almazbukayev.takeword`
 - **Личная команда Apple (для разработки):** `KT9S62S5Y2` (Apple ID `bukaevalmaz2005@icloud.com`) — это **(Personal Team)**, бесплатная.
 - **Инкубаторская команда:** `6F4RCY8SHH` (платная) — **НЕ использовать для повседневной разработки** (она для прод-публикации позже).
 - **CocoaPods** установлен через **Homebrew** (`/opt/homebrew/bin/pod`, версия 1.16.2).
@@ -14,7 +14,7 @@
 
 ## Запуск на симуляторе (просто, без подписи)
 ```bash
-cd /Users/almazbukayev/CatchWord
+cd /Users/almazbukayev/TakeWord
 npx expo run:ios            # первый раз: собирает и ставит на симулятор
 # дальше каждый день:
 npx expo start             # затем нажать i
@@ -26,8 +26,8 @@ CLI (expo/xcodebuild) **не умеет** выписывать профиль д
 первую сборку на устройство нужно сделать кнопкой **Run в Xcode**:
 1. На iPhone: **Настройки → Конфиденциальность → Режим разработчика** → вкл → перезагрузка.
 2. Подключить кабелем, разблокировать, «**Доверять этому компьютеру**».
-3. `open ios/CatchWord.xcworkspace`
-4. В Xcode: target **CatchWord** → **Signing & Capabilities** → Team = **(Personal Team) KT9S62S5Y2**, «Automatically manage signing» вкл.
+3. `open ios/TakeWord.xcworkspace`
+4. В Xcode: target **TakeWord** → **Signing & Capabilities** → Team = **(Personal Team) KT9S62S5Y2**, «Automatically manage signing» вкл.
 5. Сверху выбрать устройство **iPhone 14** → нажать **▶ Run**.
 6. На телефоне один раз: **Настройки → Основные → VPN и управление устройством** → доверять разработчику.
 7. После этого профиль создан; дальше можно `npx expo run:ios --device` или `npx expo start --dev-client`.
@@ -43,9 +43,9 @@ CLI (expo/xcodebuild) **не умеет** выписывать профиль д
 4. **Случайно выбралась инкубаторская команда** (`6F4RCY8SHH`) → профиль не сходился с сертификатом.
    → Всегда выбирать **(Personal Team)**. Сертификат у нас для `KT9S62S5Y2`.
 5. **`No profiles for 'com.catchword.app'`** — старый bundle id конфликтовал.
-   → Сменили на уникальный `com.almazbukayev.catchword`.
+   → Сменили на уникальный `com.almazbukayev.takeword`.
 6. **`Sandbox: bash deny file-write-create … Pods/resources-to-copy`** — в шаблоне SDK 56 у app-таргета `ENABLE_USER_SCRIPT_SANDBOXING = YES`, ломает скрипты CocoaPods.
-   → Поставить `NO` в `ios/CatchWord.xcodeproj/project.pbxproj`.
+   → Поставить `NO` в `ios/TakeWord.xcodeproj/project.pbxproj`.
 
 ## ⚠️ ВАЖНО: папка `ios/` генерируется и НЕ в git
 `ios/` (и `android/`) создаются командой `expo prebuild` и **не хранятся в репозитории** (`.gitignore`). Это значит: при `expo prebuild --clean` сбросятся правки, которые мы делали прямо в нативном проекте:

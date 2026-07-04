@@ -20,23 +20,23 @@ export default function Root({ children }: PropsWithChildren) {
         <meta name="theme-color" content="#208AEF" />
 
         {/* Базовые SEO/соц-мета (per-page <Head> переопределяет на клиенте). */}
-        <title>CatchWord — учи язык через камеру</title>
+        <title>TakeWord — учи язык через камеру</title>
         <meta
           name="description"
           content="Наведи камеру на любой предмет — поймай слово, перевод, произношение и карточку для повторения. Учись там, где живёшь."
         />
-        <meta property="og:title" content="CatchWord — учи язык через камеру" />
+        <meta property="og:title" content="TakeWord — учи язык через камеру" />
         <meta
           property="og:description"
           content="Наведи камеру на предмет — поймай слово и карточку для повторения."
         />
         <meta property="og:type" content="website" />
-        <meta property="og:site_name" content="CatchWord" />
+        <meta property="og:site_name" content="TakeWord" />
         <meta property="og:url" content="https://catch-words.com/" />
         <meta property="og:image" content="https://catch-words.com/og.png" />
         <meta property="og:locale" content="ru_RU" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="CatchWord — учи язык через камеру" />
+        <meta name="twitter:title" content="TakeWord — учи язык через камеру" />
         <meta
           name="twitter:description"
           content="Наведи камеру на предмет — поймай слово, перевод, произношение и карточку."
@@ -45,10 +45,10 @@ export default function Root({ children }: PropsWithChildren) {
         <meta name="robots" content="index, follow, max-image-preview:large" />
         <meta
           name="keywords"
-          content="учить английский по фото, приложение для изучения слов, учить язык через камеру, интервальные повторения, флеш-карточки, распознавание предметов, CatchWord"
+          content="учить английский по фото, приложение для изучения слов, учить язык через камеру, интервальные повторения, флеш-карточки, распознавание предметов, TakeWord"
         />
         <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-title" content="CatchWord" />
+        <meta name="apple-mobile-web-app-title" content="TakeWord" />
         <link rel="apple-touch-icon" href="/favicon.png" />
 
         {/* Шрифт — системный (как в нативной аппке), внешние веб-шрифты не грузим. */}
@@ -64,13 +64,13 @@ export default function Root({ children }: PropsWithChildren) {
               '@graph': [
                 {
                   '@type': 'Organization',
-                  name: 'CatchWord',
+                  name: 'TakeWord',
                   url: 'https://catch-words.com/',
                   logo: 'https://catch-words.com/og.png',
                 },
                 {
                   '@type': 'SoftwareApplication',
-                  name: 'CatchWord',
+                  name: 'TakeWord',
                   applicationCategory: 'EducationalApplication',
                   operatingSystem: 'iOS, Web',
                   url: 'https://catch-words.com/',

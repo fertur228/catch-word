@@ -29,6 +29,7 @@ import { feedbackSelection } from '@/lib/feedback';
 import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
 import { useSubscription } from '@/lib/subscription';
+import { isIapConfigured, restorePurchases } from '@/lib/iap';
 import { alertAsync, confirmAsync } from '@/lib/dialog';
 import { LANGUAGES, getLanguage } from '@/lib/mock-data';
 import {
@@ -179,9 +180,10 @@ export function SettingsScreen() {
   const router = useRouter();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { prefs, setLanguages, cards, clearCollection, scansLeft, scanLimit } = useCollection();
-  const { user, signInWithGoogle, signOut } = useAuth();
-  const { isPremium, status, loading: subLoading } = useSubscription();
+  const { prefs, setLanguages, canUsePair, cards, clearCollection, scansLeft, scanLimit } =
+    useCollection();
+  const { user, signInWithGoogle, signOut, deleteAccount } = useAuth();
+  const { isPremium, status, loading: subLoading, refresh: refreshSub } = useSubscription();
 
   // Ярлык тарифа для «пилюли»: Premium (активен/пробный) или Free.
   const planLabel = isPremium ? (status === 'trialing' ? 'Premium · пробный' : 'Premium') : 'Free';
@@ -200,6 +202,7 @@ export function SettingsScreen() {
   const [voiceOpen, setVoiceOpen] = useState(false); // открыт ли лист выбора голоса
   const [contactOpen, setContactOpen] = useState(false); // открыт ли лист «Связаться с нами»
   const [toast, setToast] = useState<string | null>(null); // короткое подтверждение действий
+  const [restoring, setRestoring] = useState(false); // идёт восстановление покупок
 
   // Образец для пред-прослушки — название языка на нём самом (реальное слово).
   const sample = useMemo(() => getLanguage(prefs.learningLang).label, [prefs.learningLang]);
@@ -245,18 +248,38 @@ export function SettingsScreen() {
     }
   };
 
-  const stub = (title: string) => {
-    void alertAsync(title, 'Заглушка для MVP — подключим позже.');
+  // Восстановление покупок Apple IAP (RevenueCat). До настройки ключа — мягкая
+  // подсказка вместо ошибки.
+  const onRestore = async () => {
+    if (restoring) return;
+    if (!isIapConfigured()) {
+      void alertAsync('Восстановление покупок', 'Оплата вот-вот подключится.');
+      return;
+    }
+    setRestoring(true);
+    try {
+      const ok = await restorePurchases();
+      await refreshSub();
+      setToast(ok ? 'Покупки восстановлены' : 'Активных покупок не найдено');
+    } catch {
+      void alertAsync('Не удалось восстановить', 'Попробуй ещё раз.');
+    } finally {
+      setRestoring(false);
+    }
   };
 
   // Экспорт коллекции через системный share-sheet (заявлено в Premium).
   const onExport = () => {
+    if (!isPremium) {
+      router.push('/paywall');
+      return;
+    }
     if (cards.length === 0) {
       void alertAsync('Коллекция пуста', 'Сначала поймай несколько слов камерой.');
       return;
     }
     const list = cards.map((c) => `${c.word} — ${c.translation}`).join('\n');
-    Share.share({ message: `Мои слова из CatchWord (${cards.length}):\n\n${list}` }).catch(() => {});
+    Share.share({ message: `Мои слова из TakeWord (${cards.length}):\n\n${list}` }).catch(() => {});
   };
 
   // Очистить коллекцию ТЕКУЩЕГО курса (с подтверждением). Слова других пар не трогаем.
@@ -290,11 +313,45 @@ export function SettingsScreen() {
     }
   };
 
+  // Полное удаление аккаунта (Apple 5.1.1(v)) — необратимо, поэтому явное
+  // предупреждение. Сервер удаляет аккаунт и все данные, затем гасим сессию.
+  const [deleting, setDeleting] = useState(false);
+  const onDeleteAccount = async () => {
+    const ok = await confirmAsync(
+      'Удалить аккаунт?',
+      'Аккаунт и все данные — слова, фото и подписка — будут удалены безвозвратно. Отменить это нельзя.',
+      'Удалить аккаунт',
+      true,
+    );
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      await deleteAccount();
+      await clearCollection().catch(() => {});
+      setGuest(false);
+      router.replace('/');
+    } catch {
+      void alertAsync(
+        'Не удалось удалить аккаунт',
+        `Попробуй ещё раз или напиши в поддержку: ${CONTACT_EMAIL}.`,
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // Выбор языка из листа — с тактильным откликом и тостом-подтверждением.
   const chooseLanguage = (code: string) => {
     feedbackSelection();
-    if (picker === 'learning') setLanguages(code, prefs.nativeLang);
-    else if (picker === 'native') setLanguages(prefs.learningLang, code);
+    const nextLearning = picker === 'learning' ? code : prefs.learningLang;
+    const nextNative = picker === 'native' ? code : prefs.nativeLang;
+    // Free — максимум 2 пары языков: менять можно свободно, но НОВАЯ (3-я) пара → paywall.
+    if (!canUsePair(nextLearning, nextNative)) {
+      setPicker(null);
+      router.push('/paywall');
+      return;
+    }
+    setLanguages(nextLearning, nextNative);
     setPicker(null);
     setToast(`${picker === 'native' ? 'Родной язык' : 'Язык изучения'}: ${getLanguage(code).label}`);
   };
@@ -429,7 +486,8 @@ export function SettingsScreen() {
               <SettingRow
                 icon="arrow.clockwise"
                 label="Восстановить покупки"
-                onPress={() => stub('Восстановление покупок')}
+                sublabel={restoring ? 'Восстанавливаем…' : undefined}
+                onPress={restoring ? undefined : onRestore}
               />
               <SettingRow
                 icon="creditcard.fill"
@@ -463,7 +521,7 @@ export function SettingsScreen() {
           </Section>
         </Reveal>
 
-        {/* Выйти — отдельной красной строкой внизу (для вошедших) */}
+        {/* Выйти и удаление аккаунта — красными строками внизу (для вошедших) */}
         {user ? (
           <Reveal delay={220}>
             <Group>
@@ -472,6 +530,13 @@ export function SettingsScreen() {
                 tone="danger"
                 label="Выйти"
                 onPress={onSignOut}
+              />
+              <SettingRow
+                icon="person.crop.circle.badge.xmark"
+                tone="danger"
+                label="Удалить аккаунт"
+                sublabel={deleting ? 'Удаляем…' : 'Безвозвратно'}
+                onPress={deleting ? undefined : onDeleteAccount}
               />
             </Group>
           </Reveal>
@@ -484,7 +549,7 @@ export function SettingsScreen() {
               See it. Catch it. Speak it.
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary" style={styles.footerSub}>
-              CatchWord · v{version}
+              TakeWord · v{version}
             </ThemedText>
           </View>
         </Reveal>
@@ -542,9 +607,9 @@ function PremiumBanner({ onPress }: { onPress: () => void }) {
           <Icon name="sparkles" size={20} color={theme.onPrimary} />
         </View>
         <View style={styles.bannerText}>
-          <ThemedText style={[styles.bannerTitle, { color: theme.onPrimary }]}>CatchWord Premium</ThemedText>
+          <ThemedText style={[styles.bannerTitle, { color: theme.onPrimary }]}>TakeWord Premium</ThemedText>
           <ThemedText type="small" style={{ color: theme.onPrimary, opacity: 0.85 }} numberOfLines={1}>
-            Безлимит сканов · все языки · офлайн
+            Безлимит сканов · все языки · экспорт
           </ThemedText>
         </View>
         <Icon name="chevron.right" size={16} color={theme.onPrimary} />
@@ -760,7 +825,7 @@ function ContactSheet({
               icon="envelope.fill"
               label="Почта"
               value={CONTACT_EMAIL}
-              onPress={() => Linking.openURL(`mailto:${CONTACT_EMAIL}?subject=CatchWord`)}
+              onPress={() => Linking.openURL(`mailto:${CONTACT_EMAIL}?subject=TakeWord`)}
             />
             <ContactRow
               icon="chevron.left.forwardslash.chevron.right"

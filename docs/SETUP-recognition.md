@@ -1,4 +1,4 @@
-# CatchWord — подключение распознавания (Gemini + Supabase)
+# TakeWord — подключение распознавания (Gemini + Supabase)
 
 > Обновлено: 2026-06-28. Цель — завести всё, чтобы серверная функция `/recognize` могла звать Gemini.
 > Решение по архитектуре/модели — `PLAN-scan-cutout.md`. Это пошаговая настройка доступов.
@@ -31,7 +31,7 @@ brew install supabase/tap/supabase     # установка CLI
 supabase login                          # откроет браузер → подтвердить
 # в этой сессии Claude можно набрать:  ! supabase login   (вывод попадёт в чат)
 
-cd /Users/almazbukayev/CatchWord
+cd /Users/almazbukayev/TakeWord
 supabase init                           # создаст папку supabase/ (Docker не требуется)
 supabase link --project-ref <ref>       # связать с твоим проектом (может спросить пароль БД)
 ```

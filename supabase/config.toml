@@ -378,6 +378,11 @@ allow_dynamic_registration = false
 [functions.polar-webhook]
 verify_jwt = false
 
+# Вебхук RevenueCat (Apple IAP): аутентификация собственным секретом
+# (REVENUECAT_WEBHOOK_AUTH в заголовке Authorization), НЕ Supabase-JWT.
+[functions.revenuecat-webhook]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

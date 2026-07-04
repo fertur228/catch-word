@@ -130,7 +130,7 @@ export function CardDetailScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { getById, removeCard } = useCollection();
+  const { getById, removeCard, isPremium } = useCollection();
   const card = id ? getById(id) : undefined;
 
   // Карточки нет (удалили / битый id) — дружелюбная заглушка.
@@ -158,7 +158,7 @@ export function CardDetailScreen() {
   const onShare = () => {
     const ipa = card.ipa ? ` /${card.ipa}/` : '';
     Share.share({
-      message: `${card.word}${ipa} — ${card.translation}\nПоймал в CatchWord`,
+      message: `${card.word}${ipa} — ${card.translation}\nПоймал в TakeWord`,
     }).catch(() => {});
   };
 
@@ -244,9 +244,9 @@ export function CardDetailScreen() {
             <SectionHeader
               title="Примеры"
               icon="text.bubble.fill"
-              subtitle={`${card.examples.length} ${plural(card.examples.length, ['пример', 'примера', 'примеров'])}`}
+              subtitle={`${isPremium ? card.examples.length : 1} ${plural(isPremium ? card.examples.length : 1, ['пример', 'примера', 'примеров'])}`}
             />
-            {card.examples.map((ex, j) => (
+            {(isPremium ? card.examples : card.examples.slice(0, 1)).map((ex, j) => (
               <Reveal key={ex} delay={320 + j * 60}>
                 <View style={[styles.example, { backgroundColor: theme.backgroundElement }]}>
                   <ThemedText type="default" style={styles.exampleText}>
@@ -260,8 +260,8 @@ export function CardDetailScreen() {
         </Reveal>
       ) : null}
 
-      {/* Личная заметка (опционально). */}
-      {card.notes ? (
+      {/* Заметка-мнемоника (AI) — только Premium (у free сохранена, но скрыта до апгрейда). */}
+      {isPremium && card.notes ? (
         <Reveal delay={360}>
           <View style={[styles.panel, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <View style={styles.panelHeader}>

@@ -1,11 +1,11 @@
-# CatchWord — дизайн-брифы для Google Stitch
+# TakeWord — дизайн-брифы для Google Stitch
 
 > Как пользоваться: для каждого экрана скопируй текст из ``` блока в Google Stitch. Перед первым экраном можно один раз вставить «Общий стиль» ниже — чтобы все экраны были в одной дизайн-системе.
 
 ## 🎨 Общий стиль (вставить как контекст / в начало каждого промпта)
 
 ```
-Design a cohesive iOS mobile app called "CatchWord" — a playful, premium language-learning app where you point your camera at real objects to collect foreign words like stickers in a scrapbook (vibe: CapWords meets Duolingo). 
+Design a cohesive iOS mobile app called "TakeWord" — a playful, premium language-learning app where you point your camera at real objects to collect foreign words like stickers in a scrapbook (vibe: CapWords meets Duolingo). 
 Style: warm, tactile, gamified; SF Pro / rounded system font; large bold titles; soft low shadows; generous rounded corners (cards 16–24px, sticker tiles ~28% radius, pills fully rounded); spring micro-animations.
 Light palette: background #FFFFFF, text #11181C, secondary text #5B6168, cards #FFFFFF (1px border #E3E5EA), element fill #F1F2F5. Primary indigo #4F46E5 (soft #EEF0FF). Signature coral accent #FF7A59 for "caught it!" highlights, sparkles, scan line (soft #FFE9E2). Teal #12B5A5 for stats/progress (soft #DCF7F3). Gold #C77C0A for streaks 🔥 and mastery stars. Green #1F9D55 for success. Provide a matching dark theme (bg #0B0B0F, cards #16171C).
 Signature component: a "sticker" = rounded square (~28% radius) with a soft shadow holding either an object emoji or a real cut-out photo of the object on a transparent background.
@@ -60,7 +60,7 @@ BOTTOM:
 STATES:
 - Default (granted): everything above over a live, slightly blurred-depth camera scene.
 - Capture flash: a brief full-screen white flash when the shutter is pressed (the "caught it!" moment).
-- Permission / empty state (separate variant, NO camera — solid app background on light tokens, centered column): a large rounded-square "sticker" tile with soft shadow holding a "📸" emoji; bold title "Включи камеру"; secondary grey paragraph "CatchWord наводится на предметы вокруг и превращает их в слова. Для этого нужен доступ к камере."; a big full-width rounded indigo primary button with camera icon "Разрешить камеру".
+- Permission / empty state (separate variant, NO camera — solid app background on light tokens, centered column): a large rounded-square "sticker" tile with soft shadow holding a "📸" emoji; bold title "Включи камеру"; secondary grey paragraph "TakeWord наводится на предметы вокруг и превращает их в слова. Для этого нужен доступ к камере."; a big full-width rounded indigo primary button with camera icon "Разрешить камеру".
 
 STYLE: iOS, SF Pro rounded font, large bold titles, soft low shadows, generous rounded corners, sticker/scrapbook feel. Palette: white #FFFFFF backgrounds and #11181C text on the permission screen; coral accent #FF7A59 for the scan line and breathing ring; indigo #4F46E5 for primary button; gold #C77C0A for the streak flame; green #1F9D55 for the completed-quest banner. Overlay chips and banner use translucent dark "glass" with white text. Playful, premium, warm, tactile, gamified. Provide a dark-theme variant of the permission screen too (bg #0B0B0F, cards #16171C).
 ```
@@ -261,11 +261,11 @@ Top to bottom:
 
 3) Section header "ГОЛОС / АКЦЕНТ". Grouped white card of voice rows. Row 1 (selected state): indigo speaker-wave icon tile, bold label "Системный голос", small gray sublabel "По умолчанию", and on the right a small gray play ▶ icon plus an indigo checkmark ✓. Row 2 and 3 (unselected): teal #12B5A5 waveform icon on soft teal tile #DCF7F3, label like "Samantha", small gray sublabel "en-US · Enhanced", right side a faint gray play ▶ icon only. Below the card, small gray hint text "Нажми голос, чтобы услышать пример."
 
-4) Section header "ПОДПИСКА". A bright solid indigo #4F46E5 upsell banner card (rounded 16px): left a 40px rounded tile holding a white sparkles ✨ icon, then white bold title "CatchWord Premium" and white 85%-opacity subtitle "Безлимит сканов · все языки · офлайн", and a white ">" chevron on the right. Below it a grouped white card with two rows: Row 1 gold star icon, label "Текущий тариф", right side a small rounded gold pill "Free". Row 2 gray refresh icon, label "Восстановить покупки", with ">" chevron.
+4) Section header "ПОДПИСКА". A bright solid indigo #4F46E5 upsell banner card (rounded 16px): left a 40px rounded tile holding a white sparkles ✨ icon, then white bold title "TakeWord Premium" and white 85%-opacity subtitle "Безлимит сканов · все языки · офлайн", and a white ">" chevron on the right. Below it a grouped white card with two rows: Row 1 gold star icon, label "Текущий тариф", right side a small rounded gold pill "Free". Row 2 gray refresh icon, label "Восстановить покупки", with ">" chevron.
 
 5) Section header "О ПРИЛОЖЕНИИ". Grouped white card, three rows with neutral gray icon tiles: "Политика конфиденциальности" (lock icon, chevron), "Условия использования" (document icon, chevron), "Версия" (info icon, gray value "1.0.0", no chevron).
 
-6) Centered footer: bold gray slogan "See it. Catch it. Speak it." and below smaller gray line "CatchWord · сделано с ♥ в Казахстане".
+6) Centered footer: bold gray slogan "See it. Catch it. Speak it." and below smaller gray line "TakeWord · сделано с ♥ в Казахстане".
 
 Also show the LANGUAGE PICKER state: a bottom sheet modal sliding up over a dimmed backdrop, rounded top corners 28px, a small gray grabber handle at top, bold title "Язык изучения", and a scrolling list of language rows each with a large flag emoji + bold language name (e.g. "🇬🇧 Английский", "🇪🇸 Испанский", "🇫🇷 Французский", "🇩🇪 Немецкий", "🇮🇹 Итальянский"); the currently active row has a soft indigo #EEF0FF highlight fill and an indigo checkmark on the right.
 

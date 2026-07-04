@@ -10,8 +10,8 @@ export default function Terms() {
   return (
     <>
       <Head>
-        <title>Условия использования — CatchWord</title>
-        <meta name="description" content="Условия использования CatchWord." />
+        <title>Условия использования — TakeWord</title>
+        <meta name="description" content="Условия использования TakeWord." />
       </Head>
       <LegalPage
         title="Условия использования"
@@ -20,7 +20,7 @@ export default function Terms() {
           {
             h: 'Использование сервиса',
             p: [
-              'CatchWord помогает учить слова, распознавая предметы на фотографиях. Используйте сервис законно и не загружайте чужой или запрещённый контент.',
+              'TakeWord помогает учить слова, распознавая предметы на фотографиях. Используйте сервис законно и не загружайте чужой или запрещённый контент.',
             ],
           },
           {

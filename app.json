@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "CatchWord",
+    "name": "TakeWord",
     "slug": "catchword",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,13 +9,14 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.almazbukayev.catchword",
+      "usesAppleSignIn": true,
+      "bundleIdentifier": "com.almazbukayev.takeword",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "com.almazbukayev.catchword",
+      "package": "com.almazbukayev.takeword",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -43,11 +44,18 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "CatchWord uses the camera to recognize objects and turn them into vocabulary cards."
+          "cameraPermission": "TakeWord uses the camera to recognize objects and turn them into vocabulary cards."
         }
       ],
       "expo-sqlite",
-      "expo-audio"
+      "expo-apple-authentication",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "enableBackgroundPlayback": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

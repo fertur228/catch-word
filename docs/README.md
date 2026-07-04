@@ -1,4 +1,4 @@
-# CatchWord — документация
+# TakeWord — документация
 
 Рабочие заметки по проекту. Источник правды по продукту — [`../catchword_project_doc.md`](../catchword_project_doc.md).
 
@@ -8,7 +8,7 @@
 
 ## Быстрый старт
 ```bash
-cd /Users/almazbukayev/CatchWord
+cd /Users/almazbukayev/TakeWord
 npx expo run:ios     # собрать и запустить на симуляторе (первый раз)
 npx expo start       # дальше каждый день: затем нажать i
 ```

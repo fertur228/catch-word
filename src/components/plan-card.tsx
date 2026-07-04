@@ -12,7 +12,7 @@ import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { Plan } from '@/types';
 
-export function PlanCard({ plan, onPress }: { plan: Plan; onPress: () => void }) {
+export function PlanCard({ plan, onPress, loading }: { plan: Plan; onPress: () => void; loading?: boolean }) {
   const theme = useTheme();
   const highlighted = !!plan.highlighted;
 
@@ -58,7 +58,7 @@ export function PlanCard({ plan, onPress }: { plan: Plan; onPress: () => void })
         ))}
       </View>
 
-      <Button title={plan.ctaLabel} onPress={onPress} variant={highlighted ? 'primary' : 'secondary'} />
+      <Button title={plan.ctaLabel} onPress={onPress} loading={loading} variant={highlighted ? 'primary' : 'secondary'} />
     </View>
   );
 }

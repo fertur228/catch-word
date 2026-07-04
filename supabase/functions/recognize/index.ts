@@ -187,8 +187,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         // Для OpenRouter (необязательно; другими провайдерами игнорируется).
-        'HTTP-Referer': 'https://catchword.app',
-        'X-Title': 'CatchWord',
+        'HTTP-Referer': 'https://catch-words.com',
+        'X-Title': 'TakeWord',
       },
       body: JSON.stringify({
         model: MODEL,

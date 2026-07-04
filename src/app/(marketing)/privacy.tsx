@@ -11,8 +11,8 @@ export default function Privacy() {
   return (
     <>
       <Head>
-        <title>Конфиденциальность — CatchWord</title>
-        <meta name="description" content="Как CatchWord обрабатывает ваши данные." />
+        <title>Конфиденциальность — TakeWord</title>
+        <meta name="description" content="Как TakeWord обрабатывает ваши данные." />
       </Head>
       <LegalPage
         title="Политика конфиденциальности"

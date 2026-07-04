@@ -15,8 +15,9 @@
  * Данные — мок (см. src/lib/mock-data.ts). Бэкенда и реального SRS-сервера нет.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { SFSymbol } from 'expo-symbols';
 import Animated, {
   useAnimatedStyle,
@@ -29,6 +30,7 @@ import Animated, {
 import { CelebrationModal } from '@/components/anim/celebration-modal';
 import { Confetti } from '@/components/anim/confetti';
 import { SwipeToRate } from '@/components/anim/swipe-to-rate';
+import { ContributionGrid } from '@/components/contribution-grid';
 import { Button } from '@/components/button';
 import { EmptyState } from '@/components/empty-state';
 import { FlashCard } from '@/components/flash-card';
@@ -52,6 +54,10 @@ import type { SrsRating, WordCard } from '@/types';
 
 /** Сколько карточек максимум в одной сессии повтора. */
 const MAX_SESSION = 20;
+/** Сколько недель показываем в карте активности (совпадает с подписью «N недель»). */
+const REVIEW_WEEKS = 18;
+/** Цвета иконок-плиток режимов (как в дизайне): оранж / синий / бирюза / фиолет. */
+const MODE_TILE = { flash: '#FF9500', listen: '#0A84FF', sentence: '#2FB8A8', smart: '#AF52DE' };
 /** Этапы сессии. */
 type Phase = 'intro' | 'flashcards' | 'test' | 'summary';
 /** Режим тренировки, выбранный на интро-экране. */
@@ -74,6 +80,16 @@ function pluralWords(n: number): string {
   return 'слов';
 }
 
+/** Склонение слова «день» по числу (1 день / 2 дня / 5 дней). */
+function pluralDays(n: number): string {
+  const a = Math.abs(n) % 100;
+  const b = a % 10;
+  if (a > 10 && a < 20) return 'дней';
+  if (b === 1) return 'день';
+  if (b > 1 && b < 5) return 'дня';
+  return 'дней';
+}
+
 /** Человеко-понятный интервал «когда увидишь снова» (минуты → «10 мин» / «1 ч» / «4 д»). */
 function formatInterval(minutes: number): string {
   if (minutes < 60) return `${Math.round(minutes)} мин`;
@@ -85,7 +101,19 @@ function formatInterval(minutes: number): string {
 export function ReviewSessionScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const { loading, cards, reviewCard, stats, prefs } = useCollection();
+  const {
+    loading,
+    cards,
+    reviewCard,
+    stats,
+    prefs,
+    useTestAttempt,
+    testsLeftToday,
+    isPremium,
+    activityByDay,
+    reviewStreak,
+    recordTestSession,
+  } = useCollection();
 
   // Очередь фиксируем один раз (снимок), чтобы она не «съезжала», когда
   // оценённые карточки покидают dueCards. null — ещё не собрана.
@@ -125,6 +153,8 @@ export function ReviewSessionScreen() {
   // Салют при верном ответе, шейк промпта при неверном, празднование идеальной сессии.
   const [burst, setBurst] = useState(0);
   const [showCelebration, setShowCelebration] = useState(false);
+  // Free исчерпал дневной лимит тестов → мягкий апселл-лист (не резкий редирект).
+  const [limitSheet, setLimitSheet] = useState(false);
   const celebratedRef = useRef(false);
   const promptShake = useSharedValue(0);
   const promptShakeStyle = useAnimatedStyle(() => ({ transform: [{ translateX: promptShake.value }] }));
@@ -156,6 +186,9 @@ export function ReviewSessionScreen() {
   }, [loading, queue, cards, phase]);
 
   const current = queue && index < queue.length ? queue[index] : undefined;
+
+  // Free — 1 умный тест в день. Исчерпан → показываем апселл, а не режем доступ молча.
+  const testsExhausted = !isPremium && testsLeftToday <= 0;
 
   // Duolingo-style: как только перевернули карточку — автоматически озвучиваем слово.
   useEffect(() => {
@@ -208,6 +241,15 @@ export function ReviewSessionScreen() {
   const startWith = useCallback(
     (m: Mode, q: WordCard[]) => {
       if (q.length === 0) return;
+      // Умный тест (любой режим кроме карточек) — free 1 попытка/день. Исчерпал —
+      // мягкий лист с апселлом (без резкого прыжка на пейволл) и путём к карточкам.
+      if (m !== 'flashcards' && !useTestAttempt()) {
+        feedbackTap();
+        setLimitSheet(true);
+        return;
+      }
+      // Тест начат — фиксируем в журнале активности (для хитмапа/стрика).
+      if (m !== 'flashcards') recordTestSession();
       setQueue(q);
       setMode(m);
       setMissed([]);
@@ -217,9 +259,14 @@ export function ReviewSessionScreen() {
         setReviewedCount(0);
         setPhase('flashcards');
       } else {
-        // Вопросы из очереди; дистракторы/картинки — из всей коллекции (пула).
-        // «На слух» и «Слово в предложение» фиксируют формат через forceKindFor.
-        setQuiz(buildQuiz(q, q.length, cards, forceKindFor(m)));
+        // Умный тест — 10 вопросов из ВСЕЙ коллекции, форматы вперемешку и без
+        // «знакомства» (все 10 — настоящие вопросы). «На слух» / «Слово в
+        // предложение» идут по очереди с фиксированным форматом.
+        setQuiz(
+          m === 'smart'
+            ? buildQuiz(cards, 10, cards, undefined, true)
+            : buildQuiz(q, q.length, cards, forceKindFor(m)),
+        );
         setQIndex(0);
         setSelected(null);
         setAnswered(false);
@@ -227,7 +274,7 @@ export function ReviewSessionScreen() {
         setPhase('test');
       }
     },
-    [cards],
+    [cards, useTestAttempt, recordTestSession],
   );
 
   // --- Пройти ещё раз тем же режимом (свежая очередь) ---
@@ -250,6 +297,16 @@ export function ReviewSessionScreen() {
     feedbackTap();
     startWith('smart', missed);
   }, [missed, startWith]);
+
+  // Действия апселл-листа: на пейволл или к бесплатным карточкам (не запираем наглухо).
+  const onLimitPremium = useCallback(() => {
+    setLimitSheet(false);
+    router.push('/paywall');
+  }, [router]);
+  const onLimitFlashcards = useCallback(() => {
+    setLimitSheet(false);
+    startWith('flashcards', buildFreshQueue());
+  }, [startWith, buildFreshQueue]);
 
   // --- Оценка карточки (режим флеш-карточек) ---
   const onRate = useCallback(
@@ -401,63 +458,127 @@ export function ReviewSessionScreen() {
     return (
       <Screen scroll>
         <View style={styles.intro}>
-          <Reveal delay={60}>
-            <ThemedText type="subtitle" style={styles.centerText}>
+          {/* Заголовок экрана — слева */}
+          <Reveal delay={40}>
+            <ThemedText type="title" style={styles.introTitle}>
               Повторение
             </ThemedText>
           </Reveal>
-          <Reveal delay={90}>
-            <ThemedText type="small" themeColor="textSecondary" style={styles.centerText}>
+          <Reveal delay={70}>
+            <ThemedText type="default" themeColor="textSecondary">
               Ежедневная практика помогает лучше запоминать слова
             </ThemedText>
           </Reveal>
-          <Reveal delay={110}>
-            <ThemedText type="default" themeColor="textSecondary" style={styles.centerText}>
-              {practice
-                ? `На сегодня всё выучено — потренируемся на ${n} ${pluralWords(n)}.`
-                : `${n} ${pluralWords(n)} ждут повторения. Выбери режим:`}
-            </ThemedText>
+
+          {/* Hero: статус + стрик + быстрый старт тренировки */}
+          <Reveal delay={100}>
+            <View style={[styles.heroCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <View style={styles.heroPills}>
+                {practice ? (
+                  <View style={[styles.pill, { backgroundColor: theme.successSoft }]}>
+                    <Icon name="checkmark.circle.fill" size={14} color={theme.success} />
+                    <ThemedText type="small" style={[styles.pillText, { color: theme.success }]}>
+                      Всё выучено
+                    </ThemedText>
+                  </View>
+                ) : (
+                  <View style={[styles.pill, { backgroundColor: theme.primarySoft }]}>
+                    <Icon name="clock.fill" size={13} color={theme.textSecondary} />
+                    <ThemedText type="small" style={[styles.pillText, { color: theme.textSecondary }]}>
+                      {n} на повторение
+                    </ThemedText>
+                  </View>
+                )}
+                <View style={[styles.pill, { backgroundColor: theme.goldSoft }]}>
+                  <Icon name="flame.fill" size={13} color={theme.gold} />
+                  <ThemedText type="small" style={[styles.pillText, { color: theme.gold }]}>
+                    {reviewStreak} {pluralDays(reviewStreak)}
+                  </ThemedText>
+                </View>
+              </View>
+              <ThemedText type="subtitle" style={styles.heroTitle}>
+                {practice ? `Закрепим ${n} ${pluralWords(n)}` : `${n} ${pluralWords(n)} на повторение`}
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                {practice
+                  ? 'Быстрая тренировка займёт меньше минуты'
+                  : 'Повтори, пока слова свежи в памяти'}
+              </ThemedText>
+              <Button
+                title="Начать тренировку"
+                icon="bolt.fill"
+                onPress={() => startWith('flashcards', queue)}
+              />
+            </View>
           </Reveal>
 
+          {/* Активность (гитхаб-карта) */}
+          <Reveal delay={140}>
+            <View style={[styles.activityCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <View style={styles.activityHeader}>
+                <ThemedText type="smallBold">Активность</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {REVIEW_WEEKS} недель
+                </ThemedText>
+              </View>
+              <ContributionGrid activityByDay={activityByDay} weeks={REVIEW_WEEKS} />
+            </View>
+          </Reveal>
+
+          {/* Режимы */}
+          <Reveal delay={170}>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.sectionLabel}>
+              РЕЖИМЫ
+            </ThemedText>
+          </Reveal>
           <View style={styles.modeList}>
-            <Reveal delay={170}>
+            <Reveal delay={190}>
               <ModeCard
                 icon="rectangle.on.rectangle.angled"
+                color={MODE_TILE.flash}
                 title="Карточки"
                 subtitle="Фото → слово, перевод и звук"
-                selected={false}
                 onPress={() => startWith('flashcards', queue)}
               />
             </Reveal>
-            <Reveal delay={210}>
+            <Reveal delay={220}>
               <ModeCard
-                icon="brain.head.profile"
-                title="Умный тест"
-                subtitle="Разные форматы под твой уровень"
-                selected={false}
-                onPress={() => startWith('smart', queue)}
+                icon="speaker.wave.2.fill"
+                color={MODE_TILE.listen}
+                title="На слух"
+                subtitle="Слушай слово — выбери ответ"
+                locked={testsExhausted}
+                onPress={() => startWith('listen', queue)}
               />
             </Reveal>
             <Reveal delay={250}>
               <ModeCard
-                icon="ear"
-                title="На слух"
-                subtitle="Слушай слово — выбери ответ"
-                selected={false}
-                onPress={() => startWith('listen', queue)}
-              />
-            </Reveal>
-            <Reveal delay={290}>
-              <ModeCard
-                icon="text.insert"
+                icon="text.alignleft"
+                color={MODE_TILE.sentence}
                 title="Слово в предложение"
                 subtitle="Вставь пропущенное слово"
-                selected={false}
+                locked={testsExhausted}
                 onPress={() => startWith('sentence', queue)}
+              />
+            </Reveal>
+            <Reveal delay={280}>
+              <ModeCard
+                icon="sparkles"
+                color={MODE_TILE.smart}
+                title="Умный тест"
+                subtitle="10 вопросов, форматы вперемешку"
+                locked={testsExhausted}
+                onPress={() => startWith('smart', queue)}
               />
             </Reveal>
           </View>
         </View>
+        <TestLimitSheet
+          visible={limitSheet}
+          onClose={() => setLimitSheet(false)}
+          onPremium={onLimitPremium}
+          onFlashcards={onLimitFlashcards}
+        />
       </Screen>
     );
   }
@@ -568,6 +689,12 @@ export function ReviewSessionScreen() {
           icon="trophy.fill"
           tone="gold"
           onClose={() => setShowCelebration(false)}
+        />
+        <TestLimitSheet
+          visible={limitSheet}
+          onClose={() => setLimitSheet(false)}
+          onPremium={onLimitPremium}
+          onFlashcards={onLimitFlashcards}
         />
       </Screen>
     );
@@ -900,14 +1027,17 @@ function ModeCard({
   icon,
   title,
   subtitle,
-  selected,
+  color,
   onPress,
+  locked = false,
 }: {
   icon: SFSymbol;
   title: string;
   subtitle: string;
-  selected: boolean;
+  /** Цвет иконки-плитки слева (как в дизайне). */
+  color: string;
   onPress: () => void;
+  locked?: boolean;
 }) {
   const theme = useTheme();
   const scale = useSharedValue(1);
@@ -917,26 +1047,17 @@ function ModeCard({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={title}
-      accessibilityState={{ selected }}
       onPress={onPress}
       onPressIn={() => (scale.value = withSpring(Motion.scalePressed, Motion.spring.stiff))}
       onPressOut={() => (scale.value = withSpring(1, Motion.spring.bouncy))}>
       <Animated.View
         style={[
           styles.modeCard,
-          {
-            backgroundColor: selected ? theme.primarySoft : theme.card,
-            borderColor: selected ? theme.primary : theme.border,
-            borderWidth: selected ? 2 : 1,
-          },
+          { backgroundColor: theme.card, borderColor: theme.border, borderWidth: 1 },
           animStyle,
         ]}>
-        <View
-          style={[
-            styles.modeIcon,
-            { backgroundColor: selected ? theme.primary : theme.backgroundElement },
-          ]}>
-          <Icon name={icon} size={22} color={selected ? theme.onPrimary : theme.textSecondary} />
+        <View style={[styles.modeIcon, { backgroundColor: color }]}>
+          <Icon name={icon} size={22} color="#FFFFFF" />
         </View>
         <View style={styles.modeText}>
           <ThemedText type="default" style={styles.modeTitle}>
@@ -946,9 +1067,62 @@ function ModeCard({
             {subtitle}
           </ThemedText>
         </View>
-        <Icon name="chevron.right" size={20} color={theme.textSecondary} />
+        {locked ? (
+          <View style={[styles.lockChip, { backgroundColor: theme.goldSoft }]}>
+            <Icon name="lock.fill" size={12} color={theme.gold} />
+            <ThemedText type="small" style={[styles.lockChipText, { color: theme.gold }]}>
+              Premium
+            </ThemedText>
+          </View>
+        ) : (
+          <Icon name="chevron.right" size={20} color={theme.textSecondary} />
+        )}
       </Animated.View>
     </Pressable>
+  );
+}
+
+/**
+ * Мягкий лист-апселл, когда free исчерпал дневной лимит тестов. Не запирает
+ * наглухо: предлагает Premium (безлимит) ИЛИ бесплатные карточки, плюс закрытие.
+ */
+function TestLimitSheet({
+  visible,
+  onClose,
+  onPremium,
+  onFlashcards,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onPremium: () => void;
+  onFlashcards: () => void;
+}) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose} accessibilityLabel="Закрыть" />
+      <View
+        style={[styles.sheet, { backgroundColor: theme.card, paddingBottom: insets.bottom + Spacing.five }]}>
+        <Sticker symbol="bolt.fill" tone="primary" size={72} />
+        <ThemedText type="subtitle" style={styles.centerText}>
+          Тесты на сегодня пройдены
+        </ThemedText>
+        <ThemedText type="default" themeColor="textSecondary" style={styles.centerText}>
+          На Free — 1 тест в день, лимит обновится завтра. С Premium тесты без ограничений —
+          тренируйся сколько хочешь.
+        </ThemedText>
+        <View style={styles.sheetActions}>
+          <Button title="Открыть Premium" icon="sparkles" onPress={onPremium} />
+          <Button
+            title="Позаниматься карточками"
+            icon="rectangle.on.rectangle.angled"
+            variant="ghost"
+            onPress={onFlashcards}
+          />
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1304,9 +1478,34 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three },
   centerText: { textAlign: 'center' },
 
-  // Интро (выбор режима)
-  intro: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three },
-  modeList: { alignSelf: 'stretch', gap: Spacing.two, marginTop: Spacing.two },
+  // Интро (выбор режима) — сверху вниз, выравнивание слева
+  intro: { gap: Spacing.three, paddingTop: Spacing.one, paddingBottom: Spacing.four },
+  introTitle: { fontSize: 34, lineHeight: 40, fontWeight: '800' },
+  // Hero-карточка «Начать тренировку»
+  heroCard: {
+    gap: Spacing.two,
+    padding: Spacing.four,
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+  },
+  heroPills: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.half,
+    borderRadius: Radius.pill,
+  },
+  pillText: { fontWeight: '700' },
+  heroTitle: { fontWeight: '800', marginTop: Spacing.one },
+  sectionLabel: {
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginTop: Spacing.one,
+    marginBottom: -Spacing.one,
+  },
+  modeList: { alignSelf: 'stretch', gap: Spacing.two },
   backToModes: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1469,4 +1668,61 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.three,
     borderRadius: Radius.lg,
   },
+
+  // Лимит тестов (баннер / чип «Premium» / апселл-лист)
+  limitBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    alignSelf: 'stretch',
+  },
+  lockChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.half,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.half,
+    borderRadius: Radius.pill,
+  },
+  lockChipText: { fontWeight: '700' },
+  sheetBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    gap: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.five,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+  },
+  sheetActions: { alignSelf: 'stretch', gap: Spacing.two },
+
+  // Карта активности (гитхаб-хитмап)
+  activityCard: {
+    alignSelf: 'stretch',
+    gap: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+  },
+  activityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  activityStreak: { flexDirection: 'row', alignItems: 'center', gap: Spacing.half },
 });

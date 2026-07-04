@@ -91,7 +91,7 @@ function RootNavigator() {
         />
         <Stack.Screen name="result" options={{ presentation: 'modal', title: 'Результат' }} />
         <Stack.Screen name="card/[id]" options={{ title: 'Карточка' }} />
-        <Stack.Screen name="paywall" options={{ presentation: 'modal', title: 'CatchWord Premium' }} />
+        <Stack.Screen name="paywall" options={{ presentation: 'modal', title: 'TakeWord Premium' }} />
         {/* Промежуточный экран съёмки: плавный кросс-фейд поверх камеры,
             свайп-закрытие отключено (камера → /scanning → replace на /result). */}
         <Stack.Screen

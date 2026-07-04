@@ -6,9 +6,10 @@
  * Регистрация нового аккаунта — на отдельном экране (/register), подтверждение
  * почты кодом — /verify-email. Первый вход СОЗДАЁТСЯ только после подтверждения.
  */
-import { useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -27,12 +28,20 @@ export function SignInScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { signInWithEmail, signInWithGoogle } = useAuth();
+  const scheme = useColorScheme();
+  const { signInWithEmail, signInWithGoogle, signInWithApple } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [gbusy, setGbusy] = useState(false);
+  const [abusy, setAbusy] = useState(false);
+  // Sign in with Apple — только iOS 13+. Проверяем доступность и показываем кнопку.
+  const [appleReady, setAppleReady] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    AppleAuthentication.isAvailableAsync().then(setAppleReady).catch(() => {});
+  }, []);
 
   const canSubmit = email.trim().length > 0 && password.length > 0 && !busy;
 
@@ -67,6 +76,23 @@ export function SignInScreen() {
       void alertAsync('Не удалось войти', 'Вход через Google не завершён. Попробуй ещё раз.');
     } finally {
       setGbusy(false);
+    }
+  };
+
+  const onApple = async () => {
+    if (abusy) return;
+    feedbackTap();
+    setAbusy(true);
+    try {
+      await signInWithApple();
+      // Успех — Apple подтвердил личность и почту; дальше ведёт гейт.
+    } catch (e) {
+      // Отмену пользователем не считаем ошибкой (Apple кидает ERR_REQUEST_CANCELED).
+      if ((e as { code?: string })?.code !== 'ERR_REQUEST_CANCELED') {
+        void alertAsync('Не удалось войти', 'Вход через Apple не завершён. Попробуй ещё раз.');
+      }
+    } finally {
+      setAbusy(false);
     }
   };
 
@@ -140,6 +166,20 @@ export function SignInScreen() {
               <View style={[styles.line, { backgroundColor: theme.border }]} />
             </View>
 
+            {Platform.OS === 'ios' && appleReady ? (
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                buttonStyle={
+                  scheme === 'dark'
+                    ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
+                    : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+                }
+                cornerRadius={Radius.md}
+                style={styles.apple}
+                onPress={onApple}
+              />
+            ) : null}
+
             <Pressable
               onPress={onGoogle}
               disabled={gbusy}
@@ -201,6 +241,7 @@ const styles = StyleSheet.create({
   bottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: Spacing.three, flexWrap: 'wrap' },
   divider: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, marginVertical: Spacing.three },
   line: { flex: 1, height: StyleSheet.hairlineWidth },
+  apple: { height: 52, width: '100%', marginBottom: Spacing.two },
   google: {
     flexDirection: 'row',
     alignItems: 'center',

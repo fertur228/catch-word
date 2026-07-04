@@ -26,6 +26,7 @@ export type QuizKind =
   | 'audioToTranslation'
   | 'translationToImage'
   | 'clozeExample'
+  | 'chooseSynonym' // Выбрать синоним слова (проверяем связи слова, не только перевод)
   | 'typeWord' // Впиши: ввести слово с клавиатуры (регистр не важен)
   | 'speakWord'; // Скажи вслух: произнести слово (на честность)
 
@@ -94,6 +95,7 @@ const RECOGNITION: QuizKind[] = [
   'wordToTranslation',
   'audioToWord',
   'imageToTranslation',
+  'chooseSynonym',
   'translationToWord',
   'audioToTranslation',
   'translationToImage',
@@ -103,11 +105,12 @@ const PRODUCTION_EARLY: QuizKind[] = ['clozeExample', 'typeWord'];
 const PRODUCTION: QuizKind[] = ['typeWord', 'speakWord', 'clozeExample'];
 
 /** Выбрать вид вопроса под карточку: ярус по mastery + первый подходящий формат. */
-function kindForCard(card: WordCard, pool: WordCard[], i: number): QuizKind {
+function kindForCard(card: WordCard, pool: WordCard[], i: number, noIntro = false): QuizKind {
   const mastery = card.mastery ?? 0;
   const reps = card.reps ?? 0;
-  // Новое слово — сначала знакомим, не тестируем.
-  if (mastery === 0 && reps === 0) return 'intro';
+  // Новое слово — сначала знакомим, не тестируем. В режиме noIntro (Умный тест)
+  // знакомство не показываем: все 10 — настоящие вопросы.
+  if (!noIntro && mastery === 0 && reps === 0) return 'intro';
 
   const tier = mastery >= 4 ? PRODUCTION : mastery >= 2 ? PRODUCTION_EARLY : RECOGNITION;
   for (let k = 0; k < tier.length; k += 1) {
@@ -160,6 +163,8 @@ function labelOf(kind: QuizKind): string {
       return 'Выбери картинку';
     case 'clozeExample':
       return 'Вставь пропущенное слово';
+    case 'chooseSynonym':
+      return 'Выбери синоним';
     case 'typeWord':
       return 'Впиши слово';
     case 'speakWord':
@@ -188,6 +193,8 @@ function promptTextOf(card: WordCard, kind: QuizKind): string {
   if (kind === 'wordToTranslation') return card.word;
   if (kind === 'translationToWord' || kind === 'translationToImage') return card.translation;
   if (kind === 'clozeExample') return clozeSentence(card) ?? '';
+  // Синоним ищем к самому слову — показываем слово.
+  if (kind === 'chooseSynonym') return card.word;
   // Впиши/Скажи — подсказка это перевод (произвести нужно само слово).
   if (kind === 'typeWord' || kind === 'speakWord') return card.translation;
   return '';
@@ -270,9 +277,42 @@ function buildImageOptions(card: WordCard, pool: WordCard[]): QuizOption[] | nul
   ]);
 }
 
+/**
+ * Варианты «выбери синоним»: правильный — синоним слова, дистракторы — другие
+ * слова коллекции (не синонимы). null, если синонимов нет или мало дистракторов.
+ */
+function buildSynonymOptions(card: WordCard, pool: WordCard[]): QuizOption[] | null {
+  const syns = (card.synonyms ?? []).map((s) => s.trim()).filter(Boolean);
+  if (syns.length === 0) return null;
+  const correct = syns[Math.floor(Math.random() * syns.length)];
+  // В дистракторы не берём само слово, его синонимы и повторы.
+  const seen = new Set<string>([card.word.toLowerCase(), ...syns.map((s) => s.toLowerCase())]);
+  const distractors: string[] = [];
+  for (const other of shuffle([...pool])) {
+    if (distractors.length >= OPTION_COUNT - 1) break;
+    const w = other.word?.trim();
+    if (!w || seen.has(w.toLowerCase())) continue;
+    seen.add(w.toLowerCase());
+    distractors.push(w);
+  }
+  for (const f of WORD_FILLERS) {
+    if (distractors.length >= OPTION_COUNT - 1) break;
+    if (!seen.has(f.toLowerCase())) {
+      seen.add(f.toLowerCase());
+      distractors.push(f);
+    }
+  }
+  if (distractors.length < OPTION_COUNT - 1) return null;
+  return shuffle([
+    { correct: true, text: correct },
+    ...distractors.map((text) => ({ correct: false, text })),
+  ]);
+}
+
 /** Подходит ли формат данной карточке/пулу. */
 function isValid(card: WordCard, pool: WordCard[], kind: QuizKind): boolean {
   if (kind === 'clozeExample') return clozeSentence(card) != null;
+  if (kind === 'chooseSynonym') return buildSynonymOptions(card, pool) != null;
   // Вопросы «с картинкой» — только для карточек с НАСТОЯЩИМ фото (не иконкой),
   // иначе получится «фото-вопрос», где на месте фото просто иконка категории.
   if (kind === 'imageToWord' || kind === 'imageToTranslation') return !!card.imageUri;
@@ -288,9 +328,11 @@ function makeQuestion(card: WordCard, pool: WordCard[], kind: QuizKind, i: numbe
   const options: QuizOption[] =
     answerMode !== 'choice'
       ? []
-      : optionMode === 'image'
-        ? (buildImageOptions(card, pool) ?? buildTextOptions(card, pool, 'translationToWord'))
-        : buildTextOptions(card, pool, kind);
+      : kind === 'chooseSynonym'
+        ? (buildSynonymOptions(card, pool) ?? buildTextOptions(card, pool, 'wordToTranslation'))
+        : optionMode === 'image'
+          ? (buildImageOptions(card, pool) ?? buildTextOptions(card, pool, 'translationToWord'))
+          : buildTextOptions(card, pool, kind);
   return {
     id: `${card.id}-${kind}-${i}`,
     kind,
@@ -318,6 +360,7 @@ export function buildQuiz(
   count: number = DEFAULT_COUNT,
   pool: WordCard[] = cards,
   forceKind?: QuizKind,
+  noIntro = false,
 ): QuizQuestion[] {
   if (cards.length === 0) return [];
   let ordered = shuffle([...cards]);
@@ -332,7 +375,8 @@ export function buildQuiz(
   return chosen.map((card, i) => {
     // В фиксированном режиме используем формат, если он применим к карточке;
     // иначе — адаптивный выбор (не ломаем сессию для карточек без примера и т.п.).
-    const kind = forceKind && isValid(card, pool, forceKind) ? forceKind : kindForCard(card, pool, i);
+    const kind =
+      forceKind && isValid(card, pool, forceKind) ? forceKind : kindForCard(card, pool, i, noIntro);
     return makeQuestion(card, pool, kind, i);
   });
 }

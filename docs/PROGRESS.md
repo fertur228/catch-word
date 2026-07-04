@@ -1,4 +1,4 @@
-# CatchWord — состояние проекта и дорожная карта
+# TakeWord — состояние проекта и дорожная карта
 
 > Обновлено: 2026-06-27. Источник правды по продукту — `../catchword_project_doc.md` (спека).
 > Этот файл — что уже сделано, как устроено и что дальше.
@@ -11,7 +11,7 @@
 - Эксперименты включены: `typedRoutes`, `reactCompiler`.
 - Нативные модули: `expo-camera`, `expo-speech`, `expo-sqlite`, `expo-dev-client`, `expo-symbols` (SF Symbols).
 - Анимации: `react-native-reanimated` v4.
-- bundle id: `com.almazbukayev.catchword`.
+- bundle id: `com.almazbukayev.takeword`.
 
 ## Архитектура (где что лежит)
 ```
@@ -63,13 +63,13 @@ src/
 ## Git (точки сохранения)
 ```
 995ff9c  feat: CapWords-grade полировка + 4 новые фичи (всё на моках)
-b584a81  chore: скелет MVP CatchWord (слой 1 по спеке §11)
+b584a81  chore: скелет MVP TakeWord (слой 1 по спеке §11)
 ```
 Откат при поломке: `git checkout .` (отменить несохранённое) или `git reset --hard 995ff9c`.
 
 ## Как запустить (кратко; подробно — `SETUP.md`)
 ```bash
-cd /Users/almazbukayev/CatchWord
+cd /Users/almazbukayev/TakeWord
 npx expo run:ios            # первый раз: собрать + запустить на симуляторе
 # дальше каждый день:
 npx expo start             # затем нажать i (приложение уже установлено)

@@ -120,7 +120,7 @@ export default function PaymentSuccess() {
           icon="envelope.fill"
           onPress={() => {
             if (typeof window !== 'undefined') {
-              window.location.href = 'mailto:nodes.kazakhstan@gmail.com?subject=CatchWord Premium';
+              window.location.href = 'mailto:nodes.kazakhstan@gmail.com?subject=TakeWord Premium';
             }
           }}
         />
