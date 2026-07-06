@@ -375,7 +375,7 @@ export const EN: Record<string, string> = {
   "Что на картинке?": "What's in the picture?",
   "Что ты услышал?": "What did you hear?",
   "Что учим и на каком языке показывать перевод.": "What you're learning and which language to show translations in.",
-  "Чтобы обращаться по имени. Позже можно поменять в настройках.": "So we can address you by name. You can change this later in settings.",
+  "Чтобы обращаться по имени — по желанию. Можно пропустить и добавить позже в настройках.": "So we can address you by name — optional. You can skip and add it later in settings.",
   "Экспорт коллекции": "Export collection",
   "Экспортировать коллекцию": "Export collection",
   "Это бесплатный тариф — он уже активен.": "This is the free plan — it's already active.",

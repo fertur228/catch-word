@@ -45,7 +45,11 @@ export function CompleteProfileScreen() {
   const [last, setLast] = useState(initLast);
   const [busy, setBusy] = useState(false);
 
-  const canSubmit = first.trim().length > 0 && !busy;
+  const hasName = first.trim().length > 0;
+  // Имя НЕОБЯЗАТЕЛЬНО: после Sign in with Apple нельзя заставлять вводить имя,
+  // которое пользователь не пожелал раскрыть (Apple Guideline 4.0). Пустое имя
+  // допустимо — updateProfileName всё равно проставит profile_completed.
+  const canSubmit = !busy;
 
   const onSubmit = async () => {
     if (!canSubmit) return;
@@ -81,7 +85,7 @@ export function CompleteProfileScreen() {
             {t('Как тебя зовут?')}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary" style={styles.sub}>
-            {t('Чтобы обращаться по имени. Позже можно поменять в настройках.')}
+            {t('Чтобы обращаться по имени — по желанию. Можно пропустить и добавить позже в настройках.')}
           </ThemedText>
 
           <View style={styles.fields}>
@@ -121,7 +125,13 @@ export function CompleteProfileScreen() {
           </View>
 
           <View style={styles.spacer} />
-          <Button title={t('Продолжить')} icon="arrow.right" onPress={onSubmit} loading={busy} disabled={!canSubmit} />
+          <Button
+            title={hasName ? t('Продолжить') : t('Пропустить')}
+            icon="arrow.right"
+            onPress={onSubmit}
+            loading={busy}
+            disabled={!canSubmit}
+          />
         </View>
       </KeyboardAvoidingView>
     </ThemedView>

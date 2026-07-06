@@ -55,7 +55,8 @@
           "microphonePermission": false,
           "enableBackgroundPlayback": false
         }
-      ]
+      ],
+      "./plugins/with-clean-release-infoplist"
     ],
     "experiments": {
       "typedRoutes": true,
