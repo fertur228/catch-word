@@ -21,6 +21,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth-context';
 import { alertAsync } from '@/lib/dialog';
 import { feedbackTap } from '@/lib/feedback';
+import { useT } from '@/lib/i18n';
 
 const LOGO = require('../../assets/images/logo.png');
 
@@ -29,6 +30,7 @@ export function SignInScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const scheme = useColorScheme();
+  const t = useT();
   const { signInWithEmail, signInWithGoogle, signInWithApple } = useAuth();
 
   const [email, setEmail] = useState('');
@@ -58,7 +60,7 @@ export function SignInScreen() {
         // Почта ещё не подтверждена — отправляем на ввод кода.
         router.push({ pathname: '/verify-email', params: { email: email.trim() } });
       } else {
-        void alertAsync('Не удалось войти', 'Проверь email и пароль.');
+        void alertAsync(t('Не удалось войти'), t('Проверь email и пароль.'));
       }
     } finally {
       setBusy(false);
@@ -73,7 +75,7 @@ export function SignInScreen() {
       await signInWithGoogle();
       // Успех — Google уже подтвердил почту, код не нужен; дальше ведёт гейт.
     } catch {
-      void alertAsync('Не удалось войти', 'Вход через Google не завершён. Попробуй ещё раз.');
+      void alertAsync(t('Не удалось войти'), t('Вход через Google не завершён. Попробуй ещё раз.'));
     } finally {
       setGbusy(false);
     }
@@ -89,7 +91,7 @@ export function SignInScreen() {
     } catch (e) {
       // Отмену пользователем не считаем ошибкой (Apple кидает ERR_REQUEST_CANCELED).
       if ((e as { code?: string })?.code !== 'ERR_REQUEST_CANCELED') {
-        void alertAsync('Не удалось войти', 'Вход через Apple не завершён. Попробуй ещё раз.');
+        void alertAsync(t('Не удалось войти'), t('Вход через Apple не завершён. Попробуй ещё раз.'));
       }
     } finally {
       setAbusy(false);
@@ -113,23 +115,23 @@ export function SignInScreen() {
             style={styles.logo}
           />
           <ThemedText type="small" themeColor="textSecondary" style={styles.tagline}>
-            Учи язык, фотографируя мир вокруг
+            {t('Учи язык, фотографируя мир вокруг')}
           </ThemedText>
 
           <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
             <ThemedText type="subtitle" style={styles.h}>
-              Добро пожаловать!
+              {t('Добро пожаловать!')}
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary" style={styles.hsub}>
-              Войдите в свой аккаунт
+              {t('Войдите в свой аккаунт')}
             </ThemedText>
 
             <View style={styles.fields}>
               <AuthField
-                label="Email"
+                label={t('Email')}
                 value={email}
                 onChangeText={setEmail}
-                placeholder="Введите email"
+                placeholder={t('Введите email')}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoComplete="email"
@@ -137,10 +139,10 @@ export function SignInScreen() {
                 returnKeyType="next"
               />
               <AuthField
-                label="Пароль"
+                label={t('Пароль')}
                 value={password}
                 onChangeText={setPassword}
-                placeholder="Введите пароль"
+                placeholder={t('Введите пароль')}
                 secureTextEntry
                 autoCapitalize="none"
                 autoComplete="current-password"
@@ -152,16 +154,16 @@ export function SignInScreen() {
 
             <Pressable onPress={() => router.push('/forgot-password')} hitSlop={8} style={styles.forgot}>
               <ThemedText type="small" style={{ color: BRAND_BLUE, fontWeight: '600' }}>
-                Забыли пароль?
+                {t('Забыли пароль?')}
               </ThemedText>
             </Pressable>
 
-            <PrimaryButton title="Войти" onPress={onLogin} loading={busy} disabled={!canSubmit} />
+            <PrimaryButton title={t('Войти')} onPress={onLogin} loading={busy} disabled={!canSubmit} />
 
             <View style={styles.divider}>
               <View style={[styles.line, { backgroundColor: theme.border }]} />
               <ThemedText type="small" themeColor="textSecondary">
-                или
+                {t('или')}
               </ThemedText>
               <View style={[styles.line, { backgroundColor: theme.border }]} />
             </View>
@@ -193,7 +195,7 @@ export function SignInScreen() {
                 <>
                   <Text style={styles.gMark}>G</Text>
                   <ThemedText type="default" style={styles.gLabel}>
-                    Продолжить с Google
+                    {t('Продолжить с Google')}
                   </ThemedText>
                 </>
               )}
@@ -201,11 +203,11 @@ export function SignInScreen() {
 
             <View style={styles.bottom}>
               <ThemedText type="small" themeColor="textSecondary">
-                Нет аккаунта?{' '}
+                {t('Нет аккаунта?')}{' '}
               </ThemedText>
               <Pressable onPress={() => router.push('/register')} hitSlop={8}>
                 <ThemedText type="small" style={{ color: BRAND_BLUE, fontWeight: '700' }}>
-                  Зарегистрироваться
+                  {t('Зарегистрироваться')}
                 </ThemedText>
               </Pressable>
             </View>

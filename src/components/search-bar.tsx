@@ -7,6 +7,7 @@ import { Pressable, StyleSheet, TextInput, View, type StyleProp, type ViewStyle 
 import { Icon } from '@/components/icon';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useT } from '@/lib/i18n';
 
 interface SearchBarProps {
   value: string;
@@ -19,11 +20,12 @@ interface SearchBarProps {
 export function SearchBar({
   value,
   onChangeText,
-  placeholder = 'Поиск',
+  placeholder,
   autoFocus = false,
   style,
 }: SearchBarProps) {
   const theme = useTheme();
+  const t = useT();
 
   return (
     <View style={[styles.wrap, { backgroundColor: theme.backgroundElement }, style]}>
@@ -31,7 +33,7 @@ export function SearchBar({
       <TextInput
         value={value}
         onChangeText={onChangeText}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t('Поиск')}
         placeholderTextColor={theme.textSecondary}
         autoFocus={autoFocus}
         autoCapitalize="none"
@@ -41,7 +43,7 @@ export function SearchBar({
         style={[styles.input, { color: theme.text }]}
       />
       {value.length > 0 ? (
-        <Pressable onPress={() => onChangeText('')} hitSlop={8} accessibilityLabel="Очистить">
+        <Pressable onPress={() => onChangeText('')} hitSlop={8} accessibilityLabel={t('Очистить')}>
           <Icon name="xmark.circle.fill" size={18} color={theme.textSecondary} />
         </Pressable>
       ) : null}

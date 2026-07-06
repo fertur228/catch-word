@@ -17,9 +17,11 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth-context';
 import { alertAsync } from '@/lib/dialog';
 import { feedbackTap } from '@/lib/feedback';
+import { useT } from '@/lib/i18n';
 
 export function RegisterScreen() {
   const theme = useTheme();
+  const t = useT();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signUpWithEmail } = useAuth();
@@ -35,7 +37,7 @@ export function RegisterScreen() {
   const onRegister = async () => {
     if (busy) return;
     if (password.length < 6) {
-      void alertAsync('Пароль коротковат', 'Минимум 6 символов.');
+      void alertAsync(t('Пароль коротковат'), t('Минимум 6 символов.'));
       return;
     }
     if (!canSubmit) return;
@@ -48,9 +50,9 @@ export function RegisterScreen() {
     } catch (e) {
       const msg = String((e as { message?: string })?.message ?? '');
       if (/registered|already|exists/i.test(msg)) {
-        void alertAsync('Email уже занят', 'Похоже, аккаунт уже есть — попробуй войти.');
+        void alertAsync(t('Email уже занят'), t('Похоже, аккаунт уже есть — попробуй войти.'));
       } else {
-        void alertAsync('Не удалось зарегистрироваться', 'Проверь данные и попробуй ещё раз.');
+        void alertAsync(t('Не удалось зарегистрироваться'), t('Проверь данные и попробуй ещё раз.'));
       }
       setBusy(false);
     }
@@ -66,33 +68,33 @@ export function RegisterScreen() {
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back} accessibilityLabel="Назад">
+          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back} accessibilityLabel={t('Назад')}>
             <Icon name="chevron.left" size={24} color={BRAND_BLUE} />
           </Pressable>
 
           <ThemedText type="title" style={styles.h}>
-            Создать аккаунт
+            {t('Создать аккаунт')}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary" style={styles.hsub}>
-            Пара шагов — и начинаем ловить слова
+            {t('Пара шагов — и начинаем ловить слова')}
           </ThemedText>
 
           <View style={styles.fields}>
             <AuthField
-              label="Имя"
+              label={t('Имя')}
               value={first}
               onChangeText={setFirst}
-              placeholder="Иван"
+              placeholder={t('Иван')}
               autoCapitalize="words"
               autoComplete="name-given"
               textContentType="givenName"
               returnKeyType="next"
             />
             <AuthField
-              label="Фамилия"
+              label={t('Фамилия')}
               value={last}
               onChangeText={setLast}
-              placeholder="Иванов"
+              placeholder={t('Иванов')}
               autoCapitalize="words"
               autoComplete="name-family"
               textContentType="familyName"
@@ -102,7 +104,7 @@ export function RegisterScreen() {
               label="Email"
               value={email}
               onChangeText={setEmail}
-              placeholder="Введите email"
+              placeholder={t('Введите email')}
               keyboardType="email-address"
               autoCapitalize="none"
               autoComplete="email"
@@ -110,10 +112,10 @@ export function RegisterScreen() {
               returnKeyType="next"
             />
             <AuthField
-              label="Пароль"
+              label={t('Пароль')}
               value={password}
               onChangeText={setPassword}
-              placeholder="Минимум 6 символов"
+              placeholder={t('Минимум 6 символов')}
               secureTextEntry
               autoCapitalize="none"
               autoComplete="new-password"
@@ -124,16 +126,16 @@ export function RegisterScreen() {
           </View>
 
           <View style={styles.submit}>
-            <PrimaryButton title="Зарегистрироваться" onPress={onRegister} loading={busy} disabled={!canSubmit} />
+            <PrimaryButton title={t('Зарегистрироваться')} onPress={onRegister} loading={busy} disabled={!canSubmit} />
           </View>
 
           <View style={styles.bottom}>
             <ThemedText type="small" themeColor="textSecondary">
-              Уже есть аккаунт?{' '}
+              {t('Уже есть аккаунт?')}{' '}
             </ThemedText>
             <Pressable onPress={() => router.back()} hitSlop={8}>
               <ThemedText type="small" style={{ color: BRAND_BLUE, fontWeight: '700' }}>
-                Войти
+                {t('Войти')}
               </ThemedText>
             </Pressable>
           </View>

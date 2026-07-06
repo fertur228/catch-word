@@ -6,6 +6,7 @@
  * Сессия хранится в SQLite (см. supabase.ts) и автоматически обновляется.
  */
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { Alert } from 'react-native';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -84,6 +85,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error || !data?.url) throw error ?? new Error('Не получили ссылку авторизации');
 
     const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+
+    // ⚠️ ВРЕМЕННАЯ ДИАГНОСТИКА — убрать после починки Google-входа.
+    const dbgUrl = 'url' in result && result.url ? result.url : '—';
+    Alert.alert(
+      'DEBUG Google',
+      `redirectTo:\n${redirectTo}\n\ntype: ${result.type}\n\nurl:\n${dbgUrl}`,
+    );
+
     if (result.type !== 'success' || !result.url) return;
 
     // implicit flow → токены во фрагменте (#access_token=...&refresh_token=...)

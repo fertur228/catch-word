@@ -8,10 +8,12 @@ import { AnimatedTabBar } from '@/components/animated-tab-bar';
 import { Icon } from '@/components/icon';
 import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
+import { useT } from '@/lib/i18n';
 
 export default function TabsLayout() {
   const theme = useTheme();
   const { stats } = useCollection();
+  const t = useT();
 
   return (
     <Tabs
@@ -28,7 +30,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Камера',
+          title: t('Камера'),
           headerShown: false,
           tabBarIcon: ({ color, size }) => <Icon name="camera.fill" size={size} color={color} />,
         }}
@@ -36,14 +38,14 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="collection"
         options={{
-          title: 'Коллекция',
+          title: t('Коллекция'),
           tabBarIcon: ({ color, size }) => <Icon name="square.grid.2x2.fill" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="review"
         options={{
-          title: 'Повторение',
+          title: t('Повторение'),
           tabBarIcon: ({ color, size }) => <Icon name="graduationcap.fill" size={size} color={color} />,
           tabBarBadge: stats.dueCount > 0 ? stats.dueCount : undefined,
         }}
@@ -51,7 +53,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="settings"
         options={{
-          title: 'Настройки',
+          title: t('Настройки'),
           tabBarIcon: ({ color, size }) => <Icon name="gearshape.fill" size={size} color={color} />,
         }}
       />

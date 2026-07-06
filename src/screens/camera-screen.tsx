@@ -55,6 +55,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
 import { alertAsync } from '@/lib/dialog';
 import { feedbackImpact, feedbackTap } from '@/lib/feedback';
+import { useT } from '@/lib/i18n';
 import { createScanJob, SCAN_FRAME, type ScanMode } from '@/lib/scan-job';
 
 /** Цвета элементов поверх живого видео (не зависят от темы — лежат на кадре). */
@@ -82,6 +83,7 @@ function useIsFocused() {
 
 export function CameraScreen() {
   const theme = useTheme();
+  const t = useT();
   const router = useRouter();
   const isFocused = useIsFocused();
   const reduceMotion = useReduceMotion();
@@ -196,13 +198,13 @@ export function CameraScreen() {
     // (и слова/прогресс негде хранить). Вход через Google, как на пейволле.
     if (!user) {
       await alertAsync(
-        'Войдите, чтобы сканировать',
-        'Так слова сохранятся в твоём аккаунте и синхронизируются между устройствами. Вход через Google.',
+        t('Войдите, чтобы сканировать'),
+        t('Так слова сохранятся в твоём аккаунте и синхронизируются между устройствами. Вход через Google.'),
       );
       try {
         await signInWithGoogle();
       } catch {
-        void alertAsync('Не удалось войти', 'Попробуй ещё раз.');
+        void alertAsync(t('Не удалось войти'), t('Попробуй ещё раз.'));
       }
       return;
     }
@@ -236,7 +238,7 @@ export function CameraScreen() {
     // Сначала экран «Распознаю…» (scanning), он сам уйдёт на Результат.
     const jobId = createScanJob(photoUri, mode);
     router.push({ pathname: '/scanning', params: { jobId } });
-  }, [router, tryScan, flash, capture, mode, user, signInWithGoogle]);
+  }, [router, tryScan, flash, capture, mode, user, signInWithGoogle, t]);
 
   // 1) Разрешение ещё загружается.
   if (!permission) {
@@ -257,19 +259,19 @@ export function CameraScreen() {
           </Reveal>
           <Reveal delay={80}>
             <ThemedText type="subtitle" style={styles.textCenter}>
-              Включи камеру
+              {t('Включи камеру')}
             </ThemedText>
           </Reveal>
           <Reveal delay={140}>
             <ThemedText type="default" themeColor="textSecondary" style={styles.textCenter}>
-              TakeWord наводится на предметы вокруг и превращает их в слова. Для этого нужен доступ к камере.
+              {t('TakeWord наводится на предметы вокруг и превращает их в слова. Для этого нужен доступ к камере.')}
             </ThemedText>
           </Reveal>
           <Reveal delay={200} style={styles.permissionAction}>
-            <Button title="Разрешить камеру" icon="camera.fill" onPress={requestPermission} />
+            <Button title={t('Разрешить камеру')} icon="camera.fill" onPress={requestPermission} />
             {!permission.canAskAgain ? (
               <ThemedText type="small" themeColor="textSecondary" style={styles.textCenter}>
-                Доступ был запрещён. Включить можно в Настройках iOS → TakeWord → Камера.
+                {t('Доступ был запрещён. Включить можно в Настройках iOS → TakeWord → Камера.')}
               </ThemedText>
             ) : null}
           </Reveal>
@@ -301,7 +303,7 @@ export function CameraScreen() {
         <View style={styles.topRow} pointerEvents="box-none">
           <Animated.View style={scansPillStyle}>
             <Pill
-              label={isPremium ? 'Неограниченно' : `${scansLeft}/${scanLimit} сканов`}
+              label={isPremium ? t('Неограниченно') : `${scansLeft}/${scanLimit} ${t('сканов')}`}
               icon="bolt.fill"
               tone={lowScans ? 'primary' : 'overlay'}
               onPress={() => router.push('/paywall')}
@@ -309,7 +311,7 @@ export function CameraScreen() {
           </Animated.View>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Настройки"
+            accessibilityLabel={t('Настройки')}
             onPress={() => {
               feedbackTap();
               router.push('/settings');
@@ -341,7 +343,7 @@ export function CameraScreen() {
 
           <View style={styles.hintWrap}>
             <Pill
-              label={mode === 'scene' ? 'Наведи на комнату или полку' : 'Наведи на предмет'}
+              label={mode === 'scene' ? t('Наведи на комнату или полку') : t('Наведи на предмет')}
               icon="viewfinder"
               tone="overlay"
             />
@@ -363,7 +365,7 @@ export function CameraScreen() {
             ) : null}
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={locked ? 'Сканы кончились — открыть тарифы' : 'Снять кадр'}
+              accessibilityLabel={locked ? t('Сканы кончились — открыть тарифы') : t('Снять кадр')}
               onPress={onShutter}
               onPressIn={() => (press.value = withSpring(Motion.scalePressed, Motion.spring.stiff))}
               onPressOut={() => (press.value = withSpring(1, Motion.spring.bouncy))}>

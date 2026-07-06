@@ -29,6 +29,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
 import { alertAsync } from '@/lib/dialog';
+import { useT } from '@/lib/i18n';
 import { createScanJob, SCAN_FRAME, type ScanMode } from '@/lib/scan-job';
 
 const ON_CAMERA = '#FFFFFF';
@@ -91,6 +92,7 @@ function pickImage(useCamera: boolean): Promise<string | null> {
 
 export function CameraScreen() {
   const theme = useTheme();
+  const t = useT();
   const router = useRouter();
   const isFocused = useIsFocused();
   const { user, signInWithGoogle } = useAuth();
@@ -187,13 +189,13 @@ export function CameraScreen() {
       // сохраняются в облаке. Вход через Google, как на пейволле.
       if (!user) {
         await alertAsync(
-          'Войдите, чтобы сканировать',
-          'Так слова сохранятся в твоём аккаунте и синхронизируются между устройствами. Вход через Google.',
+          t('Войдите, чтобы сканировать'),
+          t('Так слова сохранятся в твоём аккаунте и синхронизируются между устройствами. Вход через Google.'),
         );
         try {
           await signInWithGoogle();
         } catch {
-          void alertAsync('Не удалось войти', 'Попробуй ещё раз.');
+          void alertAsync(t('Не удалось войти'), t('Попробуй ещё раз.'));
         }
         return;
       }
@@ -227,14 +229,14 @@ export function CameraScreen() {
         <View style={styles.topGroup}>
           <View style={styles.topRow}>
             <Pill
-              label={isPremium ? 'Неограниченно' : `${scansLeft}/${scanLimit} сканов`}
+              label={isPremium ? t('Неограниченно') : `${scansLeft}/${scanLimit} ${t('сканов')}`}
               icon="bolt.fill"
               tone="overlay"
               onPress={() => router.push('/paywall')}
             />
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Настройки"
+              accessibilityLabel={t('Настройки')}
               onPress={() => router.push('/settings')}
               hitSlop={10}
               style={({ pressed }) => [styles.gear, { opacity: pressed ? 0.7 : 1 }]}>
@@ -261,12 +263,12 @@ export function CameraScreen() {
               {camError ? (
                 <View style={styles.camErrorWrap}>
                   <Icon name="camera.fill" size={28} color="rgba(255,255,255,0.5)" />
-                  <ThemedText style={styles.camErrorText}>Нет доступа к камере</ThemedText>
+                  <ThemedText style={styles.camErrorText}>{t('Нет доступа к камере')}</ThemedText>
                 </View>
               ) : null}
             </Animated.View>
             <View style={styles.hintWrap}>
-              <Pill label="Наведи на предмет и нажми кнопку" icon="camera.fill" tone="overlay" />
+              <Pill label={t('Наведи на предмет и нажми кнопку')} icon="camera.fill" tone="overlay" />
             </View>
           </View>
         ) : (
@@ -278,11 +280,11 @@ export function CameraScreen() {
               <Icon name={locked ? 'lock.fill' : 'camera.fill'} size={36} color={ON_CAMERA} />
             </View>
             <ThemedText style={styles.tapLabel}>
-              {locked ? 'Лимит сканов исчерпан' : 'Нажми, чтобы сфотографировать'}
+              {locked ? t('Лимит сканов исчерпан') : t('Нажми, чтобы сфотографировать')}
             </ThemedText>
             {!locked && (
               <ThemedText style={styles.tapSub}>
-                Наведи камеру на предмет
+                {t('Наведи камеру на предмет')}
               </ThemedText>
             )}
           </Pressable>
@@ -317,7 +319,7 @@ export function CameraScreen() {
             disabled={locked}
             style={({ pressed }) => [styles.galleryLink, { opacity: pressed || locked ? 0.5 : 1 }]}>
             <Icon name="square.and.arrow.up" size={15} color={ON_CAMERA} />
-            <ThemedText style={styles.galleryText}>Загрузить из галереи</ThemedText>
+            <ThemedText style={styles.galleryText}>{t('Загрузить из галереи')}</ThemedText>
           </Pressable>
         </View>
       </SafeAreaView>

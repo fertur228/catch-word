@@ -74,6 +74,14 @@ export function feedbackCorrect() {
   play('correct');
 }
 
+/**
+ * Только тактильный «успех» — для покупки/важного подтверждения. Без звука
+ * «дзынь» (он из квизов и на экране оплаты звучал бы не к месту).
+ */
+export function feedbackSuccess() {
+  safe(() => Haptics?.notificationAsync(Haptics.NotificationFeedbackType.Success));
+}
+
 /** Неверный ответ: вибрация-ошибка + мягкий «бзз». */
 export function feedbackWrong() {
   safe(() => Haptics?.notificationAsync(Haptics.NotificationFeedbackType.Error));

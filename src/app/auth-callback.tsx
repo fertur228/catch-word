@@ -13,9 +13,11 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth-context';
+import { useT } from '@/lib/i18n';
 
 export default function AuthCallback() {
   const theme = useTheme();
+  const t = useT();
   const { session, loading } = useAuth();
   const [timedOut, setTimedOut] = useState(false);
 
@@ -31,7 +33,7 @@ export default function AuthCallback() {
     <ThemedView style={styles.center}>
       <ActivityIndicator color={theme.primary} size="large" />
       <ThemedText type="default" themeColor="textSecondary" style={styles.text}>
-        Завершаем вход…
+        {t('Завершаем вход…')}
       </ThemedText>
     </ThemedView>
   );

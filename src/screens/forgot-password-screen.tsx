@@ -17,9 +17,11 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth-context';
 import { alertAsync } from '@/lib/dialog';
 import { feedbackTap } from '@/lib/feedback';
+import { useT } from '@/lib/i18n';
 
 export function ForgotPasswordScreen() {
   const theme = useTheme();
+  const t = useT();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { sendPasswordReset } = useAuth();
@@ -37,7 +39,7 @@ export function ForgotPasswordScreen() {
       router.replace({ pathname: '/reset-password', params: { email: email.trim() } });
     } catch {
       setBusy(false);
-      void alertAsync('Не получилось', 'Проверь email и попробуй ещё раз.');
+      void alertAsync(t('Не получилось'), t('Проверь email и попробуй ещё раз.'));
     }
   };
 
@@ -51,7 +53,7 @@ export function ForgotPasswordScreen() {
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back} accessibilityLabel="Назад">
+          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back} accessibilityLabel={t('Назад')}>
             <Icon name="chevron.left" size={24} color={BRAND_BLUE} />
           </Pressable>
 
@@ -59,10 +61,10 @@ export function ForgotPasswordScreen() {
             <Icon name="lock.fill" size={28} color={BRAND_BLUE} />
           </View>
           <ThemedText type="subtitle" style={styles.h}>
-            Сброс пароля
+            {t('Сброс пароля')}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary" style={styles.sub}>
-            Введи email — пришлём 6-значный код, чтобы задать новый пароль.
+            {t('Введи email — пришлём 6-значный код, чтобы задать новый пароль.')}
           </ThemedText>
 
           <View style={styles.fields}>
@@ -70,7 +72,7 @@ export function ForgotPasswordScreen() {
               label="Email"
               value={email}
               onChangeText={setEmail}
-              placeholder="Введите email"
+              placeholder={t('Введите email')}
               keyboardType="email-address"
               autoCapitalize="none"
               autoComplete="email"
@@ -81,7 +83,7 @@ export function ForgotPasswordScreen() {
           </View>
 
           <View style={styles.submit}>
-            <PrimaryButton title="Отправить код" onPress={onSend} loading={busy} disabled={!canSubmit} />
+            <PrimaryButton title={t('Отправить код')} onPress={onSend} loading={busy} disabled={!canSubmit} />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

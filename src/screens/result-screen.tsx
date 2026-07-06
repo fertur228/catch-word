@@ -44,6 +44,7 @@ import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { feedbackCorrect, feedbackImpact, feedbackWrong } from '@/lib/feedback';
 import { useCollection } from '@/lib/collection-context';
+import { getLang, useT } from '@/lib/i18n';
 import { lookupWord, suggestWords, type DictEntry } from '@/lib/dictionary';
 import { RECOGNIZABLE, getRandomRecognizable } from '@/lib/mock-data';
 import { getScanJob, type SceneItem } from '@/lib/scan-job';
@@ -123,6 +124,7 @@ function emojiForWord(word: string): string {
 
 export function ResultScreen() {
   const theme = useTheme();
+  const t = useT();
   const router = useRouter();
   const { addCard, prefs, completeQuestForWord, cards, isPremium } = useCollection();
   const { jobId } = useLocalSearchParams<{ jobId?: string }>();
@@ -198,7 +200,7 @@ export function ResultScreen() {
       setSaved(true);
       feedbackWrong(); // мягкий «бзз» — уже поймано
       const q = await completeQuestForWord(content.word);
-      if (q.caught) setQuestMsg(q.completed ? 'Квест дня выполнен!' : `Квест дня: ${q.progress} из ${q.total}`);
+      if (q.caught) setQuestMsg(q.completed ? t('Квест дня выполнен!') : (getLang() === 'en' ? `Daily quest: ${q.progress} of ${q.total}` : `Квест дня: ${q.progress} из ${q.total}`));
       backTimer.current = setTimeout(() => router.back(), q.caught ? 1900 : 1100);
       return;
     }
@@ -227,7 +229,7 @@ export function ResultScreen() {
     setFlyTs(Date.now()); // стикер «улетает» в коллекцию
     // Квест дня: если поймали целевой предмет — засчитываем и показываем дольше.
     const q = await completeQuestForWord(card.word);
-    if (q.caught) setQuestMsg(q.completed ? 'Квест дня выполнен!' : `Квест дня: ${q.progress} из ${q.total}`);
+    if (q.caught) setQuestMsg(q.completed ? t('Квест дня выполнен!') : (getLang() === 'en' ? `Daily quest: ${q.progress} of ${q.total}` : `Квест дня: ${q.progress} из ${q.total}`));
     // Даём увидеть «печать» успеха (и квест), затем закрываем модалку.
     backTimer.current = setTimeout(() => router.back(), q.caught ? 1900 : 760);
   }, [saved, content, recognized, addCard, router, completeQuestForWord, cards]);
@@ -364,7 +366,7 @@ export function ResultScreen() {
             style={[styles.questDone, { backgroundColor: theme.accent2Soft }]}>
             <Icon name="checkmark.circle.fill" size={15} color={theme.accent2} />
             <ThemedText type="smallBold" style={{ color: theme.accent2 }}>
-              Уже в коллекции
+              {t('Уже в коллекции')}
             </ThemedText>
           </Animated.View>
         ) : null}
@@ -373,7 +375,7 @@ export function ResultScreen() {
           <View style={[styles.caughtBadge, { backgroundColor: theme.accentSoft }]}>
             <Icon name="sparkles" size={15} color={theme.accent} />
             <ThemedText type="smallBold" style={{ color: theme.accent }}>
-              Поймал!
+              {t('Поймал!')}
             </ThemedText>
           </View>
         </Reveal>
@@ -392,7 +394,7 @@ export function ResultScreen() {
               <View style={styles.editHeader}>
                 <Icon name="pencil" size={15} color={theme.primary} />
                 <ThemedText type="smallBold" themeColor="textSecondary">
-                  Измени слово
+                  {t('Измени слово')}
                 </ThemedText>
               </View>
 
@@ -404,14 +406,14 @@ export function ResultScreen() {
                   autoFocus
                   autoCapitalize="none"
                   autoCorrect={false}
-                  placeholder="Слово на английском"
+                  placeholder={t('Слово на английском')}
                   placeholderTextColor={theme.textSecondary}
                   returnKeyType="done"
                   onSubmitEditing={confirmEdit}
                   style={[styles.fieldInput, styles.wordInput, { color: theme.text }]}
                 />
                 {draftWord.length > 0 ? (
-                  <Pressable onPress={() => onChangeWord('')} hitSlop={8} accessibilityLabel="Очистить">
+                  <Pressable onPress={() => onChangeWord('')} hitSlop={8} accessibilityLabel={t('Очистить')}>
                     <Icon name="xmark.circle.fill" size={18} color={theme.textSecondary} />
                   </Pressable>
                 ) : null}
@@ -445,7 +447,7 @@ export function ResultScreen() {
               {/* Перевод (+ бейдж «авто», если из словаря). */}
               <View style={styles.fieldLabelRow}>
                 <ThemedText type="small" themeColor="textSecondary">
-                  Перевод
+                  {t('Перевод')}
                 </ThemedText>
                 {draftAuto ? <AutoBadge /> : null}
               </View>
@@ -453,7 +455,7 @@ export function ResultScreen() {
                 <TextInput
                   value={draftTranslation}
                   onChangeText={onChangeTranslation}
-                  placeholder="Перевод на русский"
+                  placeholder={t('Перевод на русский')}
                   placeholderTextColor={theme.textSecondary}
                   style={[styles.fieldInput, { color: theme.text }]}
                 />
@@ -462,7 +464,7 @@ export function ResultScreen() {
               {/* Транскрипция. */}
               <View style={styles.fieldLabelRow}>
                 <ThemedText type="small" themeColor="textSecondary">
-                  Транскрипция
+                  {t('Транскрипция')}
                 </ThemedText>
               </View>
               <View style={[styles.field, { backgroundColor: theme.backgroundElement }]}>
@@ -471,7 +473,7 @@ export function ResultScreen() {
                   onChangeText={onChangeIpa}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  placeholder="напр. ˈlem.ən"
+                  placeholder={t('напр. ˈlem.ən')}
                   placeholderTextColor={theme.textSecondary}
                   style={[styles.fieldInput, { color: theme.text }]}
                 />
@@ -483,7 +485,7 @@ export function ResultScreen() {
                   <View style={[styles.hint, { backgroundColor: theme.warningSoft }]}>
                     <Icon name="info.circle.fill" size={15} color={theme.warning} />
                     <ThemedText type="small" style={[styles.hintText, { color: theme.warning }]}>
-                      Авто-перевод появится с бэкендом — впиши сам или выбери из подсказок
+                      {t('Авто-перевод появится с бэкендом — впиши сам или выбери из подсказок')}
                     </ThemedText>
                   </View>
                 </FadeIn>
@@ -491,8 +493,8 @@ export function ResultScreen() {
 
               {/* Кнопки редактора. */}
               <View style={styles.editActions}>
-                <Button title="Готово" icon="checkmark" onPress={confirmEdit} style={styles.flex} />
-                <Button title="Отмена" icon="xmark" variant="ghost" onPress={cancelEdit} style={styles.flex} />
+                <Button title={t('Готово')} icon="checkmark" onPress={confirmEdit} style={styles.flex} />
+                <Button title={t('Отмена')} icon="xmark" variant="ghost" onPress={cancelEdit} style={styles.flex} />
               </View>
             </View>
           </Reveal>
@@ -506,7 +508,7 @@ export function ResultScreen() {
                   onPress={openEdit}
                   hitSlop={6}
                   accessibilityRole="button"
-                  accessibilityLabel="Изменить слово"
+                  accessibilityLabel={t('Изменить слово')}
                   style={({ pressed }) => [styles.wordRow, { opacity: pressed ? 0.6 : 1 }]}>
                   <ThemedText type="default" style={styles.word}>
                     {content.word}
@@ -557,7 +559,7 @@ export function ResultScreen() {
                   <View style={styles.exampleHeader}>
                     <Icon name="text.bubble.fill" size={15} color={theme.accent2} />
                     <ThemedText type="smallBold" themeColor="textSecondary">
-                      {examples.length > 1 ? 'Примеры' : 'Пример'}
+                      {examples.length > 1 ? t('Примеры') : t('Пример')}
                     </ThemedText>
                   </View>
                   {examples.map((ex, i) => (
@@ -577,7 +579,7 @@ export function ResultScreen() {
                   <View style={styles.exampleHeader}>
                     <Icon name="arrow.left.arrow.right" size={15} color={theme.accent2} />
                     <ThemedText type="smallBold" themeColor="textSecondary">
-                      Синонимы
+                      {t('Синонимы')}
                     </ThemedText>
                   </View>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.one }}>
@@ -606,7 +608,7 @@ export function ResultScreen() {
                   <View style={styles.exampleHeader}>
                     <Icon name="lightbulb.fill" size={15} color={theme.gold} />
                     <ThemedText type="smallBold" style={{ color: theme.gold }}>
-                      Запомни
+                      {t('Запомни')}
                     </ThemedText>
                   </View>
                   <ThemedText style={styles.exampleText}>{note}</ThemedText>
@@ -620,11 +622,11 @@ export function ResultScreen() {
                   <View style={styles.exampleHeader}>
                     <Icon name="lock.fill" size={15} color={theme.gold} />
                     <ThemedText type="smallBold" style={{ color: theme.gold }}>
-                      Запомни · Premium
+                      {t('Запомни · Premium')}
                     </ThemedText>
                   </View>
                   <ThemedText type="small" themeColor="textSecondary">
-                    Мнемоника «как запомнить» — открой в Premium.
+                    {t('Мнемоника «как запомнить» — открой в Premium.')}
                   </ThemedText>
                 </Pressable>
               </Reveal>
@@ -636,17 +638,17 @@ export function ResultScreen() {
       {/* Действия (прячем во время правки — у редактора свои «Готово/Отмена»). */}
       {!editing ? (
         <Reveal delay={360} style={styles.actions}>
-          <Button title={saved ? 'Сохранено!' : 'Сохранить'} icon="checkmark" onPress={onSave} />
+          <Button title={saved ? t('Сохранено!') : t('Сохранить')} icon="checkmark" onPress={onSave} />
           <View style={styles.actionRow}>
             <Button
-              title="Переснять"
+              title={t('Переснять')}
               icon="arrow.counterclockwise"
               variant="secondary"
               onPress={onRetake}
               disabled={saved}
               style={styles.flex}
             />
-            <Button title="Отмена" icon="xmark" variant="ghost" onPress={onCancel} disabled={saved} style={styles.flex} />
+            <Button title={t('Отмена')} icon="xmark" variant="ghost" onPress={onCancel} disabled={saved} style={styles.flex} />
           </View>
         </Reveal>
       ) : null}
@@ -665,13 +667,14 @@ export function ResultScreen() {
  */
 function AutoBadge() {
   const theme = useTheme();
+  const t = useT();
   return (
     <Animated.View
       entering={ZoomIn.springify().damping(14).stiffness(200)}
       style={[styles.autoBadge, { backgroundColor: theme.accent2Soft }]}>
       <Icon name="sparkles" size={11} color={theme.accent2} />
       <ThemedText type="smallBold" style={[styles.autoBadgeText, { color: theme.accent2 }]}>
-        авто
+        {t('авто')}
       </ThemedText>
     </Animated.View>
   );
@@ -772,6 +775,7 @@ function SceneCatch({
 }) {
   const router = useRouter();
   const theme = useTheme();
+  const t = useT();
   const { addCard, cards } = useCollection();
   const [selected, setSelected] = useState<Set<number>>(() => new Set(items.map((_, i) => i)));
   const [saving, setSaving] = useState(false);
@@ -822,10 +826,12 @@ function SceneCatch({
         <View style={styles.sceneHeader}>
           <Icon name="square.grid.2x2.fill" size={22} color={theme.primary} />
           <ThemedText type="subtitle" style={styles.textCenter}>
-            Поймал {items.length} {pluralObjects(items.length)}
+            {getLang() === 'en'
+              ? `Caught ${items.length} ${items.length === 1 ? 'item' : 'items'}`
+              : `Поймал ${items.length} ${pluralObjects(items.length)}`}
           </ThemedText>
           <ThemedText type="default" themeColor="textSecondary" style={styles.textCenter}>
-            Выбери, что добавить в коллекцию.
+            {t('Выбери, что добавить в коллекцию.')}
           </ThemedText>
         </View>
       </Reveal>
@@ -870,13 +876,13 @@ function SceneCatch({
 
       <Reveal delay={140} style={styles.actions}>
         <Button
-          title={`Добавить (${selected.size})`}
+          title={getLang() === 'en' ? `Add (${selected.size})` : `Добавить (${selected.size})`}
           icon="checkmark"
           onPress={onSave}
           loading={saving}
           disabled={selected.size === 0}
         />
-        <Button title="Отмена" icon="xmark" variant="ghost" onPress={() => router.back()} disabled={saving} />
+        <Button title={t('Отмена')} icon="xmark" variant="ghost" onPress={() => router.back()} disabled={saving} />
       </Reveal>
     </Screen>
   );

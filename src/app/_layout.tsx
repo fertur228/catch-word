@@ -19,6 +19,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { AnimatedSplash } from '@/components/animated-splash';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { CollectionProvider, useCollection } from '@/lib/collection-context';
+import { initLang, useT } from '@/lib/i18n';
 
 // Держим сплеш на экране, пока не загрузим коллекцию/настройки.
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -26,6 +27,7 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 /** Внутренний навигатор: уже внутри CollectionProvider, поэтому видит prefs. */
 function RootNavigator() {
   const scheme = useColorScheme();
+  const t = useT();
   const { loading, prefs } = useCollection();
   const { session, loading: authLoading } = useAuth();
   const segments = useSegments();
@@ -59,14 +61,19 @@ function RootNavigator() {
     first === 'forgot-password' ||
     first === 'reset-password';
   const needsProfile = !!session && !session.user.user_metadata?.profile_completed;
-  let authRedirect: '/sign-in' | '/welcome' | '/complete-profile' | '/onboarding' | null = null;
+  let authRedirect: '/' | '/sign-in' | '/welcome' | '/complete-profile' | '/onboarding' | null = null;
   if (!onPublic) {
     if (!session) {
-      // Веб: аноним → публичный лендинг (индексируется, для SEO/GEO).
-      // Натив: сразу login-wall (вход).
-      if (!onAuthRoute) authRedirect = isWeb ? '/welcome' : '/sign-in';
+      // Аноним → сразу на вход (login-wall). Маркетинг-лендинг теперь отдельный
+      // статический сайт на catch-words.com; приложение (app.catch-words.com) —
+      // это уже сам продукт, публичный /welcome тут не нужен.
+      if (!onAuthRoute) authRedirect = '/sign-in';
     } else if (needsProfile) authRedirect = '/complete-profile';
     else if (!prefs.onboarded) authRedirect = '/onboarding';
+    // Уже вошёл + профиль + онбординг пройдены, но всё ещё на экране входа
+    // (вернулся после логаута — флаг онбординга остаётся) → уводим в приложение.
+    // Только /sign-in: /verify-email и /reset-password имеют легитимную сессию по ходу флоу.
+    else if (first === 'sign-in') authRedirect = '/';
   }
 
   return (
@@ -89,8 +96,8 @@ function RootNavigator() {
           name="complete-profile"
           options={{ headerShown: false, presentation: 'fullScreenModal', gestureEnabled: false }}
         />
-        <Stack.Screen name="result" options={{ presentation: 'modal', title: 'Результат' }} />
-        <Stack.Screen name="card/[id]" options={{ title: 'Карточка' }} />
+        <Stack.Screen name="result" options={{ presentation: 'modal', title: t('Результат') }} />
+        <Stack.Screen name="card/[id]" options={{ title: t('Карточка') }} />
         <Stack.Screen name="paywall" options={{ presentation: 'modal', title: 'TakeWord Premium' }} />
         {/* Промежуточный экран съёмки: плавный кросс-фейд поверх камеры,
             свайп-закрытие отключено (камера → /scanning → replace на /result). */}
@@ -121,6 +128,10 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
+  // Читаем сохранённый язык интерфейса на старте (дефолт — английский).
+  useEffect(() => {
+    void initLang();
+  }, []);
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>

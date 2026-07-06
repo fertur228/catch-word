@@ -1,0 +1,15 @@
+# Догоняем премиум-карточки на уже открытом пейволле (без launchApp — работаем с текущим экраном).
+appId: com.almazbukayev.takeword
+---
+- swipe:
+    direction: UP
+- swipe:
+    direction: UP
+- waitForAnimationToEnd:
+    timeout: 2500
+- takeScreenshot: qa-06-plans
+- swipe:
+    direction: UP
+- waitForAnimationToEnd:
+    timeout: 2500
+- takeScreenshot: qa-07-plans-legal

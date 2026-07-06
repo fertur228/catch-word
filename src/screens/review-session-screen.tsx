@@ -47,6 +47,7 @@ import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
 import { feedbackCorrect, feedbackTap, feedbackWrong } from '@/lib/feedback';
+import { getLang, useT } from '@/lib/i18n';
 import { speakWord } from '@/lib/speech';
 import { buildQuiz, type QuizKind, type QuizQuestion } from '@/lib/quiz';
 import { buildSessionQueue, computeNextReview, hasReviewWork } from '@/lib/srs';
@@ -92,14 +93,16 @@ function pluralDays(n: number): string {
 
 /** Человеко-понятный интервал «когда увидишь снова» (минуты → «10 мин» / «1 ч» / «4 д»). */
 function formatInterval(minutes: number): string {
-  if (minutes < 60) return `${Math.round(minutes)} мин`;
+  const en = getLang() === 'en';
+  if (minutes < 60) return `${Math.round(minutes)} ${en ? 'min' : 'мин'}`;
   const hours = minutes / 60;
-  if (hours < 24) return `${Math.round(hours)} ч`;
-  return `${Math.round(hours / 24)} д`;
+  if (hours < 24) return `${Math.round(hours)} ${en ? 'h' : 'ч'}`;
+  return `${Math.round(hours / 24)} ${en ? 'd' : 'д'}`;
 }
 
 export function ReviewSessionScreen() {
   const theme = useTheme();
+  const t = useT();
   const router = useRouter();
   const {
     loading,
@@ -430,7 +433,7 @@ export function ReviewSessionScreen() {
         <View style={styles.center}>
           <ActivityIndicator color={theme.primary} />
           <ThemedText type="default" themeColor="textSecondary">
-            Готовим повторение…
+            {t('Готовим повторение…')}
           </ThemedText>
         </View>
       </Screen>
@@ -443,9 +446,9 @@ export function ReviewSessionScreen() {
       <Screen>
         <EmptyState
           icon="camera.fill"
-          title="Пока нечего повторять"
-          message="Поймай несколько слов камерой — и они появятся здесь на повторение."
-          actionLabel="Открыть камеру"
+          title={t('Пока нечего повторять')}
+          message={t('Поймай несколько слов камерой — и они появятся здесь на повторение.')}
+          actionLabel={t('Открыть камеру')}
           onAction={() => router.replace('/(tabs)')}
         />
       </Screen>
@@ -461,12 +464,12 @@ export function ReviewSessionScreen() {
           {/* Заголовок экрана — слева */}
           <Reveal delay={40}>
             <ThemedText type="title" style={styles.introTitle}>
-              Повторение
+              {t('Повторение')}
             </ThemedText>
           </Reveal>
           <Reveal delay={70}>
             <ThemedText type="default" themeColor="textSecondary">
-              Ежедневная практика помогает лучше запоминать слова
+              {t('Ежедневная практика помогает лучше запоминать слова')}
             </ThemedText>
           </Reveal>
 
@@ -478,34 +481,42 @@ export function ReviewSessionScreen() {
                   <View style={[styles.pill, { backgroundColor: theme.successSoft }]}>
                     <Icon name="checkmark.circle.fill" size={14} color={theme.success} />
                     <ThemedText type="small" style={[styles.pillText, { color: theme.success }]}>
-                      Всё выучено
+                      {t('Всё выучено')}
                     </ThemedText>
                   </View>
                 ) : (
                   <View style={[styles.pill, { backgroundColor: theme.primarySoft }]}>
                     <Icon name="clock.fill" size={13} color={theme.textSecondary} />
                     <ThemedText type="small" style={[styles.pillText, { color: theme.textSecondary }]}>
-                      {n} на повторение
+                      {n} {t('на повторение')}
                     </ThemedText>
                   </View>
                 )}
                 <View style={[styles.pill, { backgroundColor: theme.goldSoft }]}>
                   <Icon name="flame.fill" size={13} color={theme.gold} />
                   <ThemedText type="small" style={[styles.pillText, { color: theme.gold }]}>
-                    {reviewStreak} {pluralDays(reviewStreak)}
+                    {getLang() === 'en'
+                      ? `${reviewStreak} ${reviewStreak === 1 ? 'day' : 'days'}`
+                      : `${reviewStreak} ${pluralDays(reviewStreak)}`}
                   </ThemedText>
                 </View>
               </View>
               <ThemedText type="subtitle" style={styles.heroTitle}>
-                {practice ? `Закрепим ${n} ${pluralWords(n)}` : `${n} ${pluralWords(n)} на повторение`}
+                {getLang() === 'en'
+                  ? practice
+                    ? `Practice ${n} ${n === 1 ? 'word' : 'words'}`
+                    : `${n} ${n === 1 ? 'word' : 'words'} to review`
+                  : practice
+                    ? `Закрепим ${n} ${pluralWords(n)}`
+                    : `${n} ${pluralWords(n)} на повторение`}
               </ThemedText>
               <ThemedText type="small" themeColor="textSecondary">
                 {practice
-                  ? 'Быстрая тренировка займёт меньше минуты'
-                  : 'Повтори, пока слова свежи в памяти'}
+                  ? t('Быстрая тренировка займёт меньше минуты')
+                  : t('Повтори, пока слова свежи в памяти')}
               </ThemedText>
               <Button
-                title="Начать тренировку"
+                title={t('Начать тренировку')}
                 icon="bolt.fill"
                 onPress={() => startWith('flashcards', queue)}
               />
@@ -516,9 +527,9 @@ export function ReviewSessionScreen() {
           <Reveal delay={140}>
             <View style={[styles.activityCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
               <View style={styles.activityHeader}>
-                <ThemedText type="smallBold">Активность</ThemedText>
+                <ThemedText type="smallBold">{t('Активность')}</ThemedText>
                 <ThemedText type="small" themeColor="textSecondary">
-                  {REVIEW_WEEKS} недель
+                  {REVIEW_WEEKS} {t('недель')}
                 </ThemedText>
               </View>
               <ContributionGrid activityByDay={activityByDay} weeks={REVIEW_WEEKS} />
@@ -528,7 +539,7 @@ export function ReviewSessionScreen() {
           {/* Режимы */}
           <Reveal delay={170}>
             <ThemedText type="small" themeColor="textSecondary" style={styles.sectionLabel}>
-              РЕЖИМЫ
+              {t('РЕЖИМЫ')}
             </ThemedText>
           </Reveal>
           <View style={styles.modeList}>
@@ -536,8 +547,8 @@ export function ReviewSessionScreen() {
               <ModeCard
                 icon="rectangle.on.rectangle.angled"
                 color={MODE_TILE.flash}
-                title="Карточки"
-                subtitle="Фото → слово, перевод и звук"
+                title={t('Карточки')}
+                subtitle={t('Фото → слово, перевод и звук')}
                 onPress={() => startWith('flashcards', queue)}
               />
             </Reveal>
@@ -545,8 +556,8 @@ export function ReviewSessionScreen() {
               <ModeCard
                 icon="speaker.wave.2.fill"
                 color={MODE_TILE.listen}
-                title="На слух"
-                subtitle="Слушай слово — выбери ответ"
+                title={t('На слух')}
+                subtitle={t('Слушай слово — выбери ответ')}
                 locked={testsExhausted}
                 onPress={() => startWith('listen', queue)}
               />
@@ -555,8 +566,8 @@ export function ReviewSessionScreen() {
               <ModeCard
                 icon="text.alignleft"
                 color={MODE_TILE.sentence}
-                title="Слово в предложение"
-                subtitle="Вставь пропущенное слово"
+                title={t('Слово в предложение')}
+                subtitle={t('Вставь пропущенное слово')}
                 locked={testsExhausted}
                 onPress={() => startWith('sentence', queue)}
               />
@@ -565,8 +576,8 @@ export function ReviewSessionScreen() {
               <ModeCard
                 icon="sparkles"
                 color={MODE_TILE.smart}
-                title="Умный тест"
-                subtitle="10 вопросов, форматы вперемешку"
+                title={t('Умный тест')}
+                subtitle={t('10 вопросов, форматы вперемешку')}
                 locked={testsExhausted}
                 onPress={() => startWith('smart', queue)}
               />
@@ -606,16 +617,18 @@ export function ReviewSessionScreen() {
           </Reveal>
           <Reveal delay={80}>
             <ThemedText type="subtitle" style={styles.centerText}>
-              {perfect ? 'Идеально!' : 'Готово!'}
+              {perfect ? t('Идеально!') : t('Готово!')}
             </ThemedText>
           </Reveal>
           <Reveal delay={140}>
             <ThemedText type="default" themeColor="textSecondary" style={styles.centerText}>
               {perfect
-                ? 'Без единой ошибки — так держать!'
+                ? t('Без единой ошибки — так держать!')
                 : objTotal > 0
-                  ? `Верно ${score} из ${objTotal}. Разберём промахи ниже.`
-                  : 'Готово. Разберём промахи ниже.'}
+                  ? getLang() === 'en'
+                    ? `Correct ${score} of ${objTotal}. Let's review the misses below.`
+                    : `Верно ${score} из ${objTotal}. Разберём промахи ниже.`
+                  : t('Готово. Разберём промахи ниже.')}
             </ThemedText>
           </Reveal>
 
@@ -624,16 +637,16 @@ export function ReviewSessionScreen() {
               <StatCard
                 icon="target"
                 value={`${accuracy}%`}
-                label="Точность"
+                label={t('Точность')}
                 tone={accuracy >= 80 ? 'success' : 'primary'}
               />
             ) : (
-              <StatCard icon="checkmark" value={objTotal} label="Проверок" tone="primary" />
+              <StatCard icon="checkmark" value={objTotal} label={t('Проверок')} tone="primary" />
             )}
             {missed.length > 0 ? (
-              <StatCard icon="xmark.circle.fill" value={missed.length} label="Ошибок" tone="warning" />
+              <StatCard icon="xmark.circle.fill" value={missed.length} label={t('Ошибок')} tone="warning" />
             ) : (
-              <StatCard icon="flame.fill" value={stats.streak} label="Серия дней" tone="accent" />
+              <StatCard icon="flame.fill" value={stats.streak} label={t('Серия дней')} tone="accent" />
             )}
           </Reveal>
 
@@ -643,7 +656,7 @@ export function ReviewSessionScreen() {
               <View style={styles.mistakesHeader}>
                 <Icon name="exclamationmark.triangle.fill" size={16} color={theme.danger} />
                 <ThemedText type="smallBold" style={{ color: theme.danger }}>
-                  Разбор ошибок
+                  {t('Разбор ошибок')}
                 </ThemedText>
               </View>
               <View style={[styles.mistakesCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -667,24 +680,26 @@ export function ReviewSessionScreen() {
                   </View>
                 ))}
               </View>
-              <Button title={`Повторить ошибки · ${missed.length}`} icon="arrow.counterclockwise" onPress={onRetryMissed} />
+              <Button title={`${t('Повторить ошибки')} · ${missed.length}`} icon="arrow.counterclockwise" onPress={onRetryMissed} />
             </Reveal>
           ) : null}
 
           <Reveal delay={300} style={styles.summaryActions}>
-            <Button title="Пройти ещё раз" icon="play.fill" onPress={onRestart} />
-            <Button title="К режимам" icon="chevron.left" variant="ghost" onPress={onChangeMode} />
+            <Button title={t('Пройти ещё раз')} icon="play.fill" onPress={onRestart} />
+            <Button title={t('К режимам')} icon="chevron.left" variant="ghost" onPress={onChangeMode} />
           </Reveal>
         </View>
 
         {/* Празднование идеальной сессии. */}
         <CelebrationModal
           visible={showCelebration}
-          title="Идеальная сессия!"
+          title={t('Идеальная сессия!')}
           subtitle={
             objTotal > 0
-              ? `Все ${objTotal} проверок верны — блестяще!`
-              : 'Ни одной ошибки — блестяще!'
+              ? getLang() === 'en'
+                ? `All ${objTotal} checks correct — brilliant!`
+                : `Все ${objTotal} проверок верны — блестяще!`
+              : t('Ни одной ошибки — блестяще!')
           }
           icon="trophy.fill"
           tone="gold"
@@ -722,7 +737,7 @@ export function ReviewSessionScreen() {
         <View style={styles.progressBlock}>
           <View style={styles.progressRow}>
             <ThemedText type="smallBold" themeColor="textSecondary">
-              Вопрос {qIndex + 1} из {total}
+              {t('Вопрос')} {qIndex + 1} {t('из')} {total}
             </ThemedText>
             <Pill label={`${Math.round((qIndex / total) * 100)}%`} tone="primary" />
           </View>
@@ -842,7 +857,7 @@ export function ReviewSessionScreen() {
           {answered ? (
             <FadeIn key="next">
               <Button
-                title={qIndex + 1 >= total ? 'Завершить' : 'Дальше'}
+                title={qIndex + 1 >= total ? t('Завершить') : t('Дальше')}
                 icon="arrow.right"
                 onPress={onNextQuestion}
               />
@@ -879,14 +894,14 @@ export function ReviewSessionScreen() {
             <View style={[styles.banner, { backgroundColor: theme.accent2Soft }]}>
               <Icon name="sparkles" size={16} color={theme.accent2} />
               <ThemedText type="small" style={{ color: theme.accent2, flex: 1 }}>
-                На сегодня всё выучено — тренируемся
+                {t('На сегодня всё выучено — тренируемся')}
               </ThemedText>
             </View>
           ) : null}
 
           <View style={styles.progressRow}>
             <ThemedText type="smallBold" themeColor="textSecondary">
-              Карточка {index + 1} из {total}
+              {t('Карточка')} {index + 1} {t('из')} {total}
             </ThemedText>
             <Pill label={`${Math.round((index / total) * 100)}%`} tone="primary" />
           </View>
@@ -899,9 +914,9 @@ export function ReviewSessionScreen() {
           <Reveal key={current.id} distance={16} style={styles.cardWrap}>
             <SwipeToRate
               enabled={revealed}
-              left={{ label: 'Забыл', color: theme.danger }}
-              up={{ label: 'Вспомнил', color: theme.primary }}
-              right={{ label: 'Легко', color: theme.success }}
+              left={{ label: t('Забыл'), color: theme.danger }}
+              up={{ label: t('Вспомнил'), color: theme.primary }}
+              right={{ label: t('Легко'), color: theme.success }}
               onLeft={() => onRate('again')}
               onUp={() => onRate('good')}
               onRight={() => onRate('easy')}>
@@ -913,10 +928,10 @@ export function ReviewSessionScreen() {
                 <View style={styles.face}>
                   <Sticker imageUri={current.imageUri} category={current.category} size={128} />
                   <ThemedText type="subtitle" style={styles.centerText}>
-                    Вспомни слово
+                    {t('Вспомни слово')}
                   </ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">
-                    Нажми, чтобы показать
+                    {t('Нажми, чтобы показать')}
                   </ThemedText>
                 </View>
               }
@@ -966,7 +981,7 @@ export function ReviewSessionScreen() {
             <FadeIn key="rate" style={styles.ratingRow}>
               <RatingButton
                 icon="arrow.counterclockwise"
-                label="Забыл"
+                label={t('Забыл')}
                 sub={intervals.again}
                 bg={theme.dangerSoft}
                 fg={theme.danger}
@@ -974,7 +989,7 @@ export function ReviewSessionScreen() {
               />
               <RatingButton
                 icon="checkmark"
-                label="Вспомнил"
+                label={t('Вспомнил')}
                 sub={intervals.good}
                 bg={theme.primarySoft}
                 fg={theme.primary}
@@ -982,7 +997,7 @@ export function ReviewSessionScreen() {
               />
               <RatingButton
                 icon="star.fill"
-                label="Легко"
+                label={t('Легко')}
                 sub={intervals.easy}
                 bg={theme.successSoft}
                 fg={theme.success}
@@ -991,7 +1006,7 @@ export function ReviewSessionScreen() {
             </FadeIn>
           ) : (
             <FadeIn key="show">
-              <Button title="Показать слово" icon="sparkles" onPress={() => setRevealed(true)} />
+              <Button title={t('Показать слово')} icon="sparkles" onPress={() => setRevealed(true)} />
             </FadeIn>
           )}
         </View>
@@ -1003,16 +1018,17 @@ export function ReviewSessionScreen() {
 /** Компактная кнопка «‹ К режимам» — вернуться к выбору режима из активной сессии. */
 function BackToModes({ onPress }: { onPress: () => void }) {
   const theme = useTheme();
+  const t = useT();
   return (
     <Pressable
       onPress={onPress}
       hitSlop={8}
       accessibilityRole="button"
-      accessibilityLabel="Назад к режимам"
+      accessibilityLabel={t('Назад к режимам')}
       style={styles.backToModes}>
       <Icon name="chevron.left" size={18} color={theme.textSecondary} />
       <ThemedText type="small" themeColor="textSecondary">
-        К режимам
+        {t('К режимам')}
       </ThemedText>
     </Pressable>
   );
@@ -1098,24 +1114,24 @@ function TestLimitSheet({
   onFlashcards: () => void;
 }) {
   const theme = useTheme();
+  const t = useT();
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose} accessibilityLabel="Закрыть" />
+      <Pressable style={styles.sheetBackdrop} onPress={onClose} accessibilityLabel={t('Закрыть')} />
       <View
         style={[styles.sheet, { backgroundColor: theme.card, paddingBottom: insets.bottom + Spacing.five }]}>
         <Sticker symbol="bolt.fill" tone="primary" size={72} />
         <ThemedText type="subtitle" style={styles.centerText}>
-          Тесты на сегодня пройдены
+          {t('Тесты на сегодня пройдены')}
         </ThemedText>
         <ThemedText type="default" themeColor="textSecondary" style={styles.centerText}>
-          На Free — 1 тест в день, лимит обновится завтра. С Premium тесты без ограничений —
-          тренируйся сколько хочешь.
+          {t('На Free — 1 тест в день, лимит обновится завтра. С Premium тесты без ограничений — тренируйся сколько хочешь.')}
         </ThemedText>
         <View style={styles.sheetActions}>
-          <Button title="Открыть Premium" icon="sparkles" onPress={onPremium} />
+          <Button title={t('Открыть Premium')} icon="sparkles" onPress={onPremium} />
           <Button
-            title="Позаниматься карточками"
+            title={t('Позаниматься карточками')}
             icon="rectangle.on.rectangle.angled"
             variant="ghost"
             onPress={onFlashcards}
@@ -1214,6 +1230,7 @@ function ImageOption({
   onPress: () => void;
 }) {
   const theme = useTheme();
+  const t = useT();
   const scale = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
@@ -1231,7 +1248,7 @@ function ImageOption({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="Выбрать картинку"
+      accessibilityLabel={t('Выбрать картинку')}
       disabled={disabled}
       onPress={onPress}
       onPressIn={() => (scale.value = withSpring(Motion.scalePressed, Motion.spring.stiff))}
@@ -1303,13 +1320,14 @@ function RatingButton({
 /** «Знакомство»: показываем новое слово целиком (без теста) → «Далее». */
 function IntroBody({ card, onNext }: { card: WordCard; onNext: () => void }) {
   const theme = useTheme();
+  const t = useT();
   return (
     <>
       <Reveal key={card.id} distance={16} style={styles.testBody}>
         <View style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={[styles.promptTag, { backgroundColor: theme.accentSoft }]}>
             <ThemedText type="smallBold" style={{ color: theme.accent }}>
-              Новое слово
+              {t('Новое слово')}
             </ThemedText>
           </View>
           <Sticker imageUri={card.imageUri} category={card.category} size={132} />
@@ -1337,7 +1355,7 @@ function IntroBody({ card, onNext }: { card: WordCard; onNext: () => void }) {
         </View>
       </Reveal>
       <View style={styles.footer}>
-        <Button title="Далее" icon="arrow.right" onPress={onNext} />
+        <Button title={t('Далее')} icon="arrow.right" onPress={onNext} />
       </View>
     </>
   );
@@ -1364,6 +1382,7 @@ function TypeBody({
   shakeStyle: any; // eslint-disable-line @typescript-eslint/no-explicit-any -- animated style
 }) {
   const theme = useTheme();
+  const t = useT();
   const answered = checked !== null;
   const correct = checked === true;
   const borderColor = answered ? (correct ? theme.success : theme.danger) : theme.border;
@@ -1373,7 +1392,7 @@ function TypeBody({
         <Animated.View style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }, shakeStyle]}>
           <View style={[styles.promptTag, { backgroundColor: theme.primarySoft }]}>
             <ThemedText type="smallBold" style={{ color: theme.primary }}>
-              Впиши слово
+              {t('Впиши слово')}
             </ThemedText>
           </View>
           <Sticker imageUri={card.imageUri} category={card.category} size={110} />
@@ -1387,7 +1406,7 @@ function TypeBody({
             autoCapitalize="none"
             autoCorrect={false}
             autoFocus
-            placeholder="Впиши слово"
+            placeholder={t('Впиши слово')}
             placeholderTextColor={theme.textSecondary}
             returnKeyType="done"
             onSubmitEditing={() => {
@@ -1403,7 +1422,7 @@ function TypeBody({
                 color={correct ? theme.success : theme.danger}
               />
               <ThemedText type="smallBold" style={{ color: correct ? theme.success : theme.danger }}>
-                {correct ? 'Верно!' : card.word}
+                {correct ? t('Верно!') : card.word}
               </ThemedText>
               <SpeakButton text={card.word} language={card.learningLang} size={38} />
             </View>
@@ -1412,9 +1431,9 @@ function TypeBody({
       </Reveal>
       <View style={styles.footer}>
         {answered ? (
-          <Button title={last ? 'Завершить' : 'Дальше'} icon="arrow.right" onPress={onNext} />
+          <Button title={last ? t('Завершить') : t('Дальше')} icon="arrow.right" onPress={onNext} />
         ) : (
-          <Button title="Проверить" icon="checkmark" onPress={onSubmit} disabled={!typed.trim()} />
+          <Button title={t('Проверить')} icon="checkmark" onPress={onSubmit} disabled={!typed.trim()} />
         )}
       </View>
     </>
@@ -1424,6 +1443,7 @@ function TypeBody({
 /** «Скажи вслух»: произнести → показать ответ → самооценка (до ASR — на честность). */
 function SpeakBody({ card, onRate }: { card: WordCard; onRate: (r: SrsRating) => void }) {
   const theme = useTheme();
+  const t = useT();
   const [shown, setShown] = useState(false);
   return (
     <>
@@ -1431,7 +1451,7 @@ function SpeakBody({ card, onRate }: { card: WordCard; onRate: (r: SrsRating) =>
         <View style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={[styles.promptTag, { backgroundColor: theme.primarySoft }]}>
             <ThemedText type="smallBold" style={{ color: theme.primary }}>
-              Скажи вслух
+              {t('Скажи вслух')}
             </ThemedText>
           </View>
           <Sticker imageUri={card.imageUri} category={card.category} size={120} />
@@ -1447,7 +1467,7 @@ function SpeakBody({ card, onRate }: { card: WordCard; onRate: (r: SrsRating) =>
             </View>
           ) : (
             <ThemedText type="small" themeColor="textSecondary" style={styles.centerText}>
-              Произнеси слово вслух, потом проверь себя.
+              {t('Произнеси слово вслух, потом проверь себя.')}
             </ThemedText>
           )}
         </View>
@@ -1455,7 +1475,7 @@ function SpeakBody({ card, onRate }: { card: WordCard; onRate: (r: SrsRating) =>
       <View style={styles.footer}>
         {!shown ? (
           <Button
-            title="Показать ответ"
+            title={t('Показать ответ')}
             icon="eye.fill"
             onPress={() => {
               setShown(true);
@@ -1464,9 +1484,9 @@ function SpeakBody({ card, onRate }: { card: WordCard; onRate: (r: SrsRating) =>
           />
         ) : (
           <View style={styles.ratingRow}>
-            <RatingButton icon="arrow.counterclockwise" label="Забыл" sub="" bg={theme.dangerSoft} fg={theme.danger} onPress={() => onRate('again')} />
-            <RatingButton icon="checkmark" label="Норм" sub="" bg={theme.primarySoft} fg={theme.primary} onPress={() => onRate('good')} />
-            <RatingButton icon="star.fill" label="Легко" sub="" bg={theme.successSoft} fg={theme.success} onPress={() => onRate('easy')} />
+            <RatingButton icon="arrow.counterclockwise" label={t('Забыл')} sub="" bg={theme.dangerSoft} fg={theme.danger} onPress={() => onRate('again')} />
+            <RatingButton icon="checkmark" label={t('Норм')} sub="" bg={theme.primarySoft} fg={theme.primary} onPress={() => onRate('good')} />
+            <RatingButton icon="star.fill" label={t('Легко')} sub="" bg={theme.successSoft} fg={theme.success} onPress={() => onRate('easy')} />
           </View>
         )}
       </View>

@@ -17,6 +17,7 @@ import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
 import { msUntilQuestReset } from '@/lib/daily-quest';
+import { getLang, useT } from '@/lib/i18n';
 
 /** Миллисекунды → «ЧЧ:ММ:СС». */
 function formatCountdown(ms: number): string {
@@ -30,6 +31,7 @@ function formatCountdown(ms: number): string {
 
 export function DailyQuestCard() {
   const theme = useTheme();
+  const t = useT();
   const router = useRouter();
   const { dailyQuests, questFoundWords, questProgress, questDoneToday, questStreak } = useCollection();
   const total = dailyQuests.length;
@@ -49,7 +51,13 @@ export function DailyQuestCard() {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={done ? 'Квест дня выполнен' : `Квест дня: найдено ${questProgress} из ${total}`}
+      accessibilityLabel={
+        done
+          ? t('Квест дня выполнен')
+          : getLang() === 'en'
+            ? `Daily quest: ${questProgress} of ${total} found`
+            : `Квест дня: найдено ${questProgress} из ${total}`
+      }
       onPress={() => router.navigate('/(tabs)')}
       style={({ pressed }) => ({ opacity: pressed ? 0.9 : 1 })}>
       <View style={[styles.card, { backgroundColor: theme.card, borderColor: tint }]}>
@@ -58,7 +66,7 @@ export function DailyQuestCard() {
           <View style={styles.labelRow}>
             <Icon name="target" size={14} color={tint} />
             <Text style={[styles.label, { color: tint }]}>
-              Квест дня · {questProgress}/{total}
+              {t('Квест дня')} · {questProgress}/{total}
             </Text>
           </View>
           <View style={[styles.timer, { backgroundColor: tintSoft }]}>
@@ -71,7 +79,7 @@ export function DailyQuestCard() {
         <View style={styles.body}>
           <View style={styles.texts}>
             <ThemedText type="small" themeColor="textSecondary">
-              {done ? 'Выполнено — отличная работа!' : 'Найди и сфотографируй 3 предмета'}
+              {done ? t('Выполнено — отличная работа!') : t('Найди и сфотографируй 3 предмета')}
             </ThemedText>
             <View style={styles.emojiRow}>
               {dailyQuests.map((q) => {

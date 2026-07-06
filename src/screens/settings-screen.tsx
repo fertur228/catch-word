@@ -26,9 +26,10 @@ import { Toast } from '@/components/toast';
 import { Motion, Radius, Spacing, type ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { feedbackSelection } from '@/lib/feedback';
+import { t, useT, useLang, getLang } from '@/lib/i18n';
 import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
-import { useSubscription } from '@/lib/subscription';
+import { useSubscription, type SubscriptionStatus, type SubPlan } from '@/lib/subscription';
 import { isIapConfigured, restorePurchases } from '@/lib/iap';
 import { alertAsync, confirmAsync } from '@/lib/dialog';
 import { LANGUAGES, getLanguage } from '@/lib/mock-data';
@@ -112,6 +113,57 @@ interface SettingRowProps {
 }
 
 /** Универсальная строка настроек: цветная иконка · текст · значение · шеврон. */
+const MONTHS_RU = [
+  'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+  'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+];
+const MONTHS_EN = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+/** Дата: RU «5 августа 2026» / EN «August 5, 2026» — без Intl (надёжно на Hermes). */
+function formatRuDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  if (getLang() === 'en') return `${MONTHS_EN[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  return `${d.getDate()} ${MONTHS_RU[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/**
+ * Понятное описание подписки для Настроек: что за тариф и когда продление/окончание.
+ * null — если не premium. Пробный → «до DATE, затем автопродление»; отменённая →
+ * «активна до DATE»; активная → «продлится DATE».
+ */
+function subscriptionDetail(
+  isPremium: boolean,
+  status: SubscriptionStatus,
+  plan: SubPlan | null,
+  currentPeriodEnd: string | null,
+): { label: string; sublabel: string } | null {
+  if (!isPremium) return null;
+  const short = plan === 'yearly' ? t('Год') : plan === 'monthly' ? t('Месяц') : 'Premium';
+  const long = plan === 'yearly' ? t('Годовая') : plan === 'monthly' ? t('Месячная') : 'Premium';
+  const date = formatRuDate(currentPeriodEnd);
+  if (status === 'trialing') {
+    return {
+      label: `${t('Пробный период')} · ${short}`,
+      sublabel: date ? `${t('Бесплатно до')} ${date}${t(', затем автопродление')}` : t('Бесплатный пробный период'),
+    };
+  }
+  if (status === 'canceled') {
+    return {
+      label: `${long} ${t('подписка')}`,
+      sublabel: date ? `${t('Отменена — Premium активен до')} ${date}` : t('Отменена — активна до конца периода'),
+    };
+  }
+  return {
+    label: `${long} ${t('подписка')}`,
+    sublabel: date ? `${t('Продлится')} ${date}` : t('Активна'),
+  };
+}
+
 function SettingRow({ icon, tone = 'neutral', label, sublabel, value, accessory, onPress, chevron }: SettingRowProps) {
   const theme = useTheme();
   // Монохром-графит: плитки иконок нейтрально-серые; цвет только у деструктивных
@@ -180,14 +232,33 @@ export function SettingsScreen() {
   const router = useRouter();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const t = useT();
+  const { lang, setLang } = useLang();
   const { prefs, setLanguages, canUsePair, cards, clearCollection, scansLeft, scanLimit } =
     useCollection();
   const { user, signInWithGoogle, signOut, deleteAccount } = useAuth();
-  const { isPremium, status, loading: subLoading, refresh: refreshSub } = useSubscription();
+  const {
+    isPremium,
+    status,
+    plan,
+    currentPeriodEnd,
+    loading: subLoading,
+    refresh: refreshSub,
+  } = useSubscription();
 
-  // Ярлык тарифа для «пилюли»: Premium (активен/пробный) или Free.
-  const planLabel = isPremium ? (status === 'trialing' ? 'Premium · пробный' : 'Premium') : 'Free';
+  // «Пилюля» тарифа: Free / Premium · пробный / Premium · Год / Premium · Месяц.
+  const planWord = plan === 'yearly' ? t('Год') : plan === 'monthly' ? t('Месяц') : null;
+  const planLabel = isPremium
+    ? status === 'trialing'
+      ? t('Premium · пробный')
+      : planWord
+        ? `Premium · ${planWord}`
+        : 'Premium'
+    : 'Free';
   const planTone: Tone = isPremium ? 'primary' : 'gold';
+
+  // Детали подписки (тариф + дата продления/окончания) — строка в разделе PREMIUM.
+  const subInfo = subscriptionDetail(isPremium, status, plan, currentPeriodEnd);
 
   const learning = getLanguage(prefs.learningLang);
   const native = getLanguage(prefs.nativeLang);
@@ -253,16 +324,16 @@ export function SettingsScreen() {
   const onRestore = async () => {
     if (restoring) return;
     if (!isIapConfigured()) {
-      void alertAsync('Восстановление покупок', 'Оплата вот-вот подключится.');
+      void alertAsync(t('Восстановление покупок'), t('Оплата вот-вот подключится.'));
       return;
     }
     setRestoring(true);
     try {
       const ok = await restorePurchases();
       await refreshSub();
-      setToast(ok ? 'Покупки восстановлены' : 'Активных покупок не найдено');
+      setToast(ok ? t('Покупки восстановлены') : t('Активных покупок не найдено'));
     } catch {
-      void alertAsync('Не удалось восстановить', 'Попробуй ещё раз.');
+      void alertAsync(t('Не удалось восстановить'), t('Попробуй ещё раз.'));
     } finally {
       setRestoring(false);
     }
@@ -275,19 +346,19 @@ export function SettingsScreen() {
       return;
     }
     if (cards.length === 0) {
-      void alertAsync('Коллекция пуста', 'Сначала поймай несколько слов камерой.');
+      void alertAsync(t('Коллекция пуста'), t('Сначала поймай несколько слов камерой.'));
       return;
     }
     const list = cards.map((c) => `${c.word} — ${c.translation}`).join('\n');
-    Share.share({ message: `Мои слова из TakeWord (${cards.length}):\n\n${list}` }).catch(() => {});
+    Share.share({ message: `${t('Мои слова из TakeWord')} (${cards.length}):\n\n${list}` }).catch(() => {});
   };
 
   // Очистить коллекцию ТЕКУЩЕГО курса (с подтверждением). Слова других пар не трогаем.
   const onClear = async () => {
     const ok = await confirmAsync(
-      'Очистить коллекцию?',
-      `Все слова пары ${learning.flag} ${learning.label} → ${native.label} ${native.flag} будут удалены без возможности восстановить. Слова других пар останутся.`,
-      'Очистить',
+      t('Очистить коллекцию?'),
+      `${t('Все слова пары')} ${learning.flag} ${learning.label} → ${native.label} ${native.flag} ${t('будут удалены без возможности восстановить. Слова других пар останутся.')}`,
+      t('Очистить'),
       true,
     );
     if (ok) clearCollection();
@@ -297,14 +368,14 @@ export function SettingsScreen() {
     try {
       await signInWithGoogle();
     } catch {
-      void alertAsync('Не удалось войти', 'Попробуй ещё раз.');
+      void alertAsync(t('Не удалось войти'), t('Попробуй ещё раз.'));
     }
   };
   const onSignOut = async () => {
     const ok = await confirmAsync(
-      'Выйти из аккаунта?',
-      'Локальная коллекция останется на устройстве.',
-      'Выйти',
+      t('Выйти из аккаунта?'),
+      t('Локальная коллекция останется на устройстве.'),
+      t('Выйти'),
       true,
     );
     if (ok) {
@@ -318,9 +389,9 @@ export function SettingsScreen() {
   const [deleting, setDeleting] = useState(false);
   const onDeleteAccount = async () => {
     const ok = await confirmAsync(
-      'Удалить аккаунт?',
-      'Аккаунт и все данные — слова, фото и подписка — будут удалены безвозвратно. Отменить это нельзя.',
-      'Удалить аккаунт',
+      t('Удалить аккаунт?'),
+      t('Аккаунт и все данные — слова, фото и подписка — будут удалены безвозвратно. Отменить это нельзя.'),
+      t('Удалить аккаунт'),
       true,
     );
     if (!ok) return;
@@ -332,8 +403,8 @@ export function SettingsScreen() {
       router.replace('/');
     } catch {
       void alertAsync(
-        'Не удалось удалить аккаунт',
-        `Попробуй ещё раз или напиши в поддержку: ${CONTACT_EMAIL}.`,
+        t('Не удалось удалить аккаунт'),
+        `${t('Попробуй ещё раз или напиши в поддержку:')} ${CONTACT_EMAIL}.`,
       );
     } finally {
       setDeleting(false);
@@ -353,14 +424,14 @@ export function SettingsScreen() {
     }
     setLanguages(nextLearning, nextNative);
     setPicker(null);
-    setToast(`${picker === 'native' ? 'Родной язык' : 'Язык изучения'}: ${getLanguage(code).label}`);
+    setToast(`${picker === 'native' ? t('Родной язык') : t('Язык изучения')}: ${getLanguage(code).label}`);
   };
 
   // Имя текущего голоса для строки «Голос» (свёрнутый список → лист выбора).
   const currentVoiceName =
     selectedVoice === null
-      ? 'Системный'
-      : voices.find((v) => v.identifier === selectedVoice)?.name ?? 'Системный';
+      ? t('Системный')
+      : voices.find((v) => v.identifier === selectedVoice)?.name ?? t('Системный');
 
   // Выбор голоса из листа: выбираем и сразу проигрываем пример (лист не закрываем —
   // можно попробовать несколько подряд).
@@ -392,7 +463,7 @@ export function SettingsScreen() {
               {user ? (
                 <>
                   <ThemedText style={styles.heroTitle} numberOfLines={1}>
-                    {(user.user_metadata?.full_name as string | undefined) ?? user.email ?? 'Профиль'}
+                    {(user.user_metadata?.full_name as string | undefined) ?? user.email ?? t('Профиль')}
                   </ThemedText>
                   <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
                     {user.email}
@@ -401,10 +472,10 @@ export function SettingsScreen() {
               ) : (
                 <>
                   <ThemedText style={styles.heroTitle} numberOfLines={1}>
-                    Учу {learning.label} {learning.flag}
+                    {t('Учу')} {learning.label} {learning.flag}
                   </ThemedText>
                   <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                    Родной — {native.label} {native.flag}
+                    {t('Родной —')} {native.label} {native.flag}
                   </ThemedText>
                 </>
               )}
@@ -413,15 +484,41 @@ export function SettingsScreen() {
           </View>
         </Reveal>
 
+        {/* ЯЗЫК ИНТЕРФЕЙСА — переключатель English / Русский */}
+        <Reveal delay={30}>
+          <Section label={t('ЯЗЫК')}>
+            <Group>
+              <SettingRow
+                icon="globe"
+                label="English"
+                accessory={lang === 'en' ? <Icon name="checkmark" size={18} color={theme.primary} /> : undefined}
+                onPress={() => {
+                  feedbackSelection();
+                  void setLang('en');
+                }}
+              />
+              <SettingRow
+                icon="globe"
+                label="Русский"
+                accessory={lang === 'ru' ? <Icon name="checkmark" size={18} color={theme.primary} /> : undefined}
+                onPress={() => {
+                  feedbackSelection();
+                  void setLang('ru');
+                }}
+              />
+            </Group>
+          </Section>
+        </Reveal>
+
         {/* АККАУНТ — только для гостя (вход). У вошедшего email виден в шапке. */}
         {!user ? (
           <Reveal delay={40}>
-            <Section label="АККАУНТ">
+            <Section label={t('АККАУНТ')}>
               <Group>
                 <SettingRow
                   icon="person.crop.circle.badge.plus"
-                  label="Войти через Google"
-                  sublabel="Сохрани прогресс и фото в облаке"
+                  label={t('Войти через Google')}
+                  sublabel={t('Сохрани прогресс и фото в облаке')}
                   onPress={onSignIn}
                 />
               </Group>
@@ -431,23 +528,23 @@ export function SettingsScreen() {
 
         {/* КУРС: языки + голос — всё про изучаемый язык одной группой */}
         <Reveal delay={60}>
-          <Section label="КУРС">
+          <Section label={t('КУРС')}>
             <Group>
               <SettingRow
                 icon="globe"
-                label="Изучаю"
+                label={t('Изучаю')}
                 value={`${learning.label} ${learning.flag}`}
                 onPress={() => setPicker('learning')}
               />
               <SettingRow
                 icon="text.bubble.fill"
-                label="Родной"
+                label={t('Родной')}
                 value={`${native.label} ${native.flag}`}
                 onPress={() => setPicker('native')}
               />
               <SettingRow
                 icon="speaker.wave.2.fill"
-                label="Голос"
+                label={t('Голос')}
                 value={currentVoiceName}
                 onPress={() => setVoiceOpen(true)}
               />
@@ -457,19 +554,29 @@ export function SettingsScreen() {
 
         {/* PREMIUM: апселл + сканы + управление подпиской */}
         <Reveal delay={120}>
-          <Section label="PREMIUM">
+          <Section label={t('PREMIUM')}>
             {/* Баннер апселла — только когда статус подписки уже известен,
                 иначе Premium-юзер на первом старте увидит его на миг. */}
             {!isPremium && !subLoading ? <PremiumBanner onPress={() => router.push('/paywall')} /> : null}
             <Group>
+              {/* Какая именно подписка и когда продление/окончание — чтобы человек
+                  точно знал, на каком он тарифе (как в топовых аппах App Store). */}
+              {isPremium && subInfo ? (
+                <SettingRow
+                  icon="checkmark.seal.fill"
+                  tone="primary"
+                  label={subInfo.label}
+                  sublabel={subInfo.sublabel}
+                />
+              ) : null}
               <SettingRow
                 icon="bolt.fill"
-                label="Сканы"
-                sublabel={!isPremium && scansLeft === 0 ? 'Лимит исчерпан' : undefined}
+                label={t('Сканы')}
+                sublabel={!isPremium && scansLeft === 0 ? t('Лимит исчерпан') : undefined}
                 accessory={
                   isPremium ? (
                     <ThemedText type="smallBold" themeColor="textSecondary">
-                      Неограниченно
+                      {t('Неограниченно')}
                     </ThemedText>
                   ) : (
                     <View style={styles.scansAccessory}>
@@ -485,13 +592,13 @@ export function SettingsScreen() {
               />
               <SettingRow
                 icon="arrow.clockwise"
-                label="Восстановить покупки"
-                sublabel={restoring ? 'Восстанавливаем…' : undefined}
+                label={t('Восстановить покупки')}
+                sublabel={restoring ? t('Восстанавливаем…') : undefined}
                 onPress={restoring ? undefined : onRestore}
               />
               <SettingRow
                 icon="creditcard.fill"
-                label="Управление подпиской"
+                label={t('Управление подпиской')}
                 onPress={() => Linking.openURL(MANAGE_SUBSCRIPTION_URL)}
               />
             </Group>
@@ -500,21 +607,21 @@ export function SettingsScreen() {
 
         {/* ДОПОЛНИТЕЛЬНО: данные + информация */}
         <Reveal delay={180}>
-          <Section label="ДОПОЛНИТЕЛЬНО">
+          <Section label={t('ДОПОЛНИТЕЛЬНО')}>
             <Group>
-              <SettingRow icon="square.and.arrow.up" label="Экспортировать коллекцию" onPress={onExport} />
+              <SettingRow icon="square.and.arrow.up" label={t('Экспортировать коллекцию')} onPress={onExport} />
               <SettingRow
                 icon="trash.fill"
                 tone="danger"
-                label="Очистить коллекцию"
-                sublabel="Только текущую пару"
+                label={t('Очистить коллекцию')}
+                sublabel={t('Только текущую пару')}
                 onPress={onClear}
               />
-              <SettingRow icon="lock.fill" label="Конфиденциальность" onPress={() => Linking.openURL(PRIVACY_URL)} />
-              <SettingRow icon="doc.text.fill" label="Условия использования" onPress={() => Linking.openURL(TERMS_URL)} />
+              <SettingRow icon="lock.fill" label={t('Конфиденциальность')} onPress={() => Linking.openURL(PRIVACY_URL)} />
+              <SettingRow icon="doc.text.fill" label={t('Условия использования')} onPress={() => Linking.openURL(TERMS_URL)} />
               <SettingRow
                 icon="envelope.fill"
-                label="Связаться с нами"
+                label={t('Связаться с нами')}
                 onPress={() => setContactOpen(true)}
               />
             </Group>
@@ -528,14 +635,14 @@ export function SettingsScreen() {
               <SettingRow
                 icon="rectangle.portrait.and.arrow.right"
                 tone="danger"
-                label="Выйти"
+                label={t('Выйти')}
                 onPress={onSignOut}
               />
               <SettingRow
                 icon="person.crop.circle.badge.xmark"
                 tone="danger"
-                label="Удалить аккаунт"
-                sublabel={deleting ? 'Удаляем…' : 'Безвозвратно'}
+                label={t('Удалить аккаунт')}
+                sublabel={deleting ? t('Удаляем…') : t('Безвозвратно')}
                 onPress={deleting ? undefined : onDeleteAccount}
               />
             </Group>
@@ -558,7 +665,7 @@ export function SettingsScreen() {
       {/* Лист выбора языка (нижний модал) */}
       <LanguagePicker
         visible={picker !== null}
-        title={picker === 'native' ? 'Родной язык' : 'Язык изучения'}
+        title={picker === 'native' ? t('Родной язык') : t('Язык изучения')}
         currentCode={picker === 'native' ? prefs.nativeLang : prefs.learningLang}
         bottomInset={insets.bottom}
         onSelect={chooseLanguage}
@@ -599,6 +706,7 @@ function VoiceTrailing({ selected }: { selected: boolean }) {
 /** Яркий баннер-апселл Premium → ведёт на Пейволл. */
 function PremiumBanner({ onPress }: { onPress: () => void }) {
   const theme = useTheme();
+  const t = useT();
   const press = usePressScale(0.97);
   return (
     <Pressable onPress={onPress} onPressIn={press.onPressIn} onPressOut={press.onPressOut}>
@@ -609,7 +717,7 @@ function PremiumBanner({ onPress }: { onPress: () => void }) {
         <View style={styles.bannerText}>
           <ThemedText style={[styles.bannerTitle, { color: theme.onPrimary }]}>TakeWord Premium</ThemedText>
           <ThemedText type="small" style={{ color: theme.onPrimary, opacity: 0.85 }} numberOfLines={1}>
-            Безлимит сканов · все языки · экспорт
+            {t('Безлимит сканов · все языки · экспорт')}
           </ThemedText>
         </View>
         <Icon name="chevron.right" size={16} color={theme.onPrimary} />
@@ -715,6 +823,7 @@ interface VoicePickerProps {
 
 function VoicePicker({ visible, voices, voicesLoading, selected, bottomInset, onSelect, onClose }: VoicePickerProps) {
   const theme = useTheme();
+  const t = useT();
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalRoot}>
@@ -724,12 +833,12 @@ function VoicePicker({ visible, voices, voicesLoading, selected, bottomInset, on
           style={[styles.sheet, { backgroundColor: theme.card, paddingBottom: bottomInset + Spacing.three }]}>
           <View style={[styles.grabber, { backgroundColor: theme.border }]} />
           <ThemedText type="default" style={styles.sheetTitle}>
-            Голос озвучки
+            {t('Голос озвучки')}
           </ThemedText>
           <ScrollView showsVerticalScrollIndicator={false} style={styles.sheetList}>
             <VoiceOption
-              label="Системный голос"
-              sublabel="По умолчанию"
+              label={t('Системный голос')}
+              sublabel={t('По умолчанию')}
               active={selected === null}
               onPress={() => onSelect(null)}
             />
@@ -745,10 +854,10 @@ function VoicePicker({ visible, voices, voicesLoading, selected, bottomInset, on
           </ScrollView>
           <ThemedText type="small" themeColor="textSecondary" style={styles.sheetHint}>
             {voicesLoading
-              ? 'Загружаю голоса…'
+              ? t('Загружаю голоса…')
               : voices.length > 0
-                ? 'Нажми голос, чтобы услышать пример.'
-                : 'Другие голоса появятся на реальном устройстве.'}
+                ? t('Нажми голос, чтобы услышать пример.')
+                : t('Другие голоса появятся на реальном устройстве.')}
           </ThemedText>
         </Animated.View>
       </View>
@@ -809,6 +918,7 @@ function ContactSheet({
   onClose: () => void;
 }) {
   const theme = useTheme();
+  const t = useT();
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalRoot}>
@@ -818,12 +928,12 @@ function ContactSheet({
           style={[styles.sheet, { backgroundColor: theme.card, paddingBottom: bottomInset + Spacing.three }]}>
           <View style={[styles.grabber, { backgroundColor: theme.border }]} />
           <ThemedText type="default" style={styles.sheetTitle}>
-            Связаться с нами
+            {t('Связаться с нами')}
           </ThemedText>
           <View style={styles.sheetList}>
             <ContactRow
               icon="envelope.fill"
-              label="Почта"
+              label={t('Почта')}
               value={CONTACT_EMAIL}
               onPress={() => Linking.openURL(`mailto:${CONTACT_EMAIL}?subject=TakeWord`)}
             />

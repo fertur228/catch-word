@@ -15,6 +15,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { feedbackTap } from '@/lib/feedback';
+import { useT } from '@/lib/i18n';
 import type { ScanMode } from '@/lib/scan-job';
 
 /** Белый — активные элементы поверх кадра; тёмный — текст на белом «thumb». */
@@ -50,6 +51,7 @@ function ModeSeg({
 }
 
 export function CameraModeToggle({ mode, onChange }: { mode: ScanMode; onChange: (m: ScanMode) => void }) {
+  const t = useT();
   const [w, setW] = useState(0);
   const reduceMotion = useReduceMotion();
   const PAD = 3;
@@ -67,8 +69,8 @@ export function CameraModeToggle({ mode, onChange }: { mode: ScanMode; onChange:
   return (
     <View onLayout={(e) => setW(e.nativeEvent.layout.width)} style={styles.track}>
       {segW > 0 ? <Animated.View pointerEvents="none" style={[styles.thumb, thumbStyle]} /> : null}
-      <ModeSeg icon="viewfinder" label="Предмет" active={mode === 'single'} onPress={() => onChange('single')} />
-      <ModeSeg icon="square.grid.2x2" label="Вся сцена" active={mode === 'scene'} onPress={() => onChange('scene')} />
+      <ModeSeg icon="viewfinder" label={t('Предмет')} active={mode === 'single'} onPress={() => onChange('single')} />
+      <ModeSeg icon="square.grid.2x2" label={t('Вся сцена')} active={mode === 'scene'} onPress={() => onChange('scene')} />
     </View>
   );
 }

@@ -18,6 +18,7 @@ import Animated, {
 
 import { Motion, Spacing } from '@/constants/theme';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
+import { useT } from '@/lib/i18n';
 
 const LOGO = require('../../assets/images/logo.png');
 /** Фирменный синий из логотипа — фон сплеша совпадает с подложкой PNG. */
@@ -25,6 +26,7 @@ const BRAND_BLUE = '#1678B2';
 
 export function AnimatedSplash({ onDone }: { onDone: () => void }) {
   const reduce = useReduceMotion();
+  const t = useT();
 
   const container = useSharedValue(1);
   const logoScale = useSharedValue(reduce ? 1 : 0.85);
@@ -62,7 +64,7 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
   return (
     <Animated.View style={[StyleSheet.absoluteFill, styles.root, containerStyle]}>
       <Animated.Image source={LOGO} resizeMode="cover" style={[styles.logo, logoStyle]} />
-      <Animated.Text style={[styles.tagline, tagStyle]}>Мир вокруг — твой словарь</Animated.Text>
+      <Animated.Text style={[styles.tagline, tagStyle]}>{t('Мир вокруг — твой словарь')}</Animated.Text>
     </Animated.View>
   );
 }

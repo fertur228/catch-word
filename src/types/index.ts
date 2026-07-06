@@ -111,5 +111,9 @@ export interface Plan {
   highlighted?: boolean;
   /** Бейдж сверху карточки, напр. «Best Value». */
   badge?: string;
+  /** Строка под ценой: разбивка «в месяц» + экономия (для годового). */
+  priceSub?: string;
+  /** Мелкий текст под кнопкой: цена после триала + «отмена в любой момент». */
+  caption?: string;
   ctaLabel: string;
 }

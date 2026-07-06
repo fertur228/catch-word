@@ -24,6 +24,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth-context';
+import { useT } from '@/lib/i18n';
 import { PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from '@/constants/links';
 
 const MAX_WIDTH = 1080;
@@ -46,16 +47,18 @@ export function Container({
 }
 
 /** Кнопка входа через Google (общая для топбара и hero). */
-export function GoogleButton({ title = 'Войти через Google' }: { title?: string }) {
+export function GoogleButton({ title }: { title?: string }) {
   const { signInWithGoogle } = useAuth();
+  const t = useT();
   const onPress = () => {
     void signInWithGoogle().catch(() => {});
   };
-  return <Button title={title} icon="person.crop.circle.badge.plus" onPress={onPress} />;
+  return <Button title={title ?? t('Войти через Google')} icon="person.crop.circle.badge.plus" onPress={onPress} />;
 }
 
 function TopBar() {
   const theme = useTheme();
+  const t = useT();
   const router = useRouter();
   const wide = useIsWide();
   const { session } = useAuth();
@@ -79,16 +82,16 @@ function TopBar() {
             <Link href="/pricing" asChild>
               <Pressable hitSlop={8}>
                 <ThemedText type="smallBold" themeColor="textSecondary">
-                  Тарифы
+                  {t('Тарифы')}
                 </ThemedText>
               </Pressable>
             </Link>
           ) : null}
           {session ? (
-            <Button title="Открыть приложение" icon="arrow.right" onPress={() => router.replace('/')} />
+            <Button title={t('Открыть приложение')} icon="arrow.right" onPress={() => router.replace('/')} />
           ) : (
             <Button
-              title="Войти"
+              title={t('Войти')}
               variant="secondary"
               icon="person.crop.circle.badge.plus"
               onPress={() => void signInWithGoogle().catch(() => {})}
@@ -102,6 +105,7 @@ function TopBar() {
 
 function Footer() {
   const theme = useTheme();
+  const t = useT();
   const year = new Date().getFullYear();
   return (
     <View style={[styles.footer, { borderTopColor: theme.border }]}>
@@ -113,23 +117,23 @@ function Footer() {
           <Link href="/pricing" asChild>
             <Pressable hitSlop={6}>
               <ThemedText type="small" themeColor="textSecondary">
-                Тарифы
+                {t('Тарифы')}
               </ThemedText>
             </Pressable>
           </Link>
           <Pressable hitSlop={6} onPress={() => Linking.openURL(PRIVACY_URL)}>
             <ThemedText type="small" themeColor="textSecondary">
-              Конфиденциальность
+              {t('Конфиденциальность')}
             </ThemedText>
           </Pressable>
           <Pressable hitSlop={6} onPress={() => Linking.openURL(TERMS_URL)}>
             <ThemedText type="small" themeColor="textSecondary">
-              Условия
+              {t('Условия')}
             </ThemedText>
           </Pressable>
           <Pressable hitSlop={6} onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)}>
             <ThemedText type="small" themeColor="textSecondary">
-              Поддержка
+              {t('Поддержка')}
             </ThemedText>
           </Pressable>
         </View>

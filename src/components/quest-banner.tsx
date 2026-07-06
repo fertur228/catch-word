@@ -26,11 +26,13 @@ import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { useCollection } from '@/lib/collection-context';
 import { msUntilQuestReset, type DailyQuest } from '@/lib/daily-quest';
 import { feedbackTap } from '@/lib/feedback';
+import { getLang, useT } from '@/lib/i18n';
 
 const ON = '#FFFFFF';
 
 export function QuestBanner() {
   const theme = useTheme();
+  const t = useT();
   const reduce = useReduceMotion();
   const { dailyQuests, questFoundWords, questProgress, questDoneToday, questStreak } = useCollection();
   const [open, setOpen] = useState(false);
@@ -72,7 +74,7 @@ export function QuestBanner() {
     <Animated.View entering={reduce ? undefined : FadeIn.duration(Motion.duration.base)} style={bobStyle}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Подробнее о квесте дня"
+        accessibilityLabel={t('Подробнее о квесте дня')}
         onPress={() => {
           feedbackTap();
           setOpen(true);
@@ -93,9 +95,15 @@ export function QuestBanner() {
         </Animated.View>
 
         <View style={styles.texts}>
-          <Text style={styles.label}>{questDoneToday ? 'Квест выполнен' : 'Квест дня'}</Text>
+          <Text style={styles.label}>{questDoneToday ? t('Квест выполнен') : t('Квест дня')}</Text>
           <Text style={styles.title} numberOfLines={1}>
-            {questDoneToday ? `Найдены все ${total}!` : `Найди ${total} предмета сегодня`}
+            {questDoneToday
+              ? getLang() === 'en'
+                ? `Found all ${total}!`
+                : `Найдены все ${total}!`
+              : getLang() === 'en'
+                ? `Find ${total} ${total === 1 ? 'item' : 'items'} today`
+                : `Найди ${total} предмета сегодня`}
           </Text>
         </View>
 
@@ -129,8 +137,8 @@ export function QuestBanner() {
 function formatLeft(ms: number): string {
   const h = Math.floor(ms / 3_600_000);
   const m = Math.floor((ms % 3_600_000) / 60_000);
-  if (h > 0) return `${h} ч ${m} мин`;
-  return `${m} мин`;
+  if (h > 0) return getLang() === 'en' ? `${h}h ${m}min` : `${h} ч ${m} мин`;
+  return getLang() === 'en' ? `${m}min` : `${m} мин`;
 }
 
 /** Подробное окно квеста: три цели (какие пойманы) + объяснение (в духе игр). */
@@ -154,6 +162,7 @@ function QuestDetailSheet({
   streak: number;
 }) {
   const theme = useTheme();
+  const t = useT();
   const isFound = (w: string) => found.some((f) => f.toLowerCase() === w.toLowerCase());
 
   return (
@@ -171,13 +180,17 @@ function QuestDetailSheet({
               )}
             </View>
             <ThemedText type="small" themeColor="textSecondary" style={styles.eyebrow}>
-              {done ? 'КВЕСТ ВЫПОЛНЕН' : 'КВЕСТ ДНЯ'}
+              {done ? t('КВЕСТ ВЫПОЛНЕН') : t('КВЕСТ ДНЯ')}
             </ThemedText>
             <ThemedText type="subtitle" style={styles.qTitle}>
-              {done ? 'Отличная работа!' : `Найди ${total} предмета`}
+              {done
+                ? t('Отличная работа!')
+                : getLang() === 'en'
+                  ? `Find ${total} ${total === 1 ? 'item' : 'items'}`
+                  : `Найди ${total} предмета`}
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
-              Прогресс: {progress}/{total}
+              {t('Прогресс:')} {progress}/{total}
             </ThemedText>
           </View>
 
@@ -214,31 +227,41 @@ function QuestDetailSheet({
                 icon="camera.viewfinder"
                 tone={theme.primary}
                 soft={theme.primarySoft}
-                title="Как выполнить"
-                text="Наведи камеру на любой из этих предметов и поймай слово — цель засчитается сама."
+                title={t('Как выполнить')}
+                text={t('Наведи камеру на любой из этих предметов и поймай слово — цель засчитается сама.')}
               />
             ) : null}
             <Row
               icon="flame.fill"
               tone={theme.gold}
               soft={theme.goldSoft}
-              title={streak > 0 ? `Серия: ${streak} дн. подряд` : 'Серия дней'}
+              title={
+                streak > 0
+                  ? getLang() === 'en'
+                    ? `Streak: ${streak} ${streak === 1 ? 'day' : 'days'} in a row`
+                    : `Серия: ${streak} дн. подряд`
+                  : t('Серия дней')
+              }
               text={
                 streak > 0
-                  ? 'Находи все 3 предмета каждый день, чтобы серия росла и не сгорала.'
-                  : 'Найди все 3 — начнётся серия 🔥. Заходи каждый день, чтобы её держать.'
+                  ? t('Находи все 3 предмета каждый день, чтобы серия росла и не сгорала.')
+                  : t('Найди все 3 — начнётся серия 🔥. Заходи каждый день, чтобы её держать.')
               }
             />
             <Row
               icon="clock"
               tone={theme.accent2}
               soft={theme.accent2Soft}
-              title="Новый квест"
-              text={`Обновится через ${formatLeft(msUntilQuestReset())} — три новые цели на завтра.`}
+              title={t('Новый квест')}
+              text={
+                getLang() === 'en'
+                  ? `Resets in ${formatLeft(msUntilQuestReset())} — three new targets for tomorrow.`
+                  : `Обновится через ${formatLeft(msUntilQuestReset())} — три новые цели на завтра.`
+              }
             />
           </View>
 
-          <Button title="Понятно" onPress={onClose} />
+          <Button title={t('Понятно')} onPress={onClose} />
         </Pressable>
       </Pressable>
     </Modal>

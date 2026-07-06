@@ -14,6 +14,7 @@
  * Чистые функции без React/БД. Math.random разрешён (мок-данные).
  */
 import type { WordCard } from '@/types';
+import { t } from '@/lib/i18n';
 
 /** Виды вопросов. */
 export type QuizKind =
@@ -147,28 +148,28 @@ function answerOf(card: WordCard, kind: QuizKind): string {
 function labelOf(kind: QuizKind): string {
   switch (kind) {
     case 'intro':
-      return 'Новое слово';
+      return t('Новое слово');
     case 'wordToTranslation':
     case 'imageToTranslation':
-      return 'Как переводится?';
+      return t('Как переводится?');
     case 'audioToTranslation':
-      return 'Услышал слово — как переводится?';
+      return t('Услышал слово — как переводится?');
     case 'translationToWord':
-      return 'Какое это слово?';
+      return t('Какое это слово?');
     case 'imageToWord':
-      return 'Что на картинке?';
+      return t('Что на картинке?');
     case 'audioToWord':
-      return 'Что ты услышал?';
+      return t('Что ты услышал?');
     case 'translationToImage':
-      return 'Выбери картинку';
+      return t('Выбери картинку');
     case 'clozeExample':
-      return 'Вставь пропущенное слово';
+      return t('Вставь пропущенное слово');
     case 'chooseSynonym':
-      return 'Выбери синоним';
+      return t('Выбери синоним');
     case 'typeWord':
-      return 'Впиши слово';
+      return t('Впиши слово');
     case 'speakWord':
-      return 'Скажи вслух';
+      return t('Скажи вслух');
   }
 }
 

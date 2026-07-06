@@ -22,13 +22,26 @@ export type SubscriptionStatus =
 // приложение) обновляет ВСЕ экраны разом — премиум применяется мгновенно.
 // ─────────────────────────────────────────────────────────────────────────
 
+/** Тип тарифа (колонка subscriptions.plan). */
+export type SubPlan = 'monthly' | 'yearly';
+
 interface SubSnapshot {
   isPremium: boolean;
   status: SubscriptionStatus;
+  /** Тариф активной подписки (null — free или вебхук ещё не пришёл). */
+  plan: SubPlan | null;
+  /** ISO-конец текущего периода: дата продления (active) или окончания (trial/canceled). */
+  currentPeriodEnd: string | null;
   loading: boolean;
 }
 
-let snapshot: SubSnapshot = { isPremium: false, status: 'free', loading: true };
+let snapshot: SubSnapshot = {
+  isPremium: false,
+  status: 'free',
+  plan: null,
+  currentPeriodEnd: null,
+  loading: true,
+};
 const listeners = new Set<() => void>();
 
 /** useSyncExternalStore требует стабильную ссылку, пока данные не менялись. */
@@ -48,6 +61,8 @@ function publish(next: SubSnapshot): void {
   if (
     next.isPremium === snapshot.isPremium &&
     next.status === snapshot.status &&
+    next.plan === snapshot.plan &&
+    next.currentPeriodEnd === snapshot.currentPeriodEnd &&
     next.loading === snapshot.loading
   ) {
     return;
@@ -69,11 +84,13 @@ async function doRefresh(): Promise<void> {
 
   let premium = false;
   let status: SubscriptionStatus = 'free';
+  let plan: SubPlan | null = null;
+  let currentPeriodEnd: string | null = null;
 
   if (userId) {
     const { data } = await supabase
       .from('subscriptions')
-      .select('status, current_period_end')
+      .select('status, plan, current_period_end')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -81,7 +98,9 @@ async function doRefresh(): Promise<void> {
 
     if (data) {
       status = (data.status as SubscriptionStatus) ?? 'free';
-      const periodEnd = data.current_period_end ? new Date(data.current_period_end) : null;
+      plan = (data.plan as SubPlan | null) ?? null;
+      currentPeriodEnd = (data.current_period_end as string | null) ?? null;
+      const periodEnd = currentPeriodEnd ? new Date(currentPeriodEnd) : null;
       // Активен если: active, trialing, или canceled но ещё не истёк период.
       premium =
         status === 'active' ||
@@ -100,7 +119,7 @@ async function doRefresh(): Promise<void> {
     }
   }
 
-  publish({ isPremium: premium, status, loading: false });
+  publish({ isPremium: premium, status, plan, currentPeriodEnd, loading: false });
 }
 
 /** Перечитать статус подписки и обновить ВСЕ экраны. Одновременные вызовы схлопываются. */
@@ -147,5 +166,12 @@ export function useSubscription() {
 
   const refresh = useCallback(() => refreshSubscription(), []);
 
-  return { isPremium: snap.isPremium, status: snap.status, loading: snap.loading, refresh };
+  return {
+    isPremium: snap.isPremium,
+    status: snap.status,
+    plan: snap.plan,
+    currentPeriodEnd: snap.currentPeriodEnd,
+    loading: snap.loading,
+    refresh,
+  };
 }

@@ -6,6 +6,7 @@
  * Заголовки на русском — конкретная дата «число месяц»: «26 июня» (год — только
  * если день не из текущего года: «26 июня 2025»).
  */
+import { getLang } from '@/lib/i18n';
 import type { WordCard } from '@/types';
 
 /** Секция списка: один календарный день. */
@@ -34,6 +35,22 @@ const MONTHS_RU = [
   'декабря',
 ];
 
+/** Английские названия месяцев для дат («August 5, 2026»). */
+const MONTHS_EN = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
 /** Ключ локального календарного дня для метки времени (Unix ms). */
 function dayKey(ms: number): string {
   const d = new Date(ms);
@@ -47,8 +64,14 @@ function dayKey(ms: number): string {
  */
 function titleForDay(ms: number, now: number): string {
   const d = new Date(ms);
+  const sameYear = d.getFullYear() === new Date(now).getFullYear();
+  if (getLang() === 'en') {
+    // Английская дата: «August 5» (без года) / «August 5, 2026» (с годом).
+    const base = `${MONTHS_EN[d.getMonth()]} ${d.getDate()}`;
+    return sameYear ? base : `${base}, ${d.getFullYear()}`;
+  }
   const base = `${d.getDate()} ${MONTHS_RU[d.getMonth()]}`;
-  return d.getFullYear() === new Date(now).getFullYear() ? base : `${base} ${d.getFullYear()}`;
+  return sameYear ? base : `${base} ${d.getFullYear()}`;
 }
 
 /**

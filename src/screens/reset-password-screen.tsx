@@ -17,11 +17,13 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth-context';
 import { alertAsync } from '@/lib/dialog';
 import { feedbackTap } from '@/lib/feedback';
+import { useT } from '@/lib/i18n';
 
 const LEN = 6;
 
 export function ResetPasswordScreen() {
   const theme = useTheme();
+  const t = useT();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { email } = useLocalSearchParams<{ email?: string }>();
@@ -38,11 +40,11 @@ export function ResetPasswordScreen() {
   const onSave = async () => {
     if (busy) return;
     if (code.length < LEN) {
-      void alertAsync('Введите код', 'Нужен 6-значный код из письма.');
+      void alertAsync(t('Введите код'), t('Нужен 6-значный код из письма.'));
       return;
     }
     if (pass.length < 6) {
-      void alertAsync('Пароль коротковат', 'Минимум 6 символов.');
+      void alertAsync(t('Пароль коротковат'), t('Минимум 6 символов.'));
       return;
     }
     setBusy(true);
@@ -53,7 +55,7 @@ export function ResetPasswordScreen() {
     } catch {
       setBusy(false);
       setCode('');
-      void alertAsync('Не удалось', 'Проверь код из письма и попробуй снова.');
+      void alertAsync(t('Не удалось'), t('Проверь код из письма и попробуй снова.'));
     }
   };
 
@@ -61,9 +63,9 @@ export function ResetPasswordScreen() {
     feedbackTap();
     try {
       await sendPasswordReset(mail);
-      void alertAsync('Отправили код', 'Проверь почту — придёт новый код.');
+      void alertAsync(t('Отправили код'), t('Проверь почту — придёт новый код.'));
     } catch {
-      void alertAsync('Не получилось', 'Попробуй чуть позже.');
+      void alertAsync(t('Не получилось'), t('Попробуй чуть позже.'));
     }
   };
 
@@ -77,7 +79,7 @@ export function ResetPasswordScreen() {
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back} accessibilityLabel="Назад">
+          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back} accessibilityLabel={t('Назад')}>
             <Icon name="chevron.left" size={24} color={BRAND_BLUE} />
           </Pressable>
 
@@ -86,10 +88,10 @@ export function ResetPasswordScreen() {
               <Icon name="lock.rotation" size={28} color={BRAND_BLUE} />
             </View>
             <ThemedText type="subtitle" style={styles.h}>
-              Новый пароль
+              {t('Новый пароль')}
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary" style={styles.sub}>
-              Мы отправили 6-значный код на
+              {t('Мы отправили 6-значный код на')}
             </ThemedText>
             {mail ? (
               <ThemedText type="smallBold" style={{ color: BRAND_BLUE }}>
@@ -131,10 +133,10 @@ export function ResetPasswordScreen() {
 
           <View style={styles.passField}>
             <AuthField
-              label="Новый пароль"
+              label={t('Новый пароль')}
               value={pass}
               onChangeText={setPass}
-              placeholder="Минимум 6 символов"
+              placeholder={t('Минимум 6 символов')}
               secureTextEntry
               autoCapitalize="none"
               autoComplete="new-password"
@@ -145,15 +147,15 @@ export function ResetPasswordScreen() {
           </View>
 
           <View style={styles.submit}>
-            <PrimaryButton title="Сохранить пароль" onPress={onSave} loading={busy} disabled={!canSubmit} />
+            <PrimaryButton title={t('Сохранить пароль')} onPress={onSave} loading={busy} disabled={!canSubmit} />
           </View>
 
           <Pressable onPress={onResend} hitSlop={8} style={styles.resend}>
             <ThemedText type="small" themeColor="textSecondary">
-              Не получили код?{' '}
+              {t('Не получили код?')}{' '}
             </ThemedText>
             <ThemedText type="small" style={{ color: BRAND_BLUE, fontWeight: '700' }}>
-              Отправить снова
+              {t('Отправить снова')}
             </ThemedText>
           </Pressable>
         </ScrollView>

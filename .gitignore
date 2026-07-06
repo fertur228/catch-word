@@ -48,9 +48,17 @@ example
 # Claude Code local settings
 .claude/settings.local.json
 
+# Артефакты тестов (Playwright)
+/test-results/
+/tests/e2e/report/
+/playwright/.cache/
+
 # Локальные материалы (скриншоты/примеры/аудио/сохранённые страницы) — не в репозиторий
 /landing/
+/examples/
 /logo.png
 /*.png
+/*.mp4
 /2026-*.jpg
 /*.html
+.i18n-tmp/

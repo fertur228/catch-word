@@ -18,6 +18,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
 import { alertAsync } from '@/lib/dialog';
+import { useT } from '@/lib/i18n';
 
 /** Достаём имя/фамилию из метаданных провайдера (Google/Apple), если пришли. */
 function guessName(meta: Record<string, any> | undefined): { first: string; last: string } {
@@ -33,6 +34,7 @@ function guessName(meta: Record<string, any> | undefined): { first: string; last
 
 export function CompleteProfileScreen() {
   const theme = useTheme();
+  const t = useT();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, updateProfileName } = useAuth();
@@ -53,7 +55,7 @@ export function CompleteProfileScreen() {
       router.replace(prefs.onboarded ? '/(tabs)' : '/onboarding');
     } catch {
       setBusy(false);
-      void alertAsync('Не удалось сохранить', 'Проверь соединение и попробуй ещё раз.');
+      void alertAsync(t('Не удалось сохранить'), t('Проверь соединение и попробуй ещё раз.'));
     }
   };
 
@@ -76,22 +78,22 @@ export function CompleteProfileScreen() {
             <Icon name="person.fill" size={30} color={theme.primary} />
           </View>
           <ThemedText type="subtitle" style={styles.title}>
-            Как тебя зовут?
+            {t('Как тебя зовут?')}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary" style={styles.sub}>
-            Чтобы обращаться по имени. Позже можно поменять в настройках.
+            {t('Чтобы обращаться по имени. Позже можно поменять в настройках.')}
           </ThemedText>
 
           <View style={styles.fields}>
             <View style={styles.field}>
               <ThemedText type="smallBold" themeColor="textSecondary" style={styles.label}>
-                Имя
+                {t('Имя')}
               </ThemedText>
               <TextInput
                 style={inputStyle}
                 value={first}
                 onChangeText={setFirst}
-                placeholder="Иван"
+                placeholder={t('Иван')}
                 placeholderTextColor={theme.textSecondary}
                 autoCapitalize="words"
                 autoComplete="name-given"
@@ -101,13 +103,13 @@ export function CompleteProfileScreen() {
             </View>
             <View style={styles.field}>
               <ThemedText type="smallBold" themeColor="textSecondary" style={styles.label}>
-                Фамилия
+                {t('Фамилия')}
               </ThemedText>
               <TextInput
                 style={inputStyle}
                 value={last}
                 onChangeText={setLast}
-                placeholder="Иванов"
+                placeholder={t('Иванов')}
                 placeholderTextColor={theme.textSecondary}
                 autoCapitalize="words"
                 autoComplete="name-family"
@@ -119,7 +121,7 @@ export function CompleteProfileScreen() {
           </View>
 
           <View style={styles.spacer} />
-          <Button title="Продолжить" icon="arrow.right" onPress={onSubmit} loading={busy} disabled={!canSubmit} />
+          <Button title={t('Продолжить')} icon="arrow.right" onPress={onSubmit} loading={busy} disabled={!canSubmit} />
         </View>
       </KeyboardAvoidingView>
     </ThemedView>

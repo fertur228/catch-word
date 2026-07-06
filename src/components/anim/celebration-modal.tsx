@@ -16,6 +16,7 @@ import type { ThemeColor } from '@/constants/theme';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { feedbackCorrect } from '@/lib/feedback';
+import { useT } from '@/lib/i18n';
 
 export function CelebrationModal({
   visible,
@@ -23,7 +24,7 @@ export function CelebrationModal({
   subtitle,
   icon = 'star.fill',
   tone = 'gold',
-  ctaLabel = 'Отлично!',
+  ctaLabel,
   onClose,
 }: {
   visible: boolean;
@@ -35,6 +36,7 @@ export function CelebrationModal({
   onClose: () => void;
 }) {
   const theme = useTheme();
+  const t = useT();
   const [burst, setBurst] = useState(0);
   const shown = useRef(false);
 
@@ -65,7 +67,7 @@ export function CelebrationModal({
               {subtitle}
             </ThemedText>
           ) : null}
-          <Button title={ctaLabel} onPress={onClose} style={styles.cta} />
+          <Button title={ctaLabel ?? t('Отлично!')} onPress={onClose} style={styles.cta} />
         </Pressable>
       </Pressable>
     </Modal>

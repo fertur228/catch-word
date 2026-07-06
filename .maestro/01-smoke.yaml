@@ -1,0 +1,37 @@
+# QA smoke-обход по координатам.
+# ПОЧЕМУ координаты, а не текст: приложение на RN New Architecture (Fabric) —
+# текст не попадает в accessibility-дерево iOS, поэтому Maestro не находит элементы
+# по тексту/id. Для надёжного набора нужно проставить testID на ключевые элементы
+# (см. отчёт). Пока — тапы по %-координатам + скриншоты (их проверяет человек).
+appId: com.almazbukayev.takeword
+---
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 9000
+- takeScreenshot: qa-01-camera
+# Нижние вкладки: Камера ~12% · Коллекция ~37% · Повторение ~64% · Настройки ~89% (y ~93%)
+- tapOn:
+    point: "37%,93%"
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: qa-02-collection
+- tapOn:
+    point: "64%,93%"
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: qa-03-review
+- tapOn:
+    point: "89%,93%"
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: qa-04-settings
+# Назад на Камеру и открыть пейволл через тоггл «Вся сцена» (free-юзер → пейволл)
+- tapOn:
+    point: "12%,93%"
+- waitForAnimationToEnd:
+    timeout: 4000
+- tapOn:
+    point: "66%,67%"
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: qa-05-paywall

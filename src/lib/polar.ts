@@ -1,7 +1,7 @@
 /**
  * Polar (polar.sh) — веб-оплата (только Platform.OS === 'web').
  *
- * Одна checkout-ссылка на все тарифы (Weekly/Monthly/Yearly) —
+ * Одна checkout-ссылка на тарифы (Monthly/Yearly) —
  * юзер выбирает тариф прямо на странице Polar.
  *
  * Настройка:

@@ -37,6 +37,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { feedbackImpact } from '@/lib/feedback';
 import { useCollection } from '@/lib/collection-context';
+import { getLang, t, useT } from '@/lib/i18n';
 
 const DAY_MS = 86_400_000;
 
@@ -55,29 +56,39 @@ function plural(n: number, forms: [string, string, string]): string {
 /** Когда поймали слово (относительно сейчас). */
 function formatCaught(createdAt: number): string {
   const days = Math.floor((Date.now() - createdAt) / DAY_MS);
-  if (days <= 0) return 'Поймано сегодня';
-  if (days === 1) return 'Поймано вчера';
-  return `Поймано ${days} ${plural(days, ['день', 'дня', 'дней'])} назад`;
+  if (days <= 0) return t('Поймано сегодня');
+  if (days === 1) return t('Поймано вчера');
+  return getLang() === 'en'
+    ? `Caught ${days} ${days === 1 ? 'day' : 'days'} ago`
+    : `Поймано ${days} ${plural(days, ['день', 'дня', 'дней'])} назад`;
 }
 
 /** Когда следующий повтор (по SRS-полю dueAt). */
 function formatDue(dueAt?: number): string {
-  if (dueAt == null) return 'Готово к повтору';
+  if (dueAt == null) return t('Готово к повтору');
   const diff = dueAt - Date.now();
-  if (diff <= 0) return 'Можно повторить сейчас';
+  if (diff <= 0) return t('Можно повторить сейчас');
   const mins = Math.round(diff / 60_000);
-  if (mins < 60) return `Повтор через ${mins} ${plural(mins, ['минуту', 'минуты', 'минут'])}`;
+  if (mins < 60)
+    return getLang() === 'en'
+      ? `Review in ${mins} ${mins === 1 ? 'minute' : 'minutes'}`
+      : `Повтор через ${mins} ${plural(mins, ['минуту', 'минуты', 'минут'])}`;
   const hours = Math.round(mins / 60);
-  if (hours < 24) return `Повтор через ${hours} ${plural(hours, ['час', 'часа', 'часов'])}`;
+  if (hours < 24)
+    return getLang() === 'en'
+      ? `Review in ${hours} ${hours === 1 ? 'hour' : 'hours'}`
+      : `Повтор через ${hours} ${plural(hours, ['час', 'часа', 'часов'])}`;
   const days = Math.round(hours / 24);
-  return `Повтор через ${days} ${plural(days, ['день', 'дня', 'дней'])}`;
+  return getLang() === 'en'
+    ? `Review in ${days} ${days === 1 ? 'day' : 'days'}`
+    : `Повтор через ${days} ${plural(days, ['день', 'дня', 'дней'])}`;
 }
 
 /** Подпись уровня освоения (0..5). */
 function masteryLabel(m: number): string {
-  if (m >= 4) return 'Освоено';
-  if (m >= 1) return 'В процессе';
-  return 'Новое слово';
+  if (m >= 4) return t('Освоено');
+  if (m >= 1) return t('В процессе');
+  return t('Новое слово');
 }
 
 /** Стикер «вырастает» при открытии — приятный момент «вот оно, твоё слово». */
@@ -128,6 +139,7 @@ function MasteryStars({ mastery }: { mastery: number }) {
 
 export function CardDetailScreen() {
   const theme = useTheme();
+  const t = useT();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { getById, removeCard, isPremium } = useCollection();
@@ -139,9 +151,9 @@ export function CardDetailScreen() {
       <Screen>
         <EmptyState
           icon="magnifyingglass"
-          title="Карточка не найдена"
-          message="Возможно, её удалили из коллекции."
-          actionLabel="Назад"
+          title={t('Карточка не найдена')}
+          message={t('Возможно, её удалили из коллекции.')}
+          actionLabel={t('Назад')}
           onAction={() => router.back()}
         />
       </Screen>
@@ -158,15 +170,15 @@ export function CardDetailScreen() {
   const onShare = () => {
     const ipa = card.ipa ? ` /${card.ipa}/` : '';
     Share.share({
-      message: `${card.word}${ipa} — ${card.translation}\nПоймал в TakeWord`,
+      message: `${card.word}${ipa} — ${card.translation}\n${t('Поймал в TakeWord')}`,
     }).catch(() => {});
   };
 
   const onDelete = () => {
-    Alert.alert('Удалить карточку?', `«${card.word}» исчезнет из коллекции.`, [
-      { text: 'Отмена', style: 'cancel' },
+    Alert.alert(t('Удалить карточку?'), `«${card.word}» ${t('исчезнет из коллекции.')}`, [
+      { text: t('Отмена'), style: 'cancel' },
       {
-        text: 'Удалить',
+        text: t('Удалить'),
         style: 'destructive',
         onPress: async () => {
           feedbackImpact();
@@ -222,7 +234,7 @@ export function CardDetailScreen() {
         <View style={[styles.panel, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={styles.panelHeader}>
             <ThemedText type="smallBold" themeColor="textSecondary">
-              Освоение
+              {t('Освоение')}
             </ThemedText>
             <Badge label={masteryLabel(mastery)} tone={masteryTone} />
           </View>
@@ -242,9 +254,13 @@ export function CardDetailScreen() {
         <Reveal delay={280}>
           <View style={styles.examples}>
             <SectionHeader
-              title="Примеры"
+              title={t('Примеры')}
               icon="text.bubble.fill"
-              subtitle={`${isPremium ? card.examples.length : 1} ${plural(isPremium ? card.examples.length : 1, ['пример', 'примера', 'примеров'])}`}
+              subtitle={
+                getLang() === 'en'
+                  ? `${isPremium ? card.examples.length : 1} ${(isPremium ? card.examples.length : 1) === 1 ? 'example' : 'examples'}`
+                  : `${isPremium ? card.examples.length : 1} ${plural(isPremium ? card.examples.length : 1, ['пример', 'примера', 'примеров'])}`
+              }
             />
             {(isPremium ? card.examples : card.examples.slice(0, 1)).map((ex, j) => (
               <Reveal key={ex} delay={320 + j * 60}>
@@ -267,7 +283,7 @@ export function CardDetailScreen() {
             <View style={styles.panelHeader}>
               <Icon name="note.text" size={16} color={theme.textSecondary} />
               <ThemedText type="smallBold" themeColor="textSecondary">
-                Заметка
+                {t('Заметка')}
               </ThemedText>
             </View>
             <ThemedText type="default">{card.notes}</ThemedText>
@@ -278,9 +294,9 @@ export function CardDetailScreen() {
       {/* Действия. */}
       <Reveal delay={420}>
         <View style={styles.actions}>
-          <Button title="Повторить сейчас" icon="graduationcap.fill" onPress={onReview} />
-          <Button title="Поделиться" icon="square.and.arrow.up" variant="secondary" onPress={onShare} />
-          <Button title="Удалить" icon="trash" variant="ghost" onPress={onDelete} />
+          <Button title={t('Повторить сейчас')} icon="graduationcap.fill" onPress={onReview} />
+          <Button title={t('Поделиться')} icon="square.and.arrow.up" variant="secondary" onPress={onShare} />
+          <Button title={t('Удалить')} icon="trash" variant="ghost" onPress={onDelete} />
         </View>
       </Reveal>
     </Screen>

@@ -46,6 +46,13 @@ export function PlanCard({ plan, onPress, loading }: { plan: Plan; onPress: () =
           {plan.priceNote}
         </ThemedText>
       ) : null}
+      {/* Расчётная цена «в месяц» + экономия — ПРИГЛУШЁННО и мельче реальной цены
+          (Guideline 3.1.2: списываемая сумма должна быть самым заметным элементом). */}
+      {plan.priceSub ? (
+        <ThemedText type="small" themeColor="textSecondary">
+          {plan.priceSub}
+        </ThemedText>
+      ) : null}
 
       <View style={styles.features}>
         {plan.features.map((f) => (
@@ -59,6 +66,11 @@ export function PlanCard({ plan, onPress, loading }: { plan: Plan; onPress: () =
       </View>
 
       <Button title={plan.ctaLabel} onPress={onPress} loading={loading} variant={highlighted ? 'primary' : 'secondary'} />
+      {plan.caption ? (
+        <ThemedText type="small" themeColor="textSecondary" style={styles.caption}>
+          {plan.caption}
+        </ThemedText>
+      ) : null}
     </View>
   );
 }
@@ -84,4 +96,5 @@ const styles = StyleSheet.create({
   features: { gap: Spacing.two, marginVertical: Spacing.two },
   featureRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
   featureText: { flex: 1 },
+  caption: { textAlign: 'center', lineHeight: 18 },
 });

@@ -34,6 +34,7 @@ import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { feedbackSelection } from '@/lib/feedback';
+import { useT } from '@/lib/i18n';
 import { useCollection } from '@/lib/collection-context';
 import { LANGUAGES, LEARNING_LANG, NATIVE_LANG, getLanguage } from '@/lib/mock-data';
 import type { AppLanguage } from '@/types';
@@ -67,6 +68,7 @@ const TOTAL = SLIDES.length + 1;
 
 export function OnboardingScreen() {
   const theme = useTheme();
+  const t = useT();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { setLanguages, completeOnboarding } = useCollection();
@@ -128,7 +130,7 @@ export function OnboardingScreen() {
   // Контент шага «въезжает» по направлению навигации.
   const entering = dir >= 0 ? FadeInRight : FadeInLeft;
 
-  const ctaTitle = isLanguageStep ? 'Начать' : step === SLIDES.length - 1 ? 'Выбрать языки' : 'Далее';
+  const ctaTitle = isLanguageStep ? t('Начать') : step === SLIDES.length - 1 ? t('Выбрать языки') : t('Далее');
 
   return (
     <ThemedView
@@ -136,16 +138,16 @@ export function OnboardingScreen() {
       {/* Верхняя панель: назад (со 2-го шага) и «Пропустить» (на слайдах). */}
       <View style={styles.topBar}>
         {step > 0 ? (
-          <Pressable onPress={goBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="Назад">
+          <Pressable onPress={goBack} hitSlop={12} accessibilityRole="button" accessibilityLabel={t('Назад')}>
             <Icon name="chevron.left" size={22} color={theme.textSecondary} />
           </Pressable>
         ) : (
           <View style={styles.topSpacer} />
         )}
         {!isLanguageStep ? (
-          <Pressable onPress={skip} hitSlop={12} accessibilityRole="button" accessibilityLabel="Пропустить">
+          <Pressable onPress={skip} hitSlop={12} accessibilityRole="button" accessibilityLabel={t('Пропустить')}>
             <ThemedText type="small" themeColor="textSecondary">
-              Пропустить
+              {t('Пропустить')}
             </ThemedText>
           </Pressable>
         ) : (
@@ -193,16 +195,17 @@ export function OnboardingScreen() {
 
 /** Один вступительный слайд: большой визуал + заголовок + описание. */
 function IntroStep({ index }: { index: number }) {
+  const t = useT();
   const slide = SLIDES[index];
   return (
     <View style={styles.introWrap}>
       <Hero index={index} />
       <View style={styles.copy}>
         <ThemedText type="subtitle" style={styles.title}>
-          {slide.title}
+          {t(slide.title)}
         </ThemedText>
         <ThemedText type="default" themeColor="textSecondary" style={styles.desc}>
-          {slide.description}
+          {t(slide.description)}
         </ThemedText>
       </View>
     </View>
@@ -212,6 +215,7 @@ function IntroStep({ index }: { index: number }) {
 /** Большой дружелюбный визуал слайда (с лёгким «покачиванием» стикеров). */
 function Hero({ index }: { index: number }) {
   const theme = useTheme();
+  const t = useT();
   // Бесконечное мягкое покачивание вверх-вниз — приятная микроанимация.
   const float = useSharedValue(0);
   useEffect(() => {
@@ -255,7 +259,7 @@ function Hero({ index }: { index: number }) {
           <View style={[styles.caught, { backgroundColor: theme.accent }]}>
             <Icon name="sparkles" size={14} color={theme.onPrimary} />
             <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>
-              Поймал: apple
+              {t('Поймал: apple')}
             </ThemedText>
           </View>
         </View>
@@ -275,11 +279,11 @@ function Hero({ index }: { index: number }) {
         </Animated.View>
         <View style={[styles.cornerPill, styles.pillTopLeft, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
           <Icon name="calendar" size={13} color={theme.primary} />
-          <ThemedText type="smallBold">По датам</ThemedText>
+          <ThemedText type="smallBold">{t('По датам')}</ThemedText>
         </View>
         <View style={[styles.cornerPill, styles.pillBottomRight, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
           <Icon name="square.grid.2x2.fill" size={13} color={theme.accent2} />
-          <ThemedText type="smallBold">По темам</ThemedText>
+          <ThemedText type="smallBold">{t('По темам')}</ThemedText>
         </View>
       </View>
     );
@@ -304,7 +308,7 @@ function Hero({ index }: { index: number }) {
           <View style={[styles.infoPill, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <Icon name="clock" size={13} color={theme.textSecondary} />
             <ThemedText type="small" themeColor="textSecondary">
-              Повтор через 2 часа
+              {t('Повтор через 2 часа')}
             </ThemedText>
           </View>
         </View>
@@ -322,14 +326,14 @@ function Hero({ index }: { index: number }) {
         </View>
         <View style={styles.questText}>
           <ThemedText type="small" themeColor="textSecondary">
-            Квест дня
+            {t('Квест дня')}
           </ThemedText>
-          <ThemedText type="smallBold">Найди дерево</ThemedText>
+          <ThemedText type="smallBold">{t('Найди дерево')}</ThemedText>
         </View>
       </Animated.View>
       <View style={[styles.streak, { backgroundColor: theme.card, borderColor: theme.border, shadowColor: theme.shadow }]}>
         <Icon name="flame.fill" size={15} color={theme.gold} />
-        <ThemedText type="smallBold">5 дней</ThemedText>
+        <ThemedText type="smallBold">{t('5 дней')}</ThemedText>
       </View>
     </View>
   );
@@ -349,20 +353,21 @@ function LanguageStep({
   onLearning: (code: string) => void;
   onNative: (code: string) => void;
 }) {
+  const t = useT();
   return (
     <ScrollView style={styles.stepFill} contentContainerStyle={styles.langContent} showsVerticalScrollIndicator={false}>
       <View style={styles.langHeader}>
         <Sticker symbol="bubble.left.and.bubble.right.fill" tone="primary" size={84} />
         <ThemedText type="subtitle" style={styles.title}>
-          Твои языки
+          {t('Твои языки')}
         </ThemedText>
         <ThemedText type="default" themeColor="textSecondary" style={styles.desc}>
-          Что учим и на каком языке показывать перевод.
+          {t('Что учим и на каком языке показывать перевод.')}
         </ThemedText>
       </View>
 
-      <LangRow label="Я учу" selectedCode={learning} onSelect={onLearning} />
-      <LangRow label="Мой язык" selectedCode={native} onSelect={onNative} />
+      <LangRow label={t('Я учу')} selectedCode={learning} onSelect={onLearning} />
+      <LangRow label={t('Мой язык')} selectedCode={native} onSelect={onNative} />
 
       <SummaryCard learning={learning} native={native} />
     </ScrollView>

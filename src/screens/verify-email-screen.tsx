@@ -18,11 +18,13 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth-context';
 import { alertAsync } from '@/lib/dialog';
 import { feedbackTap } from '@/lib/feedback';
+import { useT } from '@/lib/i18n';
 
 const LEN = 6;
 
 export function VerifyEmailScreen() {
   const theme = useTheme();
+  const t = useT();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { email } = useLocalSearchParams<{ email?: string }>();
@@ -42,7 +44,7 @@ export function VerifyEmailScreen() {
     } catch {
       setBusy(false);
       setCode('');
-      void alertAsync('Неверный код', 'Проверь код из письма и попробуй снова.');
+      void alertAsync(t('Неверный код'), t('Проверь код из письма и попробуй снова.'));
     }
   };
 
@@ -56,15 +58,15 @@ export function VerifyEmailScreen() {
     feedbackTap();
     try {
       await resendSignupOtp(mail);
-      void alertAsync('Отправили код', 'Проверь почту — придёт новый 6-значный код.');
+      void alertAsync(t('Отправили код'), t('Проверь почту — придёт новый 6-значный код.'));
     } catch {
-      void alertAsync('Не получилось', 'Попробуй чуть позже.');
+      void alertAsync(t('Не получилось'), t('Попробуй чуть позже.'));
     }
   };
 
   return (
     <ThemedView style={[styles.root, { paddingTop: insets.top + Spacing.two, paddingBottom: insets.bottom + Spacing.four }]}>
-      <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back} accessibilityLabel="Назад">
+      <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back} accessibilityLabel={t('Назад')}>
         <Icon name="chevron.left" size={24} color={BRAND_BLUE} />
       </Pressable>
 
@@ -73,10 +75,10 @@ export function VerifyEmailScreen() {
           <Icon name="envelope.fill" size={30} color={BRAND_BLUE} />
         </View>
         <ThemedText type="subtitle" style={styles.h}>
-          Проверьте почту
+          {t('Проверьте почту')}
         </ThemedText>
         <ThemedText type="small" themeColor="textSecondary" style={styles.hsub}>
-          Мы отправили 6-значный код на
+          {t('Мы отправили 6-значный код на')}
         </ThemedText>
         {mail ? (
           <ThemedText type="smallBold" style={{ color: BRAND_BLUE }}>
@@ -119,15 +121,15 @@ export function VerifyEmailScreen() {
       />
 
       <View style={styles.submit}>
-        <PrimaryButton title="Подтвердить" onPress={() => submit()} loading={busy} disabled={code.length < LEN} />
+        <PrimaryButton title={t('Подтвердить')} onPress={() => submit()} loading={busy} disabled={code.length < LEN} />
       </View>
 
       <Pressable onPress={onResend} hitSlop={8} style={styles.resend}>
         <ThemedText type="small" themeColor="textSecondary">
-          Не получили код?{' '}
+          {t('Не получили код?')}{' '}
         </ThemedText>
         <ThemedText type="small" style={{ color: BRAND_BLUE, fontWeight: '700' }}>
-          Отправить снова
+          {t('Отправить снова')}
         </ThemedText>
       </Pressable>
     </ThemedView>

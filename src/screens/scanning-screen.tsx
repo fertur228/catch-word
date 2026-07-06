@@ -41,6 +41,7 @@ import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
+import { useT } from '@/lib/i18n';
 import { getScanJob, updateScanJob, type ScanResult, type SceneItem } from '@/lib/scan-job';
 import {
   cropToSticker,
@@ -62,6 +63,7 @@ const RETICLE = 84;
 
 export function ScanningScreen() {
   const theme = useTheme();
+  const t = useT();
   const router = useRouter();
   const { prefs, refundScan, markScansExhausted } = useCollection();
   const { jobId } = useLocalSearchParams<{ jobId?: string }>();
@@ -146,11 +148,11 @@ export function ScanningScreen() {
           }
           if (!active) return;
           if (configured && !reco) {
-            fail('Не получилось распознать', 'Проверь интернет и попробуй ещё раз. Скан не списан.');
+            fail(t('Не получилось распознать'), t('Проверь интернет и попробуй ещё раз. Скан не списан.'));
             return;
           }
           if (configured && reco && reco.objects.length === 0) {
-            fail('Не понял, что тут', 'Наведи на сцену с предметами и попробуй снова. Скан не списан.');
+            fail(t('Не понял, что тут'), t('Наведи на сцену с предметами и попробуй снова. Скан не списан.'));
             return;
           }
           if (reco && reco.objects.length > 0) {
@@ -183,11 +185,11 @@ export function ScanningScreen() {
           if (!active) return;
 
           if (configured && !reco) {
-            fail('Не получилось распознать', 'Проверь интернет и попробуй ещё раз. Скан не списан.');
+            fail(t('Не получилось распознать'), t('Проверь интернет и попробуй ещё раз. Скан не списан.'));
             return;
           }
           if (configured && reco && reco.objects.length === 0) {
-            fail('Не понял, что это', 'Наведи ближе на один предмет и попробуй снова. Скан не списан.');
+            fail(t('Не понял, что это'), t('Наведи ближе на один предмет и попробуй снова. Скан не списан.'));
             return;
           }
 
@@ -305,7 +307,7 @@ export function ScanningScreen() {
             <ThemedText type="default" themeColor="textSecondary" style={styles.errorMsg}>
               {error.message}
             </ThemedText>
-            <Button title="Назад к камере" icon="camera.fill" onPress={() => router.back()} style={styles.errorBtn} />
+            <Button title={t('Назад к камере')} icon="camera.fill" onPress={() => router.back()} style={styles.errorBtn} />
           </View>
         </SafeAreaView>
       ) : (
@@ -350,7 +352,7 @@ export function ScanningScreen() {
             entering={FadeInDown.duration(Motion.duration.base).delay(80)}
             style={styles.caption}>
             <ThemedText type="smallBold" style={[styles.captionText, photoUri ? styles.captionOnPhoto : null]}>
-              Распознаю предмет…
+              {t('Распознаю предмет…')}
             </ThemedText>
             <View style={styles.dots}>
               <Dot delay={0} color={theme.accent} reduce={reduceMotion} />

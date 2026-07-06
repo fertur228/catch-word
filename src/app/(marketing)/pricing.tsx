@@ -29,10 +29,10 @@ export default function Pricing() {
     <MarketingShell>
       <Head>
         <title>Тарифы TakeWord — Free навсегда или Premium с безлимитом</title>
-        <meta name="description" content="Free навсегда: 10 сканов, коллекция и повторение. Premium — безлимит сканов, все языки, синхронизация и AI-примеры. От $4.99. Сравните тарифы TakeWord." />
+        <meta name="description" content="Free навсегда: 10 сканов, коллекция и повторение. Premium — безлимит сканов, все языки, синхронизация и AI-примеры. От $6.99. Сравните тарифы TakeWord." />
         <link rel="canonical" href={`${SITE_URL}/pricing`} />
         <meta property="og:title" content="Тарифы TakeWord — Free и Premium" />
-        <meta property="og:description" content="Начни бесплатно. Premium снимает лимит сканов и открывает все языки. От $4.99." />
+        <meta property="og:description" content="Начни бесплатно. Premium снимает лимит сканов и открывает все языки. От $6.99." />
         <meta property="og:url" content={`${SITE_URL}/pricing`} />
         <meta property="og:image" content={`${SITE_URL}/og.png`} />
       </Head>
@@ -46,14 +46,22 @@ export default function Pricing() {
 
       <Container style={[styles.plans, wide && styles.row2]}>
         <PlanCard name="Free" price="$0" note="навсегда" features={FREE} />
-        <PlanCard name="Premium" price="$6.99" note="в месяц" highlighted features={PREMIUM} />
+        <PlanCard name="Premium · Месяц" price="$6.99" note="в месяц" features={PREMIUM} />
+        <PlanCard
+          name="Premium · Год"
+          price="$39.99"
+          note="в год"
+          sub="≈ $3.33/мес · экономия 52%"
+          badge="Выгодно"
+          highlighted
+          features={[...PREMIUM, '7 дней бесплатно']}
+        />
       </Container>
 
       <Container style={styles.noteWrap}>
         <ThemedText type="small" themeColor="textSecondary" style={styles.note}>
-          Есть тарифы на неделю ($4.99) и год ($39.99 — выгоднее всего). Оформить Premium можно
-          прямо в браузере: войди через Google — подписка привяжется к аккаунту и будет доступна
-          на всех устройствах.
+          Оформить Premium можно прямо в браузере: войди через Google — подписка привяжется к
+          аккаунту и будет доступна на всех устройствах.
         </ThemedText>
       </Container>
     </MarketingShell>
@@ -64,14 +72,18 @@ function PlanCard({
   name,
   price,
   note,
+  sub,
   features,
   highlighted,
+  badge = 'Рекомендуем',
 }: {
   name: string;
   price: string;
   note: string;
+  sub?: string;
   features: string[];
   highlighted?: boolean;
+  badge?: string;
 }) {
   const theme = useTheme();
   return (
@@ -84,7 +96,7 @@ function PlanCard({
       {highlighted ? (
         <View style={[styles.badge, { backgroundColor: theme.primary }]}>
           <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>
-            Рекомендуем
+            {badge}
           </ThemedText>
         </View>
       ) : null}
@@ -98,6 +110,11 @@ function PlanCard({
           {note}
         </ThemedText>
       </View>
+      {sub ? (
+        <ThemedText type="small" themeColor="textSecondary" style={styles.priceSub}>
+          {sub}
+        </ThemedText>
+      ) : null}
       <View style={styles.features}>
         {features.map((f) => (
           <View key={f} style={styles.feature}>
@@ -130,6 +147,7 @@ const styles = StyleSheet.create({
   badge: { alignSelf: 'flex-start', paddingHorizontal: Spacing.two, paddingVertical: 4, borderRadius: Radius.pill },
   priceRow: { flexDirection: 'row', alignItems: 'baseline' },
   price: { fontSize: 38, fontWeight: '800' },
+  priceSub: { marginTop: -Spacing.one },
   features: { gap: Spacing.two },
   feature: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   cta: { marginTop: Spacing.two },

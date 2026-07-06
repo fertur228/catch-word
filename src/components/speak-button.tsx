@@ -19,6 +19,7 @@ import Animated, {
 import { Icon } from '@/components/icon';
 import { Motion } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useT } from '@/lib/i18n';
 import { speakWord, SPEECH_RATE } from '@/lib/speech';
 
 interface SpeakButtonProps {
@@ -33,6 +34,7 @@ interface SpeakButtonProps {
 
 export function SpeakButton({ text, language, size = 48, slow = false }: SpeakButtonProps) {
   const theme = useTheme();
+  const t = useT();
   const scale = useSharedValue(1);
   const ring = useSharedValue(0);
   const [speaking, setSpeaking] = useState(false);
@@ -68,7 +70,7 @@ export function SpeakButton({ text, language, size = 48, slow = false }: SpeakBu
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={slow ? 'Произнести медленно' : 'Озвучить произношение'}
+      accessibilityLabel={slow ? t('Произнести медленно') : t('Озвучить произношение')}
       onPress={onPress}
       onPressIn={() => (scale.value = withSpring(0.9, Motion.spring.stiff))}
       onPressOut={() => (scale.value = withSpring(1, Motion.spring.bouncy))}

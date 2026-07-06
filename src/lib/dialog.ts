@@ -5,6 +5,7 @@
  * вызов `confirmAsync`/`alertAsync` работает и на телефоне, и в браузере.
  */
 import { Alert } from 'react-native';
+import { t } from '@/lib/i18n';
 
 /** Информационное окно с кнопкой OK. */
 export function alertAsync(title: string, message?: string): Promise<void> {
@@ -27,7 +28,7 @@ export function confirmAsync(
       title,
       message,
       [
-        { text: 'Отмена', style: 'cancel', onPress: () => resolve(false) },
+        { text: t('Отмена'), style: 'cancel', onPress: () => resolve(false) },
         {
           text: confirmText,
           style: destructive ? 'destructive' : 'default',

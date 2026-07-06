@@ -52,6 +52,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
 import { groupCardsByDay } from '@/lib/dates';
 import { firstNameOf, greetingByHour } from '@/lib/greeting';
+import { getLang, useT } from '@/lib/i18n';
 import { CATEGORIES } from '@/lib/mock-data';
 import { pluralWords } from '@/lib/plural';
 import { isMastered } from '@/lib/srs';
@@ -164,6 +165,7 @@ function Stat({ value, label, flame }: { value: number; label: string; flame?: b
 export function CollectionScreen() {
   const router = useRouter();
   const theme = useTheme();
+  const t = useT();
   const { cards, loading, stats, removeCard } = useCollection();
   const { user } = useAuth();
   const firstName = firstNameOf(user);
@@ -224,12 +226,18 @@ export function CollectionScreen() {
   // Удаление слова из коллекции: долгое нажатие на плитку → подтверждение.
   const confirmDelete = useCallback(
     (card: WordCard) => {
-      Alert.alert('Удалить слово?', `«${card.word}» исчезнет из коллекции.`, [
-        { text: 'Отмена', style: 'cancel' },
-        { text: 'Удалить', style: 'destructive', onPress: () => removeCard(card.id) },
-      ]);
+      Alert.alert(
+        t('Удалить слово?'),
+        getLang() === 'en'
+          ? `“${card.word}” will be removed from your collection.`
+          : `«${card.word}» исчезнет из коллекции.`,
+        [
+          { text: t('Отмена'), style: 'cancel' },
+          { text: t('Удалить'), style: 'destructive', onPress: () => removeCard(card.id) },
+        ],
+      );
     },
-    [removeCard],
+    [removeCard, t],
   );
 
   // Загрузка из БД.
@@ -247,9 +255,9 @@ export function CollectionScreen() {
       <Screen>
         <EmptyState
           icon="sparkles"
-          title="Коллекция пуста"
-          message="Наведи камеру на предмет и поймай своё первое слово."
-          actionLabel="Открыть камеру"
+          title={t('Коллекция пуста')}
+          message={t('Наведи камеру на предмет и поймай своё первое слово.')}
+          actionLabel={t('Открыть камеру')}
           onAction={() => router.navigate('/(tabs)')}
         />
       </Screen>
@@ -271,11 +279,11 @@ export function CollectionScreen() {
       {/* Статистика коллекции — единой сгруппированной карточкой (iOS-минимал) */}
       <Reveal delay={0}>
         <View style={[styles.statCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <Stat value={stats.total} label="Поймано" />
+          <Stat value={stats.total} label={t('Поймано')} />
           <View style={[styles.statSep, { backgroundColor: theme.border }]} />
-          <Stat value={stats.mastered} label="Выучено" />
+          <Stat value={stats.mastered} label={t('Выучено')} />
           <View style={[styles.statSep, { backgroundColor: theme.border }]} />
-          <Stat value={stats.streak} label="Серия" flame />
+          <Stat value={stats.streak} label={t('Серия')} flame />
         </View>
       </Reveal>
 
@@ -288,7 +296,7 @@ export function CollectionScreen() {
       <Reveal delay={60}>
         <View style={[styles.progressCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={styles.progressTop}>
-            <ThemedText type="smallBold">Освоение</ThemedText>
+            <ThemedText type="smallBold">{t('Освоение')}</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
               {stats.mastered} / {stats.total}
             </ThemedText>
@@ -299,7 +307,7 @@ export function CollectionScreen() {
 
       {/* Поиск по слову или переводу */}
       <Reveal delay={90}>
-        <SearchBar value={query} onChangeText={setQuery} placeholder="Поиск слова или перевода" />
+        <SearchBar value={query} onChangeText={setQuery} placeholder={t('Поиск слова или перевода')} />
       </Reveal>
 
       {/* Чипы-темы (горизонтальная прокрутка, с выходом за поля) */}
@@ -329,7 +337,7 @@ export function CollectionScreen() {
       {/* Сортировка: «По датам» | «По темам» */}
       <Reveal delay={150}>
         <SegmentedControl
-          options={SORT_OPTIONS}
+          options={SORT_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))}
           value={mode}
           onChange={(m) => {
             feedbackSelection();
@@ -344,9 +352,9 @@ export function CollectionScreen() {
   const emptyComponent = (
     <EmptyState
       icon="magnifyingglass"
-      title="Ничего не нашлось"
-      message="Попробуй другой запрос или тему."
-      actionLabel="Сбросить фильтры"
+      title={t('Ничего не нашлось')}
+      message={t('Попробуй другой запрос или тему.')}
+      actionLabel={t('Сбросить фильтры')}
       onAction={resetFilters}
     />
   );
@@ -367,12 +375,14 @@ export function CollectionScreen() {
           <View style={[styles.sectionHeader, { backgroundColor: theme.background }]}>
             <View style={styles.sectionHeaderTop}>
               <ThemedText type="small" themeColor="textSecondary" style={styles.sectionTitle}>
-                {section.title.toUpperCase()}
+                {(section.key === NO_THEME ? t('Без темы') : section.title).toUpperCase()}
               </ThemedText>
               <ThemedText type="small" themeColor="textSecondary">
                 {section.learned != null
-                  ? `${section.learned}/${section.total} выучено`
-                  : `${section.total} ${pluralWords(section.total)}`}
+                  ? `${section.learned}/${section.total} ${t('выучено')}`
+                  : getLang() === 'en'
+                    ? `${section.total} ${section.total === 1 ? 'word' : 'words'}`
+                    : `${section.total} ${pluralWords(section.total)}`}
               </ThemedText>
             </View>
             {/* В режиме «По темам» — мини-полоса прогресса освоения набора. */}

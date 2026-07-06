@@ -8,7 +8,7 @@
  * ЗАГЛУШКИ: где у CapWords живые демо/скриншоты — здесь <DemoPlaceholder/>
  * (пунктирный бокс с иконкой play). Заменить на видео/скриншоты после съёмки.
  */
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   Linking,
   Platform,
@@ -19,11 +19,14 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import Head from 'expo-router/head';
 import type { SFSymbol } from 'expo-symbols';
 
 import { Icon } from '@/components/icon';
+import { VideoDemo } from '@/components/video-demo';
+import { Rise } from '@/components/rise';
 import { PRIVACY_URL, SITE_URL, SUPPORT_EMAIL, TERMS_URL } from '@/constants/links';
 
 /** Фиксированная тёмно-серая палитра (Apple-like). Один тон — без ярких акцентов. */
@@ -110,32 +113,38 @@ export default function Welcome() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         <TopBar />
 
-        <View style={styles.container}>
-          {/* ── HERO ── */}
-          <View style={styles.hero}>
-            <Badge icon="checkmark.seal.fill" label="Скоро в App Store" />
-            <Text
-              style={[
-                styles.h1,
-                { fontSize: big ? 56 : 40, lineHeight: big ? 60 : 44, letterSpacing: big ? -1.4 : -1 },
-              ]}>
-              Учи язык через{'\n'}знакомые вещи.
-            </Text>
-            <Text style={styles.heroSub}>
-              Учи языки через мир вокруг. TakeWord превращает повседневные предметы в твой
-              личный учебник.
-            </Text>
-            <View style={styles.heroCtas}>
-              <Cta label="Начать бесплатно" onPress={onStart} />
-              <Pressable onPress={onStart} hitSlop={8}>
-                <Text style={styles.link}>Войти →</Text>
-              </Pressable>
+        {/* ── HERO — текст слева, видео справа (на широких экранах) ── */}
+        <View style={[styles.heroWrap, { maxWidth: big ? 1040 : 720 }]}>
+          <View style={[styles.hero, big && styles.heroRow]}>
+            <View style={big ? styles.heroTextCol : undefined}>
+              <Badge icon="checkmark.seal.fill" label="Скоро в App Store" />
+              <Text
+                style={[
+                  styles.h1,
+                  { fontSize: big ? 56 : 40, lineHeight: big ? 60 : 44, letterSpacing: big ? -1.4 : -1 },
+                ]}>
+                Учи язык через{'\n'}знакомые вещи.
+              </Text>
+              <Text style={styles.heroSub}>
+                Учи языки через мир вокруг. TakeWord превращает повседневные предметы в твой
+                личный учебник.
+              </Text>
+              <View style={styles.heroCtas}>
+                <Cta label="Начать бесплатно" onPress={onStart} />
+                <Pressable onPress={onStart} hitSlop={8}>
+                  <Text style={styles.link}>Войти →</Text>
+                </Pressable>
+              </View>
             </View>
-            <Text style={styles.heroNote}>10 сканов бесплатно · без карты</Text>
 
-            <DemoPlaceholder label="Наведи камеру → поймай слово" tall />
+            <View style={big ? styles.heroMediaCol : styles.heroMediaColSmall}>
+              <VideoDemo src="/demo.mp4" poster="/demo-poster.jpg" maxWidth={300} />
+              <Text style={styles.heroDemoCaption}>Наводишь камеру → слово уходит в коллекцию</Text>
+            </View>
           </View>
+        </View>
 
+        <View style={styles.container}>
           {/* ── КАК ЭТО РАБОТАЕТ ── */}
           <Section header="Как это работает">
             <Group>
@@ -247,17 +256,17 @@ export default function Welcome() {
           <Section header="Вопросы">
             <Group>
               {FAQ.map((r, i) => (
-                <Row key={r.q} title={r.q} sub={r.a} last={i === FAQ.length - 1} />
+                <FaqItem key={r.q} q={r.q} a={r.a} last={i === FAQ.length - 1} />
               ))}
             </Group>
           </Section>
 
           {/* ── FINAL CTA ── */}
-          <View style={styles.finalCta}>
+          <Rise style={styles.finalCta}>
             <Text style={styles.finalTitle}>Начни ловить слова сегодня</Text>
             <Text style={styles.finalSub}>Открой камеру — и первое слово уже твоё.</Text>
             <Cta label="Начать бесплатно" onPress={onStart} />
-          </View>
+          </Rise>
 
           <Footer />
         </View>
@@ -268,10 +277,23 @@ export default function Welcome() {
 
 // ── Компоненты ────────────────────────────────────────────────────────────────
 
+// Прилипающий навбар с blur (web). RN не знает 'sticky'/backdropFilter — задаём инлайном с кастом.
+const STICKY_NAV =
+  Platform.OS === 'web'
+    ? ({
+        position: 'sticky',
+        top: 0,
+        zIndex: 50,
+        backgroundColor: 'rgba(12,12,14,0.72)',
+        backdropFilter: 'saturate(140%) blur(20px)',
+        WebkitBackdropFilter: 'saturate(140%) blur(20px)',
+      } as never)
+    : null;
+
 function TopBar() {
   const router = useRouter();
   return (
-    <View style={styles.topbar}>
+    <View style={[styles.topbar, STICKY_NAV]}>
       <View style={styles.topbarInner}>
         <Pressable onPress={() => router.push('/welcome')} hitSlop={6}>
           <Text style={styles.brand}>TakeWord</Text>
@@ -323,10 +345,40 @@ function Cta({ label, onPress }: { label: string; onPress: () => void }) {
 
 function Section({ header, intro, children }: { header: string; intro?: string; children: ReactNode }) {
   return (
-    <View style={styles.section}>
+    <Rise style={styles.section}>
       <Text style={styles.sectionHeader}>{header.toUpperCase()}</Text>
       {intro ? <Text style={styles.sectionIntro}>{intro}</Text> : null}
       {children}
+    </Rise>
+  );
+}
+
+/** Строка FAQ-аккордеона: клик раскрывает ответ, «+» плавно вращается в «×». */
+function FaqItem({ q, a, last }: { q: string; a: string; last?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View>
+      <Pressable onPress={() => setOpen((o) => !o)} style={styles.faqHead}>
+        <Text style={[styles.rowTitle, styles.faqQ]}>{q}</Text>
+        <Text
+          style={[
+            styles.faqPlus,
+            {
+              transform: [{ rotate: open ? '45deg' : '0deg' }],
+              transitionProperty: 'transform',
+              transitionDuration: '220ms',
+              transitionTimingFunction: 'ease',
+            } as never,
+          ]}>
+          +
+        </Text>
+      </Pressable>
+      {open ? (
+        <Animated.View entering={FadeIn.duration(220)} style={styles.faqBody}>
+          <Text style={styles.rowSub}>{a}</Text>
+        </Animated.View>
+      ) : null}
+      {!last ? <View style={[styles.sep, { marginLeft: 16 }]} /> : null}
     </View>
   );
 }
@@ -457,11 +509,16 @@ const styles = StyleSheet.create({
   badgeText: { fontFamily: SF, fontSize: 13, fontWeight: '500', color: C.text2, letterSpacing: -0.1 },
 
   // Герой
+  heroWrap: { width: '100%', alignSelf: 'center', paddingHorizontal: 24 },
   hero: { paddingTop: 60 },
+  heroRow: { flexDirection: 'row', alignItems: 'center', gap: 56 },
+  heroTextCol: { flex: 1 },
+  heroMediaCol: { width: 320, alignItems: 'center' },
+  heroMediaColSmall: { alignSelf: 'stretch', alignItems: 'center', marginTop: 24 },
   h1: { fontFamily: SF, fontWeight: '700', color: C.text },
   heroSub: { fontFamily: SF, fontSize: 18, lineHeight: 27, color: C.text2, maxWidth: 540, marginTop: 18 },
   heroCtas: { flexDirection: 'row', alignItems: 'center', gap: 22, marginTop: 30 },
-  heroNote: { fontFamily: SF, fontSize: 13, color: C.text3, marginTop: 16 },
+  heroDemoCaption: { fontFamily: SF, fontSize: 13, color: C.text2, textAlign: 'center', marginTop: 12 },
   link: { fontFamily: SF, fontSize: 15, fontWeight: '600', color: C.text2 },
 
   // Кнопка
@@ -564,6 +621,12 @@ const styles = StyleSheet.create({
   rowTitle: { fontFamily: SF, fontSize: 16, fontWeight: '500', color: C.text, lineHeight: 21, letterSpacing: -0.2 },
   rowSub: { fontFamily: SF, fontSize: 14, color: C.text2, lineHeight: 19 },
   sep: { height: StyleSheet.hairlineWidth, backgroundColor: C.hair },
+
+  // FAQ-аккордеон
+  faqHead: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 16, paddingHorizontal: 16 },
+  faqQ: { flex: 1 },
+  faqPlus: { fontFamily: SF, fontSize: 22, fontWeight: '300', color: C.text2, width: 20, textAlign: 'center', lineHeight: 24 },
+  faqBody: { paddingHorizontal: 16, paddingBottom: 16, marginTop: -4 },
   price: { fontFamily: SF, fontSize: 16, fontWeight: '600', color: C.text, marginTop: 1 },
   moreLink: { alignSelf: 'flex-start', marginTop: 14, marginLeft: 4 },
 
