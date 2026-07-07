@@ -7,8 +7,8 @@ export const TERMS_URL = 'https://app.catch-words.com/terms';
 export const PRIVACY_URL = 'https://app.catch-words.com/privacy';
 /** Системный экран управления подписками Apple. */
 export const MANAGE_SUBSCRIPTION_URL = 'https://apps.apple.com/account/subscriptions';
-/** Почта поддержки (mailto) — единый адрес во всём приложении. */
-export const SUPPORT_EMAIL = 'nodes.kazakhstan@gmail.com';
+/** Почта поддержки (mailto) — единый адрес во всём приложении (политика/приложение/App Store). */
+export const SUPPORT_EMAIL = 'support@catch-words.com';
 /** Контакты для раздела «Связаться с нами» — тот же адрес поддержки. */
 export const CONTACT_EMAIL = SUPPORT_EMAIL;
 export const GITHUB_USER = 'fertur228';

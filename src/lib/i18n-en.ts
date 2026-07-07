@@ -46,6 +46,8 @@ export const EN: Record<string, string> = {
   "Введите пароль": "Enter your password",
   "Верно!": "Correct!",
   "Весь мир — твой словарь. Больше сканов, все языки и живые примеры.": "The whole world is your dictionary. More scans, all languages, and living examples.",
+  "Меньше": "Less",
+  "Больше": "More",
   "Весь мир —\\nтвой словарь": "The whole world\\nis your dictionary",
   "Включи камеру": "Turn on the camera",
   "Возможно, её удалили из коллекции.": "It may have been removed from your collection.",

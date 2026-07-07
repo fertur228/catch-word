@@ -17,7 +17,7 @@
  * размонтировании; повторный переход защищён флагом-рефом.
  */
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Dimensions, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -42,8 +42,9 @@ import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
 import { useT } from '@/lib/i18n';
-import { getScanJob, updateScanJob, type ScanResult, type SceneItem } from '@/lib/scan-job';
+import { getScanJob, SCAN_FRAME, updateScanJob, type ScanResult, type SceneItem } from '@/lib/scan-job';
 import {
+  cropToFrame,
   cropToSticker,
   isRecognitionConfigured,
   persistImage,
@@ -130,8 +131,8 @@ export function ScanningScreen() {
       let cutoutUri: string | null = null;
       let items: SceneItem[] | undefined;
 
-      // Скан по ВСЕМУ кадру (без рамки). В single берём предмет ближе к центру
-      // (см. ниже), в scene — все предметы.
+      // single — по КВАДРАТУ под визиром (кроп по рамке, см. ниже): предмет крупный
+      // → точнее распознавание и чище нативная вырезка. scene — по всему кадру.
       const photoUri = job?.photoUri;
 
       if (photoUri) {
@@ -169,14 +170,19 @@ export function ScanningScreen() {
             cutoutUri = await persistImage(photoUri).catch(() => null);
           }
         } else {
-          // single: распознавание (1 предмет) + нативная вырезка фона (iOS 17+).
+          // single: сначала вырезаем КВАДРАТ ПОД ВИЗИРОМ (рамкой наведения) из кадра.
+          // Его отдаём и в распознавание (предмет крупный → выше точность), и в
+          // нативную вырезку (Vision получает центрированный субъект → чище результат).
+          const { width: screenW, height: screenH } = Dimensions.get('window');
+          const framed = await cropToFrame(photoUri, screenW, screenH, SCAN_FRAME);
+          const scanUri = framed?.uri ?? photoUri;
+
           // Вырезку запускаем параллельно, но распознавание ждём отдельно, чтобы
           // поймать ScanLimitError (402) и уйти на пейволл, не «сжигая» вырезку.
-          const liftP = liftToPNG(photoUri).catch(() => null);
+          const liftP = liftToPNG(scanUri).catch(() => null);
           let reco: Awaited<ReturnType<typeof recognizePhoto>> = null;
           try {
-            // Просим несколько кандидатов по всему кадру, чтобы выбрать предмет по центру.
-            reco = await recognizePhoto(photoUri, prefs.learningLang, prefs.nativeLang, 5);
+            reco = await recognizePhoto(scanUri, prefs.learningLang, prefs.nativeLang, 3);
           } catch (e) {
             if (e instanceof ScanLimitError) { onLimitReached(); return; }
             reco = null;
@@ -193,8 +199,7 @@ export function ScanningScreen() {
             return;
           }
 
-          // Берём предмет, чей центр bbox ближе всего к центру кадра (0.5, 0.5).
-          // Объекты без bbox считаем «далёкими», чтобы не перебивали центральный.
+          // На квадрате под рамкой берём предмет ближе к центру — это и есть тот, что в визире.
           const centerDist = (b: number[] | null) =>
             b && b.length === 4 ? (b[0] + b[2] / 2 - 0.5) ** 2 + (b[1] + b[3] / 2 - 0.5) ** 2 : 2;
           const primary =
@@ -213,7 +218,7 @@ export function ScanningScreen() {
               primary.bbox,
             );
           }
-          if (!cutoutUri) cutoutUri = await persistImage(photoUri).catch(() => null);
+          if (!cutoutUri) cutoutUri = await persistImage(scanUri).catch(() => null);
         }
       }
 

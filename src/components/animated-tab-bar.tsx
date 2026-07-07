@@ -121,7 +121,10 @@ export function AnimatedTabBar({ state, descriptors, navigation }: TabBarProps) 
   const indicatorX = useSharedValue(0);
 
   useEffect(() => {
-    const target = state.index * tabWidth;
+    // + Spacing.two: пилюля вставлена на этот отступ ВНУТРИ вкладки (симметрично,
+    // по Spacing.two с каждой стороны), поэтому её translateX должен включать тот
+    // же отступ. Иначе индикатор съезжает влево (было: 8px слева / 16px справа).
+    const target = state.index * tabWidth + Spacing.two;
     indicatorX.value = reduce ? target : withSpring(target, Motion.spring.snappy);
   }, [state.index, tabWidth, reduce, indicatorX]);
 
@@ -141,7 +144,7 @@ export function AnimatedTabBar({ state, descriptors, navigation }: TabBarProps) 
           pointerEvents="none"
           style={[
             styles.indicator,
-            { width: tabWidth - Spacing.four, backgroundColor: theme.primarySoft, marginHorizontal: Spacing.two },
+            { width: tabWidth - Spacing.two * 2, backgroundColor: theme.primarySoft },
             indicatorStyle,
           ]}
         />
@@ -186,7 +189,9 @@ export function AnimatedTabBar({ state, descriptors, navigation }: TabBarProps) 
 
 const styles = StyleSheet.create({
   bar: { flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing.two },
-  indicator: { position: 'absolute', top: Spacing.one, bottom: 'auto', height: 46, borderRadius: Radius.md, left: 0 },
+  // Высота = высоте элемента (paddingV 8 + иконка 26 + gap 2 + подпись 13), top = paddingTop
+  // бара → пилюля покрывает элемент целиком, и иконка+подпись стоят РОВНО по её центру.
+  indicator: { position: 'absolute', top: Spacing.two, bottom: 'auto', height: 49, borderRadius: Radius.md, left: 0 },
   item: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, paddingVertical: Spacing.one },
   label: { fontSize: 11, lineHeight: 13 },
   badgeWrap: { position: 'absolute', top: -6, right: -12 },

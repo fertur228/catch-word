@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { PurchaseStateView } from '@/components/purchase-state';
 import { ThemedText } from '@/components/themed-text';
+import { SUPPORT_EMAIL } from '@/constants/links';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useT } from '@/lib/i18n';
@@ -65,7 +66,7 @@ export default function PaymentSuccess() {
     icon: 'envelope.fill',
     onPress: () => {
       if (typeof window !== 'undefined') {
-        window.location.href = 'mailto:nodes.kazakhstan@gmail.com?subject=TakeWord Premium';
+        window.location.href = `mailto:${SUPPORT_EMAIL}?subject=TakeWord Premium`;
       }
     },
   };

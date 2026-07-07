@@ -13,6 +13,7 @@ import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ThemedText } from '@/components/themed-text';
+import { useT } from '@/lib/i18n';
 
 const DAY_MS = 86_400_000;
 const dayIndexOf = (ms: number) => Math.floor(ms / DAY_MS);
@@ -41,6 +42,7 @@ export function ContributionGrid({
   weeks?: number;
 }) {
   const theme = useTheme();
+  const t = useT();
   const [width, setWidth] = useState(0);
 
   const onLayout = (e: LayoutChangeEvent) => {
@@ -79,13 +81,13 @@ export function ContributionGrid({
       {/* Легенда «меньше → больше» — снизу справа */}
       <View style={styles.legend}>
         <ThemedText type="small" themeColor="textSecondary">
-          Меньше
+          {t('Меньше')}
         </ThemedText>
         {([0, 1, 2, 3, 4] as const).map((l) => (
           <View key={l} style={[styles.legendCell, fill(l)]} />
         ))}
         <ThemedText type="small" themeColor="textSecondary">
-          Больше
+          {t('Больше')}
         </ThemedText>
       </View>
     </View>
