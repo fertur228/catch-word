@@ -13,7 +13,8 @@
     },
     "production": {
       "autoIncrement": false,
-      "distribution": "store"
+      "distribution": "store",
+      "environment": "production"
     }
   },
   "submit": {
