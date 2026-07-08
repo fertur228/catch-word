@@ -14,9 +14,12 @@ const RECOGNIZE_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/recognize` : 
 
 /** Сервер вернул 402 — бесплатные сканы кончились. Экран показывает пейволл. */
 export class ScanLimitError extends Error {
-  constructor() {
+  /** true → premium исчерпал дневной fair-use кап (не free-лимит). */
+  readonly premium: boolean;
+  constructor(premium = false) {
     super('scan_limit_reached');
     this.name = 'ScanLimitError';
+    this.premium = premium;
   }
 }
 
@@ -106,7 +109,10 @@ export async function recognizePhoto(
       },
       body: JSON.stringify({ image: prepared.dataUrl, learningLang, nativeLang, maxObjects }),
     });
-    if (res.status === 402) throw new ScanLimitError(); // лимит бесплатных сканов
+    if (res.status === 402) {
+      const body = (await res.json().catch(() => null)) as { premium?: boolean } | null;
+      throw new ScanLimitError(body?.premium === true);
+    }
     if (!res.ok) {
       console.warn('recognize HTTP', res.status, (await res.text()).slice(0, 200));
       return null;

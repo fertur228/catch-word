@@ -116,8 +116,17 @@ export function ScanningScreen() {
     };
     // Сервер вернул 402 — бесплатные сканы кончились → на пейволл. Оптимистичный
     // клиентский скан НЕ возвращаем (лимит реально исчерпан), фиксируем 0.
-    const onLimitReached = () => {
+    // Лимит сканов. free → пейволл; premium (fair-use 100/день) → мягкое сообщение
+    // «вернись завтра» — пейволл ему бессмысленен, он уже premium.
+    const onLimitReached = (premium: boolean) => {
       if (!active || navigated.current) return;
+      if (premium) {
+        setError({
+          title: t('Лимит на сегодня'),
+          message: t('Сегодня уже очень много сканов — это честный дневной лимит. Возвращайся завтра, он обновится.'),
+        });
+        return;
+      }
       navigated.current = true;
       markScansExhausted();
       router.replace('/paywall');
@@ -144,7 +153,7 @@ export function ScanningScreen() {
           try {
             reco = await recognizePhoto(photoUri, prefs.learningLang, prefs.nativeLang, 8);
           } catch (e) {
-            if (e instanceof ScanLimitError) { onLimitReached(); return; }
+            if (e instanceof ScanLimitError) { onLimitReached(e.premium); return; }
             reco = null;
           }
           if (!active) return;
@@ -184,7 +193,7 @@ export function ScanningScreen() {
           try {
             reco = await recognizePhoto(scanUri, prefs.learningLang, prefs.nativeLang, 1);
           } catch (e) {
-            if (e instanceof ScanLimitError) { onLimitReached(); return; }
+            if (e instanceof ScanLimitError) { onLimitReached(e.premium); return; }
             reco = null;
           }
           const liftedUri = await liftP;

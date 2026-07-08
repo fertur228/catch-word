@@ -48,6 +48,9 @@ export const EN: Record<string, string> = {
   "Весь мир — твой словарь. Больше сканов, все языки и живые примеры.": "The whole world is your dictionary. More scans, all languages, and living examples.",
   "Меньше": "Less",
   "Больше": "More",
+  "Лимит на сегодня": "Daily limit reached",
+  "Сегодня уже очень много сканов — это честный дневной лимит. Возвращайся завтра, он обновится.":
+    "That's a lot of scans for today — a fair daily limit. Come back tomorrow and it resets.",
   "Весь мир —\\nтвой словарь": "The whole world\\nis your dictionary",
   "Включи камеру": "Turn on the camera",
   "Возможно, её удалили из коллекции.": "It may have been removed from your collection.",
