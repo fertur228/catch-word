@@ -171,10 +171,38 @@ export function getDailyQuests(): DailyQuest[] {
   return out;
 }
 
-/** Совпадает ли распознанное слово с целью квеста (мягкое сравнение). */
-export function matchesQuest(word: string, quest: DailyQuest): boolean {
-  const a = word.trim().toLowerCase();
-  const b = quest.word.trim().toLowerCase();
-  if (!a || !b) return false;
-  return a === b || a.includes(b) || b.includes(a);
+/** Нормализация для сравнения: нижний регистр, без артикля, схлопнутые пробелы. */
+function normQuest(s: string): string {
+  return s.trim().toLowerCase().replace(/^(a|an|the)\s+/, '').replace(/\s+/g, ' ');
+}
+/** Слова строки (сравнение по токенам: «water bottle» ~ «bottle»). */
+function questTokens(s: string): string[] {
+  return normQuest(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+}
+
+/**
+ * Совпадает ли пойманный предмет с целью квеста. Сравниваем ВСЕ доступные названия
+ * предмета (слово на изучаемом языке + перевод на родной + синонимы) с целью
+ * (слово-en + перевод-ru) — нормализованно и по целым словам. Перевод сравнивается
+ * на родном языке, поэтому квест засчитывается и когда изучаемый язык НЕ английский
+ * (напр. «batería»/«батарейка» ~ цель «battery»/«батарейка»), а также при других
+ * названиях/формах («water bottle» ~ «bottle», «batteries» ~ через перевод).
+ */
+export function matchesQuest(candidates: string[], quest: DailyQuest): boolean {
+  const targets = [quest.word, quest.translation].filter(Boolean);
+  for (const c of candidates) {
+    if (!c) continue;
+    const cn = normQuest(c);
+    if (!cn) continue;
+    const cTok = questTokens(c);
+    for (const tg of targets) {
+      const tn = normQuest(tg);
+      if (!tn) continue;
+      if (cn === tn) return true;
+      // Общее целое слово длиной >2 (напр. «water bottle» ~ «bottle»).
+      const tTok = questTokens(tg);
+      if (cTok.some((w) => w.length > 2 && tTok.includes(w))) return true;
+    }
+  }
+  return false;
 }

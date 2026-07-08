@@ -199,7 +199,11 @@ export function ResultScreen() {
       setAlreadyHave(true);
       setSaved(true);
       feedbackWrong(); // мягкий «бзз» — уже поймано
-      const q = await completeQuestForWord(content.word);
+      const q = await completeQuestForWord({
+        word: content.word,
+        translation: content.translation,
+        synonyms: content.word === recognized.word ? recognized.synonyms : undefined,
+      });
       if (q.caught) setQuestMsg(q.completed ? t('Квест дня выполнен!') : (getLang() === 'en' ? `Daily quest: ${q.progress} of ${q.total}` : `Квест дня: ${q.progress} из ${q.total}`));
       backTimer.current = setTimeout(() => router.back(), q.caught ? 1900 : 1100);
       return;
@@ -228,7 +232,11 @@ export function ResultScreen() {
     setBurst((b) => b + 1); // ещё один салют на сохранение
     setFlyTs(Date.now()); // стикер «улетает» в коллекцию
     // Квест дня: если поймали целевой предмет — засчитываем и показываем дольше.
-    const q = await completeQuestForWord(card.word);
+    const q = await completeQuestForWord({
+      word: card.word,
+      translation: card.translation,
+      synonyms: card.synonyms,
+    });
     if (q.caught) setQuestMsg(q.completed ? t('Квест дня выполнен!') : (getLang() === 'en' ? `Daily quest: ${q.progress} of ${q.total}` : `Квест дня: ${q.progress} из ${q.total}`));
     // Даём увидеть «печать» успеха (и квест), затем закрываем модалку.
     backTimer.current = setTimeout(() => router.back(), q.caught ? 1900 : 760);

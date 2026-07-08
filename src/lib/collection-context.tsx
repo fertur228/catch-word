@@ -132,7 +132,11 @@ interface CollectionContextValue {
   /** Текущая серия выполненных квестов (дней подряд). */
   questStreak: number;
   /** Засчитать цель, если слово совпало. Возвращает прогресс квеста (X/3). */
-  completeQuestForWord: (word: string) => Promise<QuestCatch>;
+  completeQuestForWord: (cand: {
+    word: string;
+    translation?: string;
+    synonyms?: string[];
+  }) => Promise<QuestCatch>;
 }
 
 const CollectionContext = createContext<CollectionContextValue | null>(null);
@@ -507,14 +511,18 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
   const dailyQuests = useMemo(() => getDailyQuests(), []);
 
   const completeQuestForWord = useCallback(
-    async (word: string): Promise<QuestCatch> => {
+    async (cand: { word: string; translation?: string; synonyms?: string[] }): Promise<QuestCatch> => {
       const today = todayIndex();
       const total = dailyQuests.length;
       // Что уже найдено сегодня (при смене дня прогресс обнуляется).
       const foundToday = questFound.day === today ? questFound.words : [];
       const alreadyDone = questLastDay === today;
-      // Какая из целей совпала со словом — и не поймана ли уже.
-      const target = dailyQuests.find((q) => matchesQuest(word, q));
+      // Все названия предмета (слово + перевод + синонимы) → сравниваем с целями.
+      const candidates = [cand.word, cand.translation, ...(cand.synonyms ?? [])].filter(
+        (s): s is string => !!s,
+      );
+      // Какая из целей совпала — и не поймана ли уже.
+      const target = dailyQuests.find((q) => matchesQuest(candidates, q));
       const already =
         target && foundToday.some((w) => w.toLowerCase() === target.word.toLowerCase());
       if (!target || already) {
