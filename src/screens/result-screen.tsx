@@ -203,6 +203,7 @@ export function ResultScreen() {
         word: content.word,
         translation: content.translation,
         synonyms: content.word === recognized.word ? recognized.synonyms : undefined,
+        questMatch: job?.result?.questMatch,
       });
       if (q.caught) setQuestMsg(q.completed ? t('Квест дня выполнен!') : (getLang() === 'en' ? `Daily quest: ${q.progress} of ${q.total}` : `Квест дня: ${q.progress} из ${q.total}`));
       backTimer.current = setTimeout(() => router.back(), q.caught ? 1900 : 1100);
@@ -236,6 +237,7 @@ export function ResultScreen() {
       word: card.word,
       translation: card.translation,
       synonyms: card.synonyms,
+      questMatch: job?.result?.questMatch,
     });
     if (q.caught) setQuestMsg(q.completed ? t('Квест дня выполнен!') : (getLang() === 'en' ? `Daily quest: ${q.progress} of ${q.total}` : `Квест дня: ${q.progress} из ${q.total}`));
     // Даём увидеть «печать» успеха (и квест), затем закрываем модалку.

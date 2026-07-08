@@ -78,7 +78,7 @@ const SCHEMA = {
         additionalProperties: false,
         required: [
           'word', 'translation', 'ipa', 'category', 'emoji', 'bbox', 'confidence',
-          'examples', 'note', 'distractors', 'synonyms',
+          'examples', 'note', 'distractors', 'synonyms', 'questMatch',
         ],
         properties: {
           word: { type: 'string' },
@@ -92,13 +92,19 @@ const SCHEMA = {
           note: { type: 'string' },
           distractors: { type: 'array', items: { type: 'string' } },
           synonyms: { type: 'array', items: { type: 'string' } },
+          questMatch: { type: 'string' },
         },
       },
     },
   },
 };
 
-function buildPrompt(learningLang: string, nativeLang: string, maxObjects: number): string {
+function buildPrompt(
+  learningLang: string,
+  nativeLang: string,
+  maxObjects: number,
+  questWords: string[],
+): string {
   const more = Math.max(0, maxObjects - 1);
   const single = maxObjects <= 1;
   const intro = single
@@ -121,7 +127,11 @@ function buildPrompt(learningLang: string, nativeLang: string, maxObjects: numbe
     `- note: a SHORT memory hint in ${nativeLang} (a mnemonic, a false-friend warning, or a usage tip), at most ~12 words. Empty string "" if there is nothing useful.`,
     `- distractors: array of 3 plausible but INCORRECT ${nativeLang} translations — single words a learner might confuse with the correct translation (never equal to the correct translation).`,
     `- synonyms: array of up to 3 common ${learningLang} synonyms or near-synonyms of the word (single words, never equal to the word itself). Empty array [] if there are none.`,
+    '- questMatch: the EXACT daily-quest target word this object matches (see targets below), or "" if none.',
     `Order objects by prominence (main subject first). Return at most ${maxObjects} objects.`,
+    questWords.length
+      ? `Daily-quest targets: ${questWords.join(', ')}. Match GENEROUSLY: if the main object is essentially one of these (e.g. a thermos or flask counts as "bottle", a power bank as "battery"), set its questMatch to that EXACT target word (verbatim from the list). Otherwise "".`
+      : 'No quest targets provided → questMatch must be "".',
     'Respond with ONLY a JSON object matching the schema — no prose, no markdown.',
   ].join('\n');
 }
@@ -135,7 +145,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ error: 'server_misconfigured', message: 'RECOGNIZE_API_KEY is not set' }, 500);
   }
 
-  let body: { image?: string; learningLang?: string; nativeLang?: string; maxObjects?: number };
+  let body: {
+    image?: string; learningLang?: string; nativeLang?: string; maxObjects?: number; questWords?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
@@ -150,6 +162,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const nativeLang = body.nativeLang ?? 'ru-RU';
   // Сколько предметов максимум: 1 предмет (single) … до 8 («поймай всю сцену»).
   const maxObjects = Math.max(1, Math.min(8, Math.round(Number(body.maxObjects) || 3)));
+  // Цели дневного квеста (англ. слова) — модель проверит семантическое совпадение.
+  const questWords: string[] = Array.isArray(body.questWords)
+    ? (body.questWords as unknown[]).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 12)
+    : [];
+  const qwLower = questWords.map((w) => w.toLowerCase());
   const dataUrl = image.startsWith('data:') ? image : `data:image/jpeg;base64,${image}`;
 
   // --- Серверный лимит бесплатных сканов (антифрод) ---
@@ -209,7 +226,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           {
             role: 'user',
             content: [
-              { type: 'text', text: buildPrompt(learningLang, nativeLang, maxObjects) },
+              { type: 'text', text: buildPrompt(learningLang, nativeLang, maxObjects, questWords) },
               { type: 'image_url', image_url: { url: dataUrl } },
             ],
           },
@@ -272,6 +289,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
       note: String(o?.note ?? '').trim(),
       distractors: strList(o?.distractors, 3),
       synonyms: strList(o?.synonyms, 3),
+      // Только слово ИЗ переданных целей квеста (иначе "" — защита от галлюцинаций).
+      questMatch: ((): string => {
+        const qm = String(o?.questMatch ?? '').trim().toLowerCase();
+        const i = qm ? qwLower.indexOf(qm) : -1;
+        return i >= 0 ? questWords[i] : '';
+      })(),
     }))
     .filter((o: { word: string }) => o.word.length > 0)
     .slice(0, maxObjects);

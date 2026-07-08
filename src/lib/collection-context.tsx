@@ -136,6 +136,7 @@ interface CollectionContextValue {
     word: string;
     translation?: string;
     synonyms?: string[];
+    questMatch?: string;
   }) => Promise<QuestCatch>;
 }
 
@@ -511,16 +512,25 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
   const dailyQuests = useMemo(() => getDailyQuests(), []);
 
   const completeQuestForWord = useCallback(
-    async (cand: { word: string; translation?: string; synonyms?: string[] }): Promise<QuestCatch> => {
+    async (cand: {
+      word: string;
+      translation?: string;
+      synonyms?: string[];
+      questMatch?: string;
+    }): Promise<QuestCatch> => {
       const today = todayIndex();
       const total = dailyQuests.length;
       // Что уже найдено сегодня (при смене дня прогресс обнуляется).
       const foundToday = questFound.day === today ? questFound.words : [];
       const alreadyDone = questLastDay === today;
-      // Все названия предмета (слово + перевод + синонимы) → сравниваем с целями.
-      const candidates = [cand.word, cand.translation, ...(cand.synonyms ?? [])].filter(
-        (s): s is string => !!s,
-      );
+      // Все названия предмета (слово + перевод + синонимы) + семантическое совпадение
+      // от модели (questMatch — точное слово-цель) → сравниваем с целями.
+      const candidates = [
+        cand.word,
+        cand.translation,
+        ...(cand.synonyms ?? []),
+        cand.questMatch,
+      ].filter((s): s is string => !!s);
       // Какая из целей совпала — и не поймана ли уже.
       const target = dailyQuests.find((q) => matchesQuest(candidates, q));
       const already =

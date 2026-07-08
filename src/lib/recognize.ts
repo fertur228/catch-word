@@ -56,6 +56,8 @@ export interface RecognizedObject {
   distractors?: string[];
   /** До 3 синонимов/близких по значению слов на изучаемом языке. */
   synonyms?: string[];
+  /** Точное слово-цель квеста, которому предмет соответствует семантически, или "". */
+  questMatch?: string;
 }
 
 /** Готов ли бэкенд распознавания (есть URL и ключ). */
@@ -100,6 +102,7 @@ export async function recognizePhoto(
   learningLang: string,
   nativeLang: string,
   maxObjects = 1,
+  questWords: string[] = [],
 ): Promise<{
   objects: RecognizedObject[];
   prepared: { uri: string; width: number; height: number };
@@ -130,7 +133,7 @@ export async function recognizePhoto(
         apikey: SUPABASE_ANON,
         Authorization: `Bearer ${token ?? SUPABASE_ANON}`,
       },
-      body: JSON.stringify({ image: prepared.base64, learningLang, nativeLang, maxObjects }),
+      body: JSON.stringify({ image: prepared.base64, learningLang, nativeLang, maxObjects, questWords }),
     });
     if (res.status === 402) {
       // free-лимит или premium fair-use (флаг premium в теле).
@@ -268,6 +271,7 @@ export function toScanResult(obj: RecognizedObject, learningLang: string): ScanR
     note: obj.note || undefined,
     distractors: obj.distractors ?? [],
     synonyms: obj.synonyms ?? [],
+    questMatch: obj.questMatch || undefined,
     auto: true,
   };
 }

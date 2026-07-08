@@ -54,6 +54,7 @@ import {
   toScanResult,
 } from '@/lib/recognize';
 import { liftToPNG } from '@/lib/subject-lift';
+import { getDailyQuests } from '@/lib/daily-quest';
 
 /** Размеры сканирующего «визира». */
 const FRAME = 240;
@@ -203,7 +204,13 @@ export function ScanningScreen() {
           });
           let reco: Awaited<ReturnType<typeof recognizePhoto>> = null;
           try {
-            reco = await recognizePhoto(scanUri, prefs.learningLang, prefs.nativeLang, 1);
+            reco = await recognizePhoto(
+              scanUri,
+              prefs.learningLang,
+              prefs.nativeLang,
+              1,
+              getDailyQuests().map((q) => q.word),
+            );
           } catch (e) {
             if (e instanceof ScanLimitError) { onLimitReached(e.premium); return; }
             reco = null;

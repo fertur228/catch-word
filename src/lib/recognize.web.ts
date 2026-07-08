@@ -39,6 +39,7 @@ export interface RecognizedObject {
   note?: string;
   distractors?: string[];
   synonyms?: string[];
+  questMatch?: string;
 }
 
 export function isRecognitionConfigured(): boolean {
@@ -84,6 +85,7 @@ export async function recognizePhoto(
   learningLang: string,
   nativeLang: string,
   maxObjects = 1,
+  questWords: string[] = [],
 ): Promise<{
   objects: RecognizedObject[];
   prepared: { uri: string; width: number; height: number };
@@ -107,7 +109,7 @@ export async function recognizePhoto(
         apikey: SUPABASE_ANON,
         Authorization: `Bearer ${token ?? SUPABASE_ANON}`,
       },
-      body: JSON.stringify({ image: prepared.dataUrl, learningLang, nativeLang, maxObjects }),
+      body: JSON.stringify({ image: prepared.dataUrl, learningLang, nativeLang, maxObjects, questWords }),
     });
     if (res.status === 402) {
       const body = (await res.json().catch(() => null)) as { premium?: boolean } | null;
@@ -213,6 +215,7 @@ export function toScanResult(obj: RecognizedObject, learningLang: string): ScanR
     note: obj.note || undefined,
     distractors: obj.distractors ?? [],
     synonyms: obj.synonyms ?? [],
+    questMatch: obj.questMatch || undefined,
     auto: true,
   };
 }
