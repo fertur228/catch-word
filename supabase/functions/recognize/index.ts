@@ -100,22 +100,28 @@ const SCHEMA = {
 
 function buildPrompt(learningLang: string, nativeLang: string, maxObjects: number): string {
   const more = Math.max(0, maxObjects - 1);
+  const single = maxObjects <= 1;
+  const intro = single
+    ? 'The photo is tightly framed around ONE object that fills the center — identify THAT object, precisely.'
+    : `Identify the MOST PROMINENT foreground object, then up to ${more} more clearly visible objects.`;
   return [
-    'You identify physical objects in a photo to help someone learn a language.',
-    `Identify the MOST PROMINENT foreground object, then up to ${more} more notable objects.`,
+    `You are an expert at naming physical objects to help someone learn ${learningLang}.`,
+    intro,
+    'Be accurate: give the SPECIFIC everyday noun a native speaker would use, not a vague category (e.g. "mug" not "cup", "sneaker" not "shoe"). Use the generic object name, never a brand.',
+    'If the photo is imperfect (blurry, partial, odd angle), still give your single best guess and lower confidence accordingly. Return an empty list ONLY if there is genuinely no discernible object.',
     'For each object return:',
-    `- word: the object's common name in ${learningLang} (a single, lowercase noun).`,
+    `- word: the object's common name in ${learningLang} — a single, lowercase, singular noun.`,
     `- translation: that word translated into ${nativeLang}.`,
     `- ipa: IPA transcription of the ${learningLang} word (symbols only, no slashes).`,
     `- category: a one-word category in ${nativeLang}.`,
     '- emoji: one emoji that best represents the object.',
     '- bbox: bounding box as [x, y, width, height], each 0..1 relative to image size.',
-    '- confidence: 0..1.',
+    '- confidence: your honest 0..1 certainty.',
     `- examples: array of 2 SHORT, natural example sentences in ${learningLang} that use the word, at a beginner (A1-A2) level.`,
     `- note: a SHORT memory hint in ${nativeLang} (a mnemonic, a false-friend warning, or a usage tip), at most ~12 words. Empty string "" if there is nothing useful.`,
     `- distractors: array of 3 plausible but INCORRECT ${nativeLang} translations — single words a learner might confuse with the correct translation (never equal to the correct translation).`,
     `- synonyms: array of up to 3 common ${learningLang} synonyms or near-synonyms of the word (single words, never equal to the word itself). Empty array [] if there are none.`,
-    `Order objects by prominence (main subject first). Return at most ${maxObjects} objects. If nothing recognizable, return an empty list.`,
+    `Order objects by prominence (main subject first). Return at most ${maxObjects} objects.`,
     'Respond with ONLY a JSON object matching the schema — no prose, no markdown.',
   ].join('\n');
 }

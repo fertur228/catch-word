@@ -182,7 +182,7 @@ export function ScanningScreen() {
           const liftP = liftToPNG(scanUri).catch(() => null);
           let reco: Awaited<ReturnType<typeof recognizePhoto>> = null;
           try {
-            reco = await recognizePhoto(scanUri, prefs.learningLang, prefs.nativeLang, 3);
+            reco = await recognizePhoto(scanUri, prefs.learningLang, prefs.nativeLang, 1);
           } catch (e) {
             if (e instanceof ScanLimitError) { onLimitReached(); return; }
             reco = null;
