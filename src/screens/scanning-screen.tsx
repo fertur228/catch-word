@@ -32,6 +32,7 @@ import Animated, {
   withDelay,
   withRepeat,
   withTiming,
+  ZoomIn,
 } from 'react-native-reanimated';
 
 import { Button } from '@/components/button';
@@ -72,6 +73,9 @@ export function ScanningScreen() {
   const reduceMotion = useReduceMotion();
   // Ошибка распознавания (нет сети / не понял) — показываем вместо результата.
   const [error, setError] = useState<{ title: string; message: string } | null>(null);
+  // Локальная вырезка (VisionKit) готова раньше слова — показываем её сразу как
+  // превью в визире («поймал!»), не дожидаясь облачного распознавания.
+  const [cutoutPreview, setCutoutPreview] = useState<string | null>(null);
   // Реальный снятый кадр — показываем «обработку» именно его (а не абстрактный скрим).
   const photoUri = getScanJob(jobId)?.photoUri;
 
@@ -189,6 +193,11 @@ export function ScanningScreen() {
           // Вырезку запускаем параллельно, но распознавание ждём отдельно, чтобы
           // поймать ScanLimitError (402) и уйти на пейволл, не «сжигая» вырезку.
           const liftP = liftToPNG(scanUri).catch(() => null);
+          // Мгновенное превью: как только VisionKit вернул вырез — показываем его,
+          // не дожидаясь облачного распознавания.
+          void liftP.then((uri) => {
+            if (active && uri) setCutoutPreview(uri);
+          });
           let reco: Awaited<ReturnType<typeof recognizePhoto>> = null;
           try {
             reco = await recognizePhoto(scanUri, prefs.learningLang, prefs.nativeLang, 1);
@@ -341,23 +350,29 @@ export function ScanningScreen() {
               />
             ) : null}
 
-            {/* Пульсирующий визир-фокус: кольцо-спиннер + центр */}
+            {/* Готова локальная вырезка → показываем её сразу («поймал!»); иначе — визир. */}
             <View style={styles.reticleWrap} pointerEvents="none">
-              <Animated.View style={reticleStyle}>
-                <Animated.View
-                  style={[
-                    styles.spinner,
-                    {
-                      borderColor: photoUri ? 'rgba(255,255,255,0.3)' : theme.primarySoft,
-                      borderTopColor: theme.accent,
-                    },
-                    spinStyle,
-                  ]}
-                />
-                <View style={styles.reticleCenter}>
-                  <Icon name="viewfinder" size={26} color={theme.accent} />
-                </View>
-              </Animated.View>
+              {cutoutPreview ? (
+                <Animated.View entering={reduceMotion ? undefined : ZoomIn.springify().damping(13).stiffness(150)}>
+                  <Image source={{ uri: cutoutPreview }} style={styles.cutoutPreview} contentFit="contain" />
+                </Animated.View>
+              ) : (
+                <Animated.View style={reticleStyle}>
+                  <Animated.View
+                    style={[
+                      styles.spinner,
+                      {
+                        borderColor: photoUri ? 'rgba(255,255,255,0.3)' : theme.primarySoft,
+                        borderTopColor: theme.accent,
+                      },
+                      spinStyle,
+                    ]}
+                  />
+                  <View style={styles.reticleCenter}>
+                    <Icon name="viewfinder" size={26} color={theme.accent} />
+                  </View>
+                </Animated.View>
+              )}
             </View>
           </View>
 
@@ -454,6 +469,7 @@ const styles = StyleSheet.create({
 
   // --- Пульсирующий визир-фокус по центру рамки ---
   reticleWrap: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+  cutoutPreview: { width: 200, height: 200 },
   spinner: {
     position: 'absolute',
     width: RETICLE,
