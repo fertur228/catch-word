@@ -1,0 +1,63 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1080px;height:1350px}
+body{position:relative;overflow:hidden;
+  font-family:-apple-system,"SF Pro Display","Helvetica Neue",system-ui,sans-serif;
+  color:#fff;-webkit-font-smoothing:antialiased}
+em{font-style:normal;font-family:"Avenir Next Condensed","SF Pro Display",sans-serif}
+/* верхняя строка: лого + счётчик */
+.top{position:absolute;top:60px;left:64px;right:64px;display:flex;align-items:center;
+  justify-content:space-between;z-index:9}
+.brand{display:flex;align-items:center;gap:16px}
+.brand img{width:58px;height:58px;border-radius:15px;box-shadow:0 6px 18px rgba(0,0,0,.28)}
+.brand b{font-size:33px;font-weight:800;letter-spacing:-.6px}
+.count{font-size:26px;font-weight:800;letter-spacing:.5px;padding:9px 20px;border-radius:999px;
+  background:rgba(255,255,255,.16);backdrop-filter:blur(6px)}
+/* рамка-визир (прицел сканера) */
+.reticle{position:absolute;pointer-events:none}
+.reticle span{position:absolute;width:74px;height:74px;border:7px solid #fff}
+.reticle .tl{top:0;left:0;border-right:0;border-bottom:0;border-radius:22px 0 0 0}
+.reticle .tr{top:0;right:0;border-left:0;border-bottom:0;border-radius:0 22px 0 0}
+.reticle .bl{bottom:0;left:0;border-right:0;border-top:0;border-radius:0 0 0 22px}
+.reticle .br{bottom:0;right:0;border-left:0;border-top:0;border-radius:0 0 22px 0}
+/* тайловый водяной знак */
+.wm{position:absolute;inset:-40% -10%;transform:rotate(-8deg);opacity:.07;z-index:0;
+  font-weight:900;font-size:120px;line-height:1.1;letter-spacing:-2px;
+  white-space:nowrap;overflow:hidden;color:#fff}
+.wm div{overflow:hidden;text-overflow:clip}
+
+.phone{position:relative;width:520px;border-radius:52px;background:#0C0D10;padding:14px;
+  box-shadow:0 46px 90px -26px rgba(0,0,0,.6),0 14px 30px rgba(0,0,0,.3);z-index:5}
+.phone img{display:block;width:100%;border-radius:40px}
+.notch{position:absolute;top:14px;left:50%;transform:translateX(-50%);
+  width:186px;height:24px;background:#0C0D10;border-radius:0 0 14px 14px;z-index:2}
+</style></head><body style="background:#0A1830">
+  <div class="wm"><div>take word · take word · take word · take word</div><div>take word · take word · take word · take word</div><div>take word · take word · take word · take word</div><div>take word · take word · take word · take word</div><div>take word · take word · take word · take word</div><div>take word · take word · take word · take word</div><div>take word · take word · take word · take word</div><div>take word · take word · take word · take word</div><div>take word · take word · take word · take word</div><div>take word · take word · take word · take word</div><div>take word · take word · take word · take word</div><div>take word · take word · take word · take word</div></div>
+  <div class="shard c1"></div><div class="shard c2"></div>
+  <div class="top" style="color:#fff">
+    <div class="brand"><img src="file:///Users/almazbukayev/CatchWord/assets/images/icon.png"><b>TakeWord</b></div>
+    <div class="count" style="">6/6</div>
+  </div>
+  <div class="reticle" style="left:110px;right:110px;top:360px;bottom:360px">
+    <span class="tl"></span><span class="tr"></span><span class="bl"></span><span class="br"></span></div>
+  <div class="cta-wrap">
+    <div class="cta-h"><span>Learn a language</span><span><em>by living it.</em></span></div>
+    <div class="cta-url">catch-words.com</div>
+    <div class="cta-sub">TakeWord — on iOS</div>
+  </div>
+  <style>
+    .shard{position:absolute;z-index:0}
+    .c1{top:-140px;right:-160px;width:680px;height:680px;background:#208AEF;opacity:.9;
+      clip-path:polygon(40% 0,100% 30%,100% 100%,0 66%)}
+    .c2{bottom:-160px;left:-180px;width:560px;height:560px;background:#208AEF;opacity:.24;
+      clip-path:polygon(0 30%,70% 0,100% 100%,16% 100%)}
+    .cta-wrap{position:absolute;left:64px;right:64px;top:50%;transform:translateY(-50%);text-align:center;z-index:5}
+    .cta-h{display:flex;flex-direction:column;line-height:.94}
+    .cta-h span:first-child{font-size:74px;font-weight:800;letter-spacing:-1.6px}
+    .cta-h span:last-child{font-size:118px;font-weight:900;letter-spacing:-3px}
+    .cta-h em{font-family:"Avenir Next Condensed";font-style:italic;font-weight:800;color:#208AEF;
+      -webkit-text-stroke:0;text-shadow:0 0 1px #208AEF}
+    .cta-url{margin-top:44px;display:inline-block;font-size:40px;font-weight:900;letter-spacing:-.5px;
+      background:#fff;color:#0A1830;padding:16px 42px;border-radius:999px}
+    .cta-sub{margin-top:26px;font-size:30px;font-weight:700;opacity:.8;letter-spacing:.5px}
+  </style></body></html>

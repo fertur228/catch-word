@@ -8,10 +8,10 @@
     "scheme": "catchword",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "usesAppleSignIn": true,
       "bundleIdentifier": "com.almazbukayev.takeword",
-      "buildNumber": "5",
+      "buildNumber": "6",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
