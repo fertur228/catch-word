@@ -172,9 +172,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     } else if (gate) {
       scanInfo = { used: gate.used, limit: gate.limit, unlimited: gate.unlimited };
       if (gate.allowed === false) {
-        return json({ error: 'scan_limit_reached', used: gate.used, limit: gate.limit }, 402);
+        // premium=true → это fair-use кап (100/день), а не free-лимит: клиент НЕ
+        // показывает пейволл, а сообщает «дневной лимит, вернись завтра».
+        return json({ error: 'scan_limit_reached', used: gate.used, limit: gate.limit,
+                      premium: gate.premium === true }, 402);
       }
-      consumed = gate.unlimited === false; // счётчик увеличен только для free-пользователя
+      // Скан засчитан для ОБОИХ тарифов (premium теперь тоже под капом) → при ошибке
+      // модели возвращаем его через refund_scan.
+      consumed = gate.allowed === true;
     }
   }
 
