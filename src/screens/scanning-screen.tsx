@@ -194,9 +194,12 @@ export function ScanningScreen() {
           // поймать ScanLimitError (402) и уйти на пейволл, не «сжигая» вырезку.
           const liftP = liftToPNG(scanUri).catch(() => null);
           // Мгновенное превью: как только VisionKit вернул вырез — показываем его,
-          // не дожидаясь облачного распознавания.
+          // не дожидаясь облачного распознавания, и визуально ЗАВЕРШАЕМ прогресс,
+          // чтобы ожидание слова читалось как «готово», а не «ждём медленный ИИ».
           void liftP.then((uri) => {
-            if (active && uri) setCutoutPreview(uri);
+            if (!active || !uri) return;
+            setCutoutPreview(uri);
+            prog.value = reduceMotion ? 1 : withTiming(1, { duration: 300, easing: Easing.out(Easing.ease) });
           });
           let reco: Awaited<ReturnType<typeof recognizePhoto>> = null;
           try {
@@ -381,13 +384,15 @@ export function ScanningScreen() {
             entering={FadeInDown.duration(Motion.duration.base).delay(80)}
             style={styles.caption}>
             <ThemedText type="smallBold" style={[styles.captionText, photoUri ? styles.captionOnPhoto : null]}>
-              {t('Распознаю предмет…')}
+              {cutoutPreview ? t('Поймал!') : t('Распознаю предмет…')}
             </ThemedText>
-            <View style={styles.dots}>
-              <Dot delay={0} color={theme.accent} reduce={reduceMotion} />
-              <Dot delay={160} color={theme.accent} reduce={reduceMotion} />
-              <Dot delay={320} color={theme.accent} reduce={reduceMotion} />
-            </View>
+            {cutoutPreview ? null : (
+              <View style={styles.dots}>
+                <Dot delay={0} color={theme.accent} reduce={reduceMotion} />
+                <Dot delay={160} color={theme.accent} reduce={reduceMotion} />
+                <Dot delay={320} color={theme.accent} reduce={reduceMotion} />
+              </View>
+            )}
             {/* Полоса прогресса распознавания. */}
             <View style={[styles.progTrack, { backgroundColor: photoUri ? 'rgba(255,255,255,0.22)' : theme.primarySoft }]}>
               <Animated.View style={[styles.progFill, { backgroundColor: theme.accent }, progStyle]} />
