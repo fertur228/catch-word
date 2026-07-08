@@ -23,7 +23,7 @@
  * весь поток работают (мок). На реальном iPhone превью живое.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Dimensions, Pressable, StyleSheet, View } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -56,7 +56,7 @@ import { useCollection } from '@/lib/collection-context';
 import { alertAsync } from '@/lib/dialog';
 import { feedbackImpact, feedbackTap } from '@/lib/feedback';
 import { useT } from '@/lib/i18n';
-import { createScanJob, SCAN_FRAME, type ScanMode } from '@/lib/scan-job';
+import { createScanJob, SCAN_FRAME, type ScanMode, type Visor } from '@/lib/scan-job';
 
 /** Цвета элементов поверх живого видео (не зависят от темы — лежат на кадре). */
 const ON_CAMERA = '#FFFFFF';
@@ -110,6 +110,8 @@ export function CameraScreen() {
   const navigating = useRef(false);
   // Ссылка на камеру — чтобы снять реальный кадр.
   const cameraRef = useRef<CameraView>(null);
+  // Ref на рамку-визир — меряем её реальное положение на экране, чтобы кроп совпал.
+  const frameRef = useRef<View>(null);
 
   // Зацикленные анимации крутим только пока вкладка в фокусе (экономия батареи).
   useEffect(() => {
@@ -235,8 +237,24 @@ export function CameraScreen() {
     } catch (e) {
       console.warn('Съёмка не удалась:', e);
     }
+    // Меряем реальное положение визира на экране (он выше центра) — чтобы кроп по
+    // рамке совпал с тем, что пользователь навёл. Сбой замера → undefined (кроп
+    // упадёт на прежний центр-кроп, без регресса).
+    const { width: sw, height: sh } = Dimensions.get('window');
+    const visor = await Promise.race<Visor | undefined>([
+      new Promise<Visor | undefined>((resolve) => {
+        const node = frameRef.current;
+        if (!node) return resolve(undefined);
+        node.measureInWindow((x, y, w, h) => {
+          if (!w || !h || !Number.isFinite(x) || !Number.isFinite(y)) return resolve(undefined);
+          resolve({ cx: x + w / 2, cy: y + h / 2, side: SCAN_FRAME, screenW: sw, screenH: sh });
+        });
+      }),
+      // Страховка от подвисания, если колбэк не пришёл.
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 150)),
+    ]);
     // Сначала экран «Распознаю…» (scanning), он сам уйдёт на Результат.
-    const jobId = createScanJob(photoUri, mode);
+    const jobId = createScanJob(photoUri, mode, visor);
     router.push({ pathname: '/scanning', params: { jobId } });
   }, [router, tryScan, flash, capture, mode, user, signInWithGoogle, t]);
 
@@ -327,7 +345,7 @@ export function CameraScreen() {
 
         {/* Центр: сканирующий визир (квадрат) + подсказка */}
         <View style={styles.centerWrap} pointerEvents="none">
-          <Animated.View style={[styles.frame, frameStyle]}>
+          <Animated.View ref={frameRef} style={[styles.frame, frameStyle]}>
             {/* Полупрозрачная подложка-«стекло» и тонкая полная рамка */}
             <View style={styles.frameGlass} />
             {/* Яркие угловые скобки */}

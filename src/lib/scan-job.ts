@@ -49,6 +49,18 @@ export interface SceneItem {
   cutoutUri?: string | null;
 }
 
+/** Реальное положение визира на экране камеры (в points) — для точного кропа. */
+export interface Visor {
+  /** Центр визира по X/Y (window-координаты). */
+  cx: number;
+  cy: number;
+  /** Сторона квадрата визира (обычно SCAN_FRAME). */
+  side: number;
+  /** Размеры окна на момент съёмки. */
+  screenW: number;
+  screenH: number;
+}
+
 /** Один скан «в полёте». */
 export interface ScanJob {
   id: string;
@@ -56,6 +68,8 @@ export interface ScanJob {
   mode?: ScanMode;
   /** Реальный снятый кадр (file://...). Может отсутствовать (симулятор/ошибка съёмки). */
   photoUri?: string;
+  /** Измеренное положение визира на экране камеры — чтобы кроп совпал с наведением. */
+  visor?: Visor;
   /** Вырезанный стикер: PNG без фона (Фаза 2) либо кроп по рамке (Фаза 1). */
   cutoutUri?: string | null;
   /** Результат распознавания (Фаза 1, режим single). Пусто → Результат берёт мок. */
@@ -75,9 +89,9 @@ const jobs = new Map<string, ScanJob>();
 let counter = 0;
 
 /** Создать скан с (опциональным) снятым кадром. Возвращает jobId для роута. */
-export function createScanJob(photoUri?: string, mode: ScanMode = 'single'): string {
+export function createScanJob(photoUri?: string, mode: ScanMode = 'single', visor?: Visor): string {
   const id = `scan-${Date.now()}-${++counter}`;
-  jobs.set(id, { id, photoUri, mode });
+  jobs.set(id, { id, photoUri, mode, visor });
   // Не копим память: держим только несколько последних сканов.
   while (jobs.size > 8) {
     const oldest = jobs.keys().next().value;

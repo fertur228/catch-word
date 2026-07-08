@@ -187,8 +187,17 @@ export function ScanningScreen() {
           // single: сначала вырезаем КВАДРАТ ПОД ВИЗИРОМ (рамкой наведения) из кадра.
           // Его отдаём и в распознавание (предмет крупный → выше точность), и в
           // нативную вырезку (Vision получает центрированный субъект → чище результат).
+          // Кроп по РЕАЛЬНОМУ положению визира (замерено на камере). Fallback —
+          // центр экрана (прежнее поведение), если замер не пришёл.
           const { width: screenW, height: screenH } = Dimensions.get('window');
-          const framed = await cropToFrame(photoUri, screenW, screenH, SCAN_FRAME);
+          const visor = job?.visor ?? {
+            cx: screenW / 2,
+            cy: screenH / 2,
+            side: SCAN_FRAME,
+            screenW,
+            screenH,
+          };
+          const framed = await cropToFrame(photoUri, visor);
           const scanUri = framed?.uri ?? photoUri;
 
           // Вырезку запускаем параллельно, но распознавание ждём отдельно, чтобы

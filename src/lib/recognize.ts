@@ -15,7 +15,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 import { lookupWord } from '@/lib/dictionary';
 import { supabase } from '@/lib/supabase';
-import type { ScanResult } from '@/lib/scan-job';
+import type { ScanResult, Visor } from '@/lib/scan-job';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -196,29 +196,32 @@ export async function cropToSticker(
 }
 
 /**
- * Кроп по «визиру»: вырезает центральный квадрат фото, соответствующий рамке
- * наведения на экране. Превью камеры масштабируется в режиме cover (заполняет
- * экран, лишнее обрезается), поэтому сторону рамки (в pt) переводим в пиксели
- * фото через тот же cover-масштаб и берём центральный квадрат — ровно то, что
- * пользователь видел в рамке. Возвращает { uri, width, height } или null.
+ * Кроп по «визиру»: вырезает квадрат фото, соответствующий рамке наведения на
+ * экране. Превью камеры масштабируется в режиме cover (заполняет экран, лишнее
+ * обрезается), поэтому точки экрана переводим в пиксели фото через тот же
+ * cover-масштаб и берём квадрат вокруг РЕАЛЬНОГО центра визира (visor.cx/cy) —
+ * ровно то, что пользователь видел в рамке (визир НЕ по центру экрана — выше).
+ * Возвращает { uri, width, height } или null.
  */
 export async function cropToFrame(
   uri: string,
-  screenW: number,
-  screenH: number,
-  frameSidePt: number,
+  visor: Visor,
 ): Promise<{ uri: string; width: number; height: number } | null> {
   try {
     // Пустой список действий нормализует EXIF-ориентацию и даёт реальные пиксели.
     const base = await manipulateAsync(uri, [], { compress: 1, format: SaveFormat.JPEG });
     const pw = base.width;
     const ph = base.height;
+    const { cx, cy, side: frameSidePt, screenW, screenH } = visor;
     if (!pw || !ph || screenW <= 0 || screenH <= 0) return base;
     // cover-масштаб превью → сторона квадрата в пикселях фото.
     const scale = Math.max(screenW / pw, screenH / ph);
     const side = Math.max(1, Math.min(pw, ph, Math.round(frameSidePt / scale)));
-    const originX = Math.max(0, Math.round((pw - side) / 2));
-    const originY = Math.max(0, Math.round((ph - side) / 2));
+    // Центр визира (в точках экрана) → пиксели фото через ту же cover-трансформацию.
+    const cxPx = (cx - screenW / 2) / scale + pw / 2;
+    const cyPx = (cy - screenH / 2) / scale + ph / 2;
+    const originX = Math.max(0, Math.min(pw - side, Math.round(cxPx - side / 2)));
+    const originY = Math.max(0, Math.min(ph - side, Math.round(cyPx - side / 2)));
     const out = await manipulateAsync(
       base.uri,
       [{ crop: { originX, originY, width: side, height: side } }],

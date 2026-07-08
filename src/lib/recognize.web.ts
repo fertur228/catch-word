@@ -6,7 +6,7 @@
  */
 import { lookupWord } from '@/lib/dictionary';
 import { supabase } from '@/lib/supabase';
-import type { ScanResult } from '@/lib/scan-job';
+import type { ScanResult, Visor } from '@/lib/scan-job';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -174,9 +174,7 @@ export async function cropToSticker(
  */
 export async function cropToFrame(
   uri: string,
-  _screenW: number,
-  _screenH: number,
-  _frameSidePt: number,
+  _visor: Visor,
 ): Promise<{ uri: string; width: number; height: number } | null> {
   try {
     const img = await loadImage(uri);
