@@ -383,6 +383,12 @@ verify_jwt = false
 [functions.revenuecat-webhook]
 verify_jwt = false
 
+# Автономный агент-тренер: вызывается ночным pg_cron (и debug-curl) с
+# собственным секретом QUEST_AGENT_SECRET, НЕ Supabase-JWT. Клиент эту
+# функцию не вызывает вовсе — он читает таблицу daily_quests (RLS).
+[functions.quest-agent]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

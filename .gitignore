@@ -63,3 +63,4 @@ example
 /2026-*.jpg
 /*.html
 .i18n-tmp/
+.gstack/

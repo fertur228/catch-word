@@ -1,13 +1,17 @@
 /**
  * Ежедневный квест: «найди и сфотографируй 3 предмета за день».
  *
- * Пул — 200 распознаваемых предметов ([слово, перевод, эмодзи]). Три цели на день
- * выбираются ДЕТЕРМИНИРОВАННО по номеру дня (скользящее окно из 3), поэтому у всех
- * одинаковы, не зависят от рандома и переживают перезапуск; за ~67 дней пул
- * прокручивается целиком. IPA (если есть) подтягивается из RECOGNIZABLE.
+ * Два источника целей:
+ * 1. АГЕНТ (таблица daily_quests) — ночной агент-тренер персонально выбирает
+ *    3 цели под коллекцию человека (слабые/просроченные слова) и пишет короткое
+ *    сообщение тренера. См. supabase/functions/quest-agent + fetchAgentQuests().
+ * 2. СТАТИЧЕСКИЙ ПУЛ (фолбэк) — 200 предметов ([слово, перевод, эмодзи]), три
+ *    цели ДЕТЕРМИНИРОВАННО по номеру дня, одинаковы у всех. Показывается
+ *    мгновенно и остаётся, если агент ночью не отработал или пользователь гость.
  * Прогресс (какие из 3 найдены) и серия хранятся в key_value (см. collection-context).
  */
 import { RECOGNIZABLE } from '@/lib/mock-data';
+import { supabase } from '@/lib/supabase';
 
 const DAY_MS = 86_400_000;
 
@@ -169,6 +173,51 @@ export function getDailyQuests(): DailyQuest[] {
     out.push(buildQuest(QUEST_POOL[(idx * QUEST_TARGETS + k) % n], idx));
   }
   return out;
+}
+
+/** План дня от ночного агента-тренера (или null, если агент не отработал). */
+export interface AgentQuestPlan {
+  quests: DailyQuest[];
+  coachMessage: string | null;
+}
+
+/**
+ * Персональный квест из daily_quests (составлен ночным агентом). RLS пускает
+ * только к своей строке. Любая проблема (нет строки, сеть, кривые данные) →
+ * null, и вызывающий остаётся на статическом пуле — пользователь ошибку
+ * не видит никогда.
+ */
+export async function fetchAgentQuests(userId: string): Promise<AgentQuestPlan | null> {
+  try {
+    const { data, error } = await supabase
+      .from('daily_quests')
+      .select('quests, coach_message')
+      .eq('user_id', userId)
+      .eq('day_index', todayIndex())
+      .maybeSingle();
+    if (error || !data) return null;
+    const raw = Array.isArray(data.quests) ? (data.quests as Partial<DailyQuest>[]) : [];
+    const idx = todayIndex();
+    const quests: DailyQuest[] = raw
+      .filter((q) => typeof q?.word === 'string' && q.word.trim() && typeof q?.translation === 'string')
+      .map((q) => ({
+        word: q.word!.trim(),
+        emoji: typeof q.emoji === 'string' && q.emoji ? q.emoji : '❓',
+        translation: q.translation!.trim(),
+        category: q.category ?? null,
+        ipa: q.ipa ?? '',
+        dayIndex: idx,
+      }));
+    if (quests.length !== QUEST_TARGETS) return null;
+    return {
+      quests,
+      coachMessage: typeof data.coach_message === 'string' && data.coach_message.trim()
+        ? data.coach_message.trim()
+        : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Нормализация для сравнения: нижний регистр, без артикля, схлопнутые пробелы. */

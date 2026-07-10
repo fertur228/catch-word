@@ -34,7 +34,7 @@ export function QuestBanner() {
   const theme = useTheme();
   const t = useT();
   const reduce = useReduceMotion();
-  const { dailyQuests, questFoundWords, questProgress, questDoneToday, questStreak } = useCollection();
+  const { dailyQuests, coachMessage, questFoundWords, questProgress, questDoneToday, questStreak } = useCollection();
   const [open, setOpen] = useState(false);
   const total = dailyQuests.length;
 
@@ -123,6 +123,7 @@ export function QuestBanner() {
         visible={open}
         onClose={() => setOpen(false)}
         quests={dailyQuests}
+        coachMessage={coachMessage}
         found={questFoundWords}
         progress={questProgress}
         total={total}
@@ -146,6 +147,7 @@ function QuestDetailSheet({
   visible,
   onClose,
   quests,
+  coachMessage,
   found,
   progress,
   total,
@@ -155,6 +157,7 @@ function QuestDetailSheet({
   visible: boolean;
   onClose: () => void;
   quests: DailyQuest[];
+  coachMessage: string | null;
   found: string[];
   progress: number;
   total: number;
@@ -193,6 +196,17 @@ function QuestDetailSheet({
               {t('Прогресс:')} {progress}/{total}
             </ThemedText>
           </View>
+
+          {/* Сообщение ночного агента-тренера: почему сегодня именно эти цели.
+              Есть только у персонального квеста; статический пул идёт без него. */}
+          {coachMessage ? (
+            <View style={[styles.coach, { backgroundColor: theme.primarySoft }]}>
+              <Icon name="sparkles" size={16} color={theme.primary} />
+              <ThemedText type="small" style={styles.coachText}>
+                {coachMessage}
+              </ThemedText>
+            </View>
+          ) : null}
 
           {/* Три цели: эмодзи + перевод/слово + галочка, если поймана. */}
           <View style={styles.targets}>
@@ -359,6 +373,15 @@ const styles = StyleSheet.create({
   },
   eyebrow: { letterSpacing: 0.6, fontWeight: '700' },
   qTitle: { textAlign: 'center' },
+
+  coach: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: Radius.md,
+  },
+  coachText: { flex: 1, lineHeight: 18 },
 
   targets: { gap: Spacing.two },
   targetRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },

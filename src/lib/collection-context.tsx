@@ -27,7 +27,7 @@ import {
   pushCard,
   uploadSticker,
 } from '@/lib/cloud-sync';
-import { getDailyQuests, matchesQuest, todayIndex, type DailyQuest } from '@/lib/daily-quest';
+import { fetchAgentQuests, getDailyQuests, matchesQuest, todayIndex, type DailyQuest } from '@/lib/daily-quest';
 import { LEARNING_LANG, NATIVE_LANG } from '@/lib/mock-data';
 import { computeNextReview, freshSrs, isDue, isMastered } from '@/lib/srs';
 import type { CollectionStats, SrsRating, UserPrefs, WordCard } from '@/types';
@@ -123,6 +123,8 @@ interface CollectionContextValue {
   // --- Ежедневный квест (найти 3 предмета за день) ---
   /** Три сегодняшние цели (что найти и сфотографировать). */
   dailyQuests: DailyQuest[];
+  /** Сообщение ночного агента-тренера (почему сегодня эти цели); null — квест из статического пула. */
+  coachMessage: string | null;
   /** Слова целей, которые уже найдены сегодня. */
   questFoundWords: string[];
   /** Сколько из целей найдено сегодня (0..3). */
@@ -508,8 +510,29 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     [cards, userId],
   );
 
-  // Три сегодняшние цели квеста (стабильны в течение сессии).
-  const dailyQuests = useMemo(() => getDailyQuests(), []);
+  // Три сегодняшние цели квеста. Статический пул показывается МГНОВЕННО;
+  // если ночной агент-тренер уже составил персональный план (daily_quests),
+  // он тихо подменяет пул вместе с сообщением тренера. Агент не отработал /
+  // гость / сеть упала → остаёмся на пуле, пользователь разницы не видит.
+  // План храним вместе с uid: при выходе/смене аккаунта он просто перестаёт
+  // подходить (производное значение), сбрасывать состояние не нужно.
+  const staticQuests = useMemo(() => getDailyQuests(), []);
+  const [agentPlan, setAgentPlan] = useState<{ uid: string; quests: DailyQuest[]; coach: string | null } | null>(null);
+  useEffect(() => {
+    if (!userId) return;
+    let alive = true;
+    fetchAgentQuests(userId)
+      .then((plan) => {
+        if (alive && plan) setAgentPlan({ uid: userId, quests: plan.quests, coach: plan.coachMessage });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [userId]);
+  const agentActive = agentPlan !== null && agentPlan.uid === userId;
+  const dailyQuests = agentActive ? agentPlan.quests : staticQuests;
+  const coachMessage = agentActive ? agentPlan.coach : null;
 
   const completeQuestForWord = useCallback(
     async (cand: {
@@ -630,6 +653,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       dueCards,
       reviewCard,
       dailyQuests,
+      coachMessage,
       questFoundWords: questFound.day === today ? questFound.words : [],
       questProgress: questFound.day === today ? questFound.words.length : 0,
       questDoneToday: questLastDay === today,
@@ -663,6 +687,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     dueCards,
     reviewCard,
     dailyQuests,
+    coachMessage,
     questFound,
     questLastDay,
     questStreak,
