@@ -469,14 +469,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
   const todayIdx = Math.floor(Date.now() / DAY_MS);
 
-  if (body.mode === 'debug') {
-    if (!body.user_id) return json({ error: 'user_id required in debug mode' }, 400);
+  // 'user' — рабочий режим ночного fan-out (pg_cron шлёт ПО ОДНОМУ запросу на
+  // юзера, см. миграцию); 'debug' — то же самое руками, + поддержка dry_run.
+  // Один юзер на запрос — принципиально: батч всех в одном запросе упирается
+  // в WORKER_RESOURCE_LIMIT edge-воркера (проверено 10.07.2026).
+  if (body.mode === 'debug' || body.mode === 'user') {
+    if (!body.user_id) return json({ error: 'user_id required' }, 400);
     const dayIndex = Number.isFinite(Number(body.day_index)) ? Number(body.day_index) : todayIdx;
     const res = await runAgentForUser(admin, String(body.user_id), dayIndex, body.dry_run === true);
-    return json({ mode: 'debug', day_index: dayIndex, dry_run: body.dry_run === true, ...res });
+    return json({ mode: body.mode, day_index: dayIndex, dry_run: body.dry_run === true, ...res });
   }
 
-  // cron: квест на СЛЕДУЮЩИЙ UTC-день (22:00 UTC = уже завтра в Алматы).
+  // cron: ЗАПАСНОЙ последовательный режим для ручного прогона малых баз.
+  // На проде НЕ используется — там fan-out по одному юзеру (см. выше).
   const dayIndex = todayIdx + 1;
   // Только активные: есть хотя бы одна карточка (не жжём токены на пустых).
   const { data: users, error } = await admin

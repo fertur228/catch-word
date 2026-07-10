@@ -79,8 +79,11 @@ create policy "read own daily quest"
 
 -- ── Ночное расписание ──────────────────────────────────────────────────
 -- 22:00 UTC = 03:00 в Алматы (UTC+5): агент работает, пока когорта спит.
--- Функция при mode=cron пишет квест на СЛЕДУЮЩИЙ UTC-день (day_index+1),
--- потому что для Алматы этот «следующий» день уже наступил.
+-- Квест пишется на СЛЕДУЮЩИЙ UTC-день (day_index+1): для Алматы он уже наступил.
+--
+-- FAN-OUT: по ОДНОМУ асинхронному запросу на юзера (pg_net шлёт параллельно).
+-- Батч «все юзеры в одном запросе» падает с WORKER_RESOURCE_LIMIT — edge-воркер
+-- не переживает ~10 последовательных LLM-циклов (проверено на проде 10.07.2026).
 select cron.schedule(
   'quest-agent-nightly',
   '0 22 * * *',
@@ -94,8 +97,13 @@ select cron.schedule(
         where name = 'quest_agent_secret'
       )
     ),
-    body    := jsonb_build_object('mode', 'cron'),
-    timeout_milliseconds := 300000
-  );
+    body    := jsonb_build_object(
+      'mode', 'user',
+      'user_id', u.user_id::text,
+      'day_index', (floor(extract(epoch from now()) * 1000 / 86400000))::int + 1
+    ),
+    timeout_milliseconds := 120000
+  )
+  from (select distinct user_id from public.word_cards) u;
   $$
 );
