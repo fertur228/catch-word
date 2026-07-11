@@ -389,6 +389,12 @@ verify_jwt = false
 [functions.quest-agent]
 verify_jwt = false
 
+# Оценка открытых ответов: пользовательская функция, JWT проверяет шлюз.
+# ВАЖНО: verify_jwt пропускает и anon-ключ — роль 'authenticated' функция
+# проверяет сама и отвечает 401 (гость получает локальную проверку на клиенте).
+[functions.grade-answer]
+verify_jwt = true
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.
