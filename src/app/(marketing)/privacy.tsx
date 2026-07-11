@@ -27,13 +27,14 @@ const CONTENT: Record<Locale, { title: string; updated: string; sections: LegalS
           'Аккаунт: при входе через Apple или Google мы получаем ваш email и идентификатор аккаунта, а также имя, если вы решили им поделиться, — чтобы сохранять и синхронизировать вашу коллекцию слов между устройствами. Если вы используете «Скрыть e-mail» от Apple, мы работаем с его релейным адресом.',
           'Фотографии: снимок предмета отправляется на наш сервер распознавания только для того, чтобы определить слово. Мы не используем его для рекламы и не публикуем.',
           'Учебные данные: слова, переводы, прогресс повторений и (по желанию) вырезанные изображения предметов.',
+          'Ответы в упражнениях: результаты повторений и тексты ваших ответов в заданиях (например, диктант или составленное предложение) сохраняются, чтобы подстраивать тренировки под вас. В голосовых заданиях распознавание речи выполняет ваш браузер — аудио может обрабатываться в облаке его разработчика; мы получаем только готовый текст.',
           'Подписка: если вы оформляете Premium, мы получаем статус подписки (активна, пробный период или истекла). Данные банковской карты мы не получаем — оплата полностью проходит на стороне Apple.',
         ],
       },
       {
         h: 'Как мы используем данные',
         p: [
-          'Чтобы распознавать предметы, формировать карточки, озвучивать слова и напоминать о повторении.',
+          'Чтобы распознавать предметы, формировать карточки, озвучивать слова и подстраивать тренировки под ваш прогресс.',
           'Чтобы синхронизировать вашу коллекцию между телефоном и браузером, когда вы вошли в аккаунт.',
           'Чтобы предоставлять и учитывать доступ к платным функциям Premium.',
         ],
@@ -97,13 +98,14 @@ const CONTENT: Record<Locale, { title: string; updated: string; sections: LegalS
           'Account: when you sign in with Apple or Google, we receive your email address and an account identifier, and your name if you choose to share it — so we can save and sync your word collection across devices. If you use Apple’s “Hide My Email,” we work with Apple’s relay address.',
           'Photos: a photo of an object is sent to our recognition server solely to identify the word. We do not use it for advertising and do not publish it.',
           'Learning data: words, translations, review progress, and (optionally) cut-out images of objects.',
+          'Exercise answers: your review results and the text of your answers in exercises (such as dictation or a sentence you write) are stored so we can tailor your training. In speaking exercises, speech recognition is performed by your browser — audio may be processed in its vendor’s cloud; we only receive the resulting text.',
           'Subscription: if you purchase Premium, we receive your subscription status (active, trial, or expired). We do not receive your payment card details — payment is handled entirely by Apple.',
         ],
       },
       {
         h: 'How we use data',
         p: [
-          'To recognize objects, build cards, pronounce words, and remind you to review.',
+          'To recognize objects, build cards, pronounce words, and tailor your training to your progress.',
           'To sync your collection between your phone and browser when you are signed in.',
           'To provide and manage access to paid Premium features.',
         ],
