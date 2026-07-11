@@ -22,6 +22,7 @@ import type { SFSymbol } from 'expo-symbols';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
+  withRepeat,
   withSequence,
   withSpring,
   withTiming,
@@ -48,8 +49,15 @@ import { useTheme } from '@/hooks/use-theme';
 import { useCollection } from '@/lib/collection-context';
 import { feedbackCorrect, feedbackTap, feedbackWrong } from '@/lib/feedback';
 import { getLang, useT } from '@/lib/i18n';
-import { speakWord } from '@/lib/speech';
-import { buildQuiz, type QuizKind, type QuizQuestion } from '@/lib/quiz';
+import { gradeAnswer, type GradeVerdict } from '@/lib/grade';
+import { hasVoiceForLang, speakWord } from '@/lib/speech';
+import {
+  buildQuiz,
+  checkDictation,
+  dictationSentence,
+  type QuizKind,
+  type QuizQuestion,
+} from '@/lib/quiz';
 import { buildSessionQueue, computeNextReview, hasReviewWork } from '@/lib/srs';
 import { todayIndex } from '@/lib/daily-quest';
 import { flushReviewEvents, logReviewEvent } from '@/lib/telemetry';
@@ -59,17 +67,27 @@ import type { SrsRating, WordCard } from '@/types';
 const MAX_SESSION = 20;
 /** Сколько недель показываем в карте активности (совпадает с подписью «N недель»). */
 const REVIEW_WEEKS = 18;
-/** Цвета иконок-плиток режимов (как в дизайне): оранж / синий / бирюза / фиолет. */
-const MODE_TILE = { flash: '#FF9500', listen: '#0A84FF', sentence: '#2FB8A8', smart: '#AF52DE' };
+/** Цвета иконок-плиток режимов (как в дизайне): оранж / синий / бирюза / фиолет
+ *  + индиго «Диктант» и роза «Напиши сам» — задания тренера (Э2, спека B.3). */
+const MODE_TILE = {
+  flash: '#FF9500',
+  listen: '#0A84FF',
+  sentence: '#2FB8A8',
+  smart: '#AF52DE',
+  dictation: '#5856D6',
+  write: '#FF2D55',
+};
 /** Этапы сессии. */
 type Phase = 'intro' | 'flashcards' | 'test' | 'summary';
 /** Режим тренировки, выбранный на интро-экране. */
-type Mode = 'flashcards' | 'smart' | 'listen' | 'sentence';
+type Mode = 'flashcards' | 'smart' | 'listen' | 'sentence' | 'dictation' | 'write';
 
 /** Фиксированный формат вопроса для режима (undefined = адаптивный «Умный тест»). */
 function forceKindFor(m: Mode): QuizKind | undefined {
   if (m === 'listen') return 'audioToWord';
   if (m === 'sentence') return 'clozeExample';
+  if (m === 'dictation') return 'dictation';
+  if (m === 'write') return 'writeSentence';
   return undefined;
 }
 
@@ -81,6 +99,16 @@ function pluralWords(n: number): string {
   if (b === 1) return 'слово';
   if (b > 1 && b < 5) return 'слова';
   return 'слов';
+}
+
+/** Склонение слова «режим» по числу (1 режим / 2 режима / 5 режимов). */
+function pluralModes(n: number): string {
+  const a = Math.abs(n) % 100;
+  const b = a % 10;
+  if (a > 10 && a < 20) return 'режимов';
+  if (b === 1) return 'режим';
+  if (b > 1 && b < 5) return 'режима';
+  return 'режимов';
 }
 
 /** Склонение слова «день» по числу (1 день / 2 дня / 5 дней). */
@@ -147,6 +175,30 @@ export function ReviewSessionScreen() {
   const [typed, setTyped] = useState('');
   const [typeChecked, setTypeChecked] = useState<boolean | null>(null);
 
+  // --- Открытые ответы (движок v2, Э2): «Диктант» и «Напиши сам» ---
+  // Диктант: локальный вердикт + фидбек тренера (подтягивается только на ошибке).
+  const [dictResult, setDictResult] = useState<'correct' | 'partial' | 'wrong' | null>(null);
+  const [dictNote, setDictNote] = useState<{ corrected: string; feedback: string } | null>(null);
+  const [dictGradeFailed, setDictGradeFailed] = useState(false);
+  // «Напиши сам»: input → grading («Тренер читает…») → done (фидбек или фолбэк).
+  const [writePhase, setWritePhase] = useState<'input' | 'grading' | 'done'>('input');
+  const [writeVerdict, setWriteVerdict] = useState<GradeVerdict | null>(null);
+  const [writeNote, setWriteNote] = useState<{ corrected: string; feedback: string } | null>(null);
+  const [writeFallback, setWriteFallback] = useState<'auth' | 'limit' | 'unavailable' | null>(null);
+  // Кап проверок тренера исчерпан посреди сессии → ОДИН апселл на итоге (B.2).
+  const [limitHit, setLimitHit] = useState(false);
+  // Ответы, оставшиеся без оценки (фолбэки) — не считаем в точность итога.
+  const [ungraded, setUngraded] = useState(0);
+  // corrected/feedback тренера по карточкам — для разбора ошибок на итоге (B.6).
+  const [coachNotes, setCoachNotes] = useState<Map<string, { corrected: string; feedback: string }>>(
+    () => new Map(),
+  );
+  // Токен «актуальности» асинхронной оценки: перешли к следующему вопросу или
+  // сменили сессию — поздний ответ тренера не должен перерисовать чужой вопрос.
+  const gradeTokenRef = useRef(0);
+  // Есть ли TTS-голос изучаемого языка (гейт плитки «Диктант», B.3).
+  const [voiceOk, setVoiceOk] = useState(true);
+
   // Слова, которые не дались в этой сессии (тест — неверный ответ, карточки —
   // оценка «Забыл»). Используем для блока «Разбор ошибок» и кнопки «Повторить
   // ошибки» на экране итога. Дедуплицируем по id.
@@ -202,12 +254,25 @@ export function ReviewSessionScreen() {
     }
   }, [phase, revealed, current]);
 
-  // Аудио-вопрос в тесте: проигрываем слово сразу при появлении вопроса.
+  // Аудио-вопрос в тесте: проигрываем сразу при появлении вопроса. «Диктант»
+  // озвучивает ЦЕЛОЕ предложение с ключевым словом (B.4), остальные — слово.
   useEffect(() => {
     if (phase !== 'test' || !quiz) return;
     const q = quiz[qIndex];
-    if (q && q.promptMode === 'audio') speakWord(q.card.word, q.card.learningLang);
+    if (!q || q.promptMode !== 'audio') return;
+    speakWord(q.kind === 'dictation' ? dictationSentence(q.card) : q.card.word, q.card.learningLang);
   }, [phase, qIndex, quiz]);
+
+  // TTS-детект для «Диктанта» (B.3): один раз на интро; сменили курс — заново.
+  useEffect(() => {
+    let alive = true;
+    hasVoiceForLang(prefs.learningLang).then((ok) => {
+      if (alive) setVoiceOk(ok);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [prefs.learningLang]);
 
   // Идеальная сессия (без ошибок) достаточной длины → празднование-модалка.
   useEffect(() => {
@@ -250,7 +315,13 @@ export function ReviewSessionScreen() {
     (
       card: WordCard,
       kind: string,
-      data: { correct?: boolean | null; rating?: string | null; answer?: string | null },
+      data: {
+        correct?: boolean | null;
+        rating?: string | null;
+        answer?: string | null;
+        /** Оценка ИИ-тренера 0..1 (открытые ответы, Э2); null — без оценки. */
+        score?: number | null;
+      },
     ) => {
       logReviewEvent({
         cardId: card.id ?? null,
@@ -267,6 +338,17 @@ export function ReviewSessionScreen() {
     },
     [mode],
   );
+
+  // Сброс пер-вопросного состояния открытых ответов (диктант / «Напиши сам»).
+  const resetOpenAnswer = useCallback(() => {
+    setDictResult(null);
+    setDictNote(null);
+    setDictGradeFailed(false);
+    setWritePhase('input');
+    setWriteVerdict(null);
+    setWriteNote(null);
+    setWriteFallback(null);
+  }, []);
 
   // Запустить сессию заданного режима по заданной очереди. Сбрасывает всё
   // прогресс-состояние, поэтому годится и для старта, и для «пройти заново».
@@ -287,6 +369,14 @@ export function ReviewSessionScreen() {
       setQueue(q);
       setMode(m);
       setMissed([]);
+      // Хвосты открытых ответов прошлой сессии (Э2): фидбек, кап, «без оценки».
+      gradeTokenRef.current += 1;
+      setCoachNotes(new Map());
+      setLimitHit(false);
+      setUngraded(0);
+      setTyped('');
+      setTypeChecked(null);
+      resetOpenAnswer();
       if (m === 'flashcards') {
         setIndex(0);
         setRevealed(false);
@@ -308,7 +398,7 @@ export function ReviewSessionScreen() {
         setPhase('test');
       }
     },
-    [cards, useTestAttempt, recordTestSession],
+    [cards, useTestAttempt, recordTestSession, resetOpenAnswer],
   );
 
   // --- Пройти ещё раз тем же режимом (свежая очередь) ---
@@ -320,6 +410,7 @@ export function ReviewSessionScreen() {
   // --- Вернуться к выбору режима (свежая очередь) ---
   const onChangeMode = useCallback(() => {
     feedbackTap();
+    gradeTokenRef.current += 1; // поздние ответы тренера уже не актуальны
     setQueue(buildFreshQueue());
     setMissed([]);
     setPhase('intro');
@@ -400,6 +491,7 @@ export function ReviewSessionScreen() {
   const onNextQuestion = useCallback(() => {
     if (!quiz) return;
     qShownAtRef.current = Date.now();
+    gradeTokenRef.current += 1; // фидбек к прошлому вопросу больше не рисуем
     const next = qIndex + 1;
     if (next >= quiz.length) {
       setPhase('summary');
@@ -410,7 +502,8 @@ export function ReviewSessionScreen() {
     setAnswered(false);
     setTyped('');
     setTypeChecked(null);
-  }, [quiz, qIndex]);
+    resetOpenAnswer();
+  }, [quiz, qIndex, resetOpenAnswer]);
 
   // --- «Знакомство» (новое слово): показали → мягко планируем и идём дальше ---
   const onIntroNext = useCallback(async () => {
@@ -446,6 +539,119 @@ export function ReviewSessionScreen() {
     logAnswer(q.card, q.kind, { correct, answer: typed });
     await reviewCard(q.card.id, correct ? 'good' : 'again');
   }, [typeChecked, typed, quiz, qIndex, reviewCard, addMissed, promptShake, logAnswer]);
+
+  // --- «Диктант»: локальная проверка слова; фидбек тренера — только на ошибке ---
+  const onDictationSubmit = useCallback(async () => {
+    if (dictResult !== null || !quiz) return;
+    const q = quiz[qIndex];
+    if (!q || !typed.trim()) return;
+    const verdict = checkDictation(typed, q.card.word);
+    setDictResult(verdict);
+    logAnswer(q.card, q.kind, {
+      correct: verdict === 'correct',
+      answer: typed,
+      score: verdict === 'correct' ? 1 : verdict === 'partial' ? 0.8 : 0,
+    });
+    if (verdict === 'correct') {
+      setScore((s) => s + 1);
+      feedbackCorrect();
+      setBurst((b) => b + 1);
+      await reviewCard(q.card.id, 'good');
+      return;
+    }
+    if (verdict === 'partial') {
+      // «Почти!»: разошлась только диакритика — интервал двигаем, освоение
+      // держим; в missed не попадает и идеальную сессию не ломает (B.2).
+      feedbackTap();
+      await reviewCard(q.card.id, 'good', { holdMastery: true });
+      return;
+    }
+    // wrong: диктант — тоже открытый ответ, без красного шейка и feedbackWrong.
+    // Фидбек добираем у тренера, НЕ блокируя переход к следующему вопросу.
+    feedbackTap();
+    addMissed(q.card);
+    const token = gradeTokenRef.current;
+    const cardId = q.card.id;
+    gradeAnswer({
+      task: 'dictation',
+      word: q.card.word,
+      expected: dictationSentence(q.card),
+      userAnswer: typed,
+      learningLang: q.card.learningLang,
+      nativeLang: q.card.nativeLang,
+    }).then((res) => {
+      if (res.ok) {
+        // corrected пригодится и в разборе ошибок на итоге (B.6, п.4).
+        setCoachNotes((prev) =>
+          new Map(prev).set(cardId, { corrected: res.corrected, feedback: res.feedback }),
+        );
+        if (gradeTokenRef.current === token) {
+          setDictNote({ corrected: res.corrected, feedback: res.feedback });
+        }
+      } else if (gradeTokenRef.current === token) {
+        setDictGradeFailed(true);
+      }
+    });
+    await reviewCard(q.card.id, 'again');
+  }, [dictResult, typed, quiz, qIndex, reviewCard, addMissed, logAnswer]);
+
+  // --- «Напиши сам»: свободное предложение → оценка ИИ-тренера (Э2, B.2) ---
+  const onWriteSubmit = useCallback(async () => {
+    if (writePhase !== 'input' || !quiz) return;
+    const q = quiz[qIndex];
+    if (!q || !typed.trim()) return;
+    const token = gradeTokenRef.current;
+    setWritePhase('grading');
+    const res = await gradeAnswer({
+      task: 'write_sentence',
+      word: q.card.word,
+      userAnswer: typed,
+      learningLang: q.card.learningLang,
+      nativeLang: q.card.nativeLang,
+    });
+    if (gradeTokenRef.current !== token) return; // вопрос/сессию уже сменили
+    setWritePhase('done');
+    if (res.ok) {
+      setWriteVerdict(res.verdict);
+      setWriteNote({ corrected: res.corrected, feedback: res.feedback });
+      logAnswer(q.card, q.kind, { correct: res.verdict === 'correct', answer: typed, score: res.score });
+      if (res.verdict === 'correct') {
+        setScore((s) => s + 1);
+        feedbackCorrect();
+        setBurst((b) => b + 1);
+      } else {
+        // Оценка собственного творчества ≠ промах в угадайке: без feedbackWrong
+        // и красного шейка (эмоциональные правила B.2).
+        feedbackTap();
+        if (res.corrected || res.feedback) {
+          setCoachNotes((prev) =>
+            new Map(prev).set(q.card.id, { corrected: res.corrected, feedback: res.feedback }),
+          );
+        }
+      }
+      // score → SRS (спека Э2): 0.95+ легко · 0.8+ вспомнил · 0.5+ вспомнил без
+      // роста освоения · ниже — «забыл» + разбор ошибок.
+      if (res.score >= 0.95) await reviewCard(q.card.id, 'easy');
+      else if (res.score >= 0.8) await reviewCard(q.card.id, 'good');
+      else if (res.score >= 0.5) await reviewCard(q.card.id, 'good', { holdMastery: true });
+      else {
+        addMissed(q.card);
+        await reviewCard(q.card.id, 'again');
+      }
+      return;
+    }
+    // Фолбэки (B.2): пользователь никогда не застревает и не наказывается.
+    feedbackTap();
+    setWriteFallback(res.reason);
+    setUngraded((u) => u + 1); // без оценки — не считаем в точность итога
+    logAnswer(q.card, q.kind, { answer: typed, score: null });
+    if (res.reason === 'limit') {
+      // Кап проверок посреди сессии: молча принимаем, апселл — раз на итоге.
+      setLimitHit(true);
+      await reviewCard(q.card.id, 'good', { holdMastery: true });
+    }
+    // auth/unavailable: оценки не было — SRS не двигаем.
+  }, [writePhase, typed, quiz, qIndex, reviewCard, addMissed, logAnswer]);
 
   // --- «Скажи вслух»: самооценка (нет объективной проверки до ASR) ---
   const onSpeakRate = useCallback(
@@ -564,8 +770,101 @@ export function ReviewSessionScreen() {
             </View>
           </Reveal>
 
-          {/* Активность (гитхаб-карта) */}
-          <Reveal delay={140}>
+          {/* Задания тренера — открытые ответы с ИИ-оценкой (Э2, B.1/B.3).
+              Free после исчерпания: запертые режимы свёрнуты в один блок ниже. */}
+          {!testsExhausted ? (
+            <>
+              <Reveal delay={140}>
+                <ThemedText type="small" themeColor="textSecondary" style={styles.sectionLabel}>
+                  {t('ЗАДАНИЯ ТРЕНЕРА')}
+                </ThemedText>
+              </Reveal>
+              <View style={styles.modeList}>
+                <Reveal delay={160}>
+                  <ModeCard
+                    icon="ear"
+                    color={MODE_TILE.dictation}
+                    title={t('Диктант')}
+                    subtitle={voiceOk ? t('Услышь и напиши') : t('Голос для языка не установлен')}
+                    disabled={!voiceOk}
+                    onPress={() => startWith('dictation', queue)}
+                  />
+                </Reveal>
+                <Reveal delay={190}>
+                  <ModeCard
+                    icon="pencil.line"
+                    color={MODE_TILE.write}
+                    title={t('Напиши сам')}
+                    subtitle={t('Составь своё предложение')}
+                    onPress={() => startWith('write', queue)}
+                  />
+                </Reveal>
+              </View>
+            </>
+          ) : null}
+
+          {/* Быстрые тесты */}
+          <Reveal delay={220}>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.sectionLabel}>
+              {t('БЫСТРЫЕ ТЕСТЫ')}
+            </ThemedText>
+          </Reveal>
+          <View style={styles.modeList}>
+            <Reveal delay={240}>
+              <ModeCard
+                icon="rectangle.on.rectangle.angled"
+                color={MODE_TILE.flash}
+                title={t('Карточки')}
+                subtitle={t('Фото → слово, перевод и звук')}
+                onPress={() => startWith('flashcards', queue)}
+              />
+            </Reveal>
+            {!testsExhausted ? (
+              <>
+                <Reveal delay={270}>
+                  <ModeCard
+                    icon="speaker.wave.2.fill"
+                    color={MODE_TILE.listen}
+                    title={t('На слух')}
+                    subtitle={t('Слушай слово — выбери ответ')}
+                    onPress={() => startWith('listen', queue)}
+                  />
+                </Reveal>
+                <Reveal delay={300}>
+                  <ModeCard
+                    icon="text.alignleft"
+                    color={MODE_TILE.sentence}
+                    title={t('Слово в предложение')}
+                    subtitle={t('Вставь пропущенное слово')}
+                    onPress={() => startWith('sentence', queue)}
+                  />
+                </Reveal>
+                <Reveal delay={330}>
+                  <ModeCard
+                    icon="sparkles"
+                    color={MODE_TILE.smart}
+                    title={t('Умный тест')}
+                    subtitle={t('10 вопросов, форматы вперемешку')}
+                    onPress={() => startWith('smart', queue)}
+                  />
+                </Reveal>
+              </>
+            ) : (
+              // Один блок вместо шести замков (B.1, п.4): не пугаем пейволлом.
+              <Reveal delay={270}>
+                <PremiumModesCard
+                  count={4 + (voiceOk ? 1 : 0)}
+                  onPress={() => {
+                    feedbackTap();
+                    setLimitSheet(true);
+                  }}
+                />
+              </Reveal>
+            )}
+          </View>
+
+          {/* Карта активности (гитхаб-карта) — ПОД плитками (B.1, п.3) */}
+          <Reveal delay={360}>
             <View style={[styles.activityCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
               <View style={styles.activityHeader}>
                 <ThemedText type="smallBold">{t('Активность')}</ThemedText>
@@ -576,54 +875,6 @@ export function ReviewSessionScreen() {
               <ContributionGrid activityByDay={activityByDay} weeks={REVIEW_WEEKS} />
             </View>
           </Reveal>
-
-          {/* Режимы */}
-          <Reveal delay={170}>
-            <ThemedText type="small" themeColor="textSecondary" style={styles.sectionLabel}>
-              {t('РЕЖИМЫ')}
-            </ThemedText>
-          </Reveal>
-          <View style={styles.modeList}>
-            <Reveal delay={190}>
-              <ModeCard
-                icon="rectangle.on.rectangle.angled"
-                color={MODE_TILE.flash}
-                title={t('Карточки')}
-                subtitle={t('Фото → слово, перевод и звук')}
-                onPress={() => startWith('flashcards', queue)}
-              />
-            </Reveal>
-            <Reveal delay={220}>
-              <ModeCard
-                icon="speaker.wave.2.fill"
-                color={MODE_TILE.listen}
-                title={t('На слух')}
-                subtitle={t('Слушай слово — выбери ответ')}
-                locked={testsExhausted}
-                onPress={() => startWith('listen', queue)}
-              />
-            </Reveal>
-            <Reveal delay={250}>
-              <ModeCard
-                icon="text.alignleft"
-                color={MODE_TILE.sentence}
-                title={t('Слово в предложение')}
-                subtitle={t('Вставь пропущенное слово')}
-                locked={testsExhausted}
-                onPress={() => startWith('sentence', queue)}
-              />
-            </Reveal>
-            <Reveal delay={280}>
-              <ModeCard
-                icon="sparkles"
-                color={MODE_TILE.smart}
-                title={t('Умный тест')}
-                subtitle={t('10 вопросов, форматы вперемешку')}
-                locked={testsExhausted}
-                onPress={() => startWith('smart', queue)}
-              />
-            </Reveal>
-          </View>
         </View>
         <TestLimitSheet
           visible={limitSheet}
@@ -637,9 +888,15 @@ export function ReviewSessionScreen() {
 
   // ===================== ИТОГ =====================
   if (phase === 'summary') {
-    // Точность считаем только по «объективным» вопросам (выбор + впиши):
-    // знакомство и «скажи вслух» не имеют объективного «верно/неверно».
-    const objTotal = quiz?.filter((q) => q.answerMode === 'choice' || q.answerMode === 'type').length ?? 0;
+    // Точность считаем только по «объективным» вопросам: выбор + впиши +
+    // «Напиши сам» (verdict тренера объективен; фолбэки без оценки — ungraded —
+    // в точность не идут). Знакомство и «скажи вслух» — без «верно/неверно».
+    const objTotal = Math.max(
+      0,
+      (quiz?.filter(
+        (q) => q.answerMode === 'choice' || q.answerMode === 'type' || q.answerMode === 'write',
+      ).length ?? 0) - ungraded,
+    );
     const accuracy = objTotal > 0 ? Math.round((score / objTotal) * 100) : null;
     // «Идеально» — сессия без единой ошибки.
     const perfect = missed.length === 0;
@@ -716,12 +973,31 @@ export function ReviewSessionScreen() {
                       <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
                         {card.translation}
                       </ThemedText>
+                      {/* Исправленный вариант тренера (диктант/«Напиши сам») —
+                          главная ценность фидбека, не теряем её на итоге (B.6). */}
+                      {coachNotes.get(card.id)?.corrected ? (
+                        <ThemedText type="small" style={{ color: theme.primary }} numberOfLines={2}>
+                          {t('Тренер:')} {coachNotes.get(card.id)?.corrected}
+                        </ThemedText>
+                      ) : null}
                     </View>
                     <SpeakButton text={card.word} language={card.learningLang} size={36} />
                   </View>
                 ))}
               </View>
               <Button title={`${t('Повторить ошибки')} · ${missed.length}`} icon="arrow.counterclockwise" onPress={onRetryMissed} />
+            </Reveal>
+          ) : null}
+
+          {/* Кап проверок тренера исчерпан по ходу сессии → один апселл здесь,
+              а не посреди ритма (B.2). */}
+          {limitHit ? (
+            <Reveal delay={270}>
+              <Pressable onPress={onLimitPremium} accessibilityRole="button">
+                <ThemedText type="small" style={[styles.centerText, { color: theme.gold }]}>
+                  {t('Лимит проверок на сегодня — Premium снимает')}
+                </ThemedText>
+              </Pressable>
             </Reveal>
           ) : null}
 
@@ -788,9 +1064,22 @@ export function ReviewSessionScreen() {
         {/* Салют за верный ответ (поверх всего, не ловит нажатия). */}
         <Confetti trigger={burst} originTop="26%" count={16} />
 
-        {/* Знакомство / впиши слово / скажи вслух — свои тела. */}
+        {/* Знакомство / впиши / диктант / напиши сам / скажи вслух — свои тела. */}
         {q.answerMode === 'intro' ? (
           <IntroBody card={q.card} onNext={onIntroNext} />
+        ) : q.answerMode === 'type' && q.kind === 'dictation' ? (
+          <DictationBody
+            key={q.id}
+            card={q.card}
+            typed={typed}
+            onChange={setTyped}
+            result={dictResult}
+            note={dictNote}
+            gradeFailed={dictGradeFailed}
+            onSubmit={onDictationSubmit}
+            onNext={onNextQuestion}
+            last={qIndex + 1 >= total}
+          />
         ) : q.answerMode === 'type' ? (
           <TypeBody
             card={q.card}
@@ -801,6 +1090,20 @@ export function ReviewSessionScreen() {
             onNext={onNextQuestion}
             last={qIndex + 1 >= total}
             shakeStyle={promptShakeStyle}
+          />
+        ) : q.answerMode === 'write' ? (
+          <WriteBody
+            key={q.id}
+            card={q.card}
+            typed={typed}
+            onChange={setTyped}
+            phase={writePhase}
+            verdict={writeVerdict}
+            note={writeNote}
+            fallback={writeFallback}
+            onSubmit={onWriteSubmit}
+            onNext={onNextQuestion}
+            last={qIndex + 1 >= total}
           />
         ) : q.answerMode === 'speak' ? (
           <SpeakBody key={q.id} card={q.card} onRate={onSpeakRate} />
@@ -1086,7 +1389,7 @@ function ModeCard({
   subtitle,
   color,
   onPress,
-  locked = false,
+  disabled = false,
 }: {
   icon: SFSymbol;
   title: string;
@@ -1094,11 +1397,60 @@ function ModeCard({
   /** Цвет иконки-плитки слева (как в дизайне). */
   color: string;
   onPress: () => void;
-  locked?: boolean;
+  /** Режим недоступен (например, нет TTS-голоса): приглушён и не нажимается. */
+  disabled?: boolean;
 }) {
   const theme = useTheme();
   const scale = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      onPressIn={() => (scale.value = withSpring(Motion.scalePressed, Motion.spring.stiff))}
+      onPressOut={() => (scale.value = withSpring(1, Motion.spring.bouncy))}>
+      <Animated.View
+        style={[
+          styles.modeCard,
+          { backgroundColor: theme.card, borderColor: theme.border, borderWidth: 1 },
+          disabled ? { opacity: 0.55 } : null,
+          animStyle,
+        ]}>
+        <View style={[styles.modeIcon, { backgroundColor: color }]}>
+          <Icon name={icon} size={22} color="#FFFFFF" />
+        </View>
+        <View style={styles.modeText}>
+          <ThemedText type="default" style={styles.modeTitle}>
+            {title}
+          </ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            {subtitle}
+          </ThemedText>
+        </View>
+        <Icon name="chevron.right" size={20} color={theme.textSecondary} />
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+/**
+ * Один блок «Ещё N режимов — Premium» вместо чипов-замков на каждой плитке
+ * (B.1, п.4): free после исчерпания дневного теста видит свёрнутые режимы и
+ * мягкий путь к Premium через существующий лист лимита.
+ */
+function PremiumModesCard({ count, onPress }: { count: number; onPress: () => void }) {
+  const theme = useTheme();
+  const t = useT();
+  const scale = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const title =
+    getLang() === 'en'
+      ? `${count} more modes — Premium`
+      : `Ещё ${count} ${pluralModes(count)} — Premium`;
 
   return (
     <Pressable
@@ -1113,27 +1465,18 @@ function ModeCard({
           { backgroundColor: theme.card, borderColor: theme.border, borderWidth: 1 },
           animStyle,
         ]}>
-        <View style={[styles.modeIcon, { backgroundColor: color }]}>
-          <Icon name={icon} size={22} color="#FFFFFF" />
+        <View style={[styles.modeIcon, { backgroundColor: theme.goldSoft }]}>
+          <Icon name="lock.fill" size={22} color={theme.gold} />
         </View>
         <View style={styles.modeText}>
           <ThemedText type="default" style={styles.modeTitle}>
             {title}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            {subtitle}
+            {t('Тесты на сегодня пройдены')}
           </ThemedText>
         </View>
-        {locked ? (
-          <View style={[styles.lockChip, { backgroundColor: theme.goldSoft }]}>
-            <Icon name="lock.fill" size={12} color={theme.gold} />
-            <ThemedText type="small" style={[styles.lockChipText, { color: theme.gold }]}>
-              Premium
-            </ThemedText>
-          </View>
-        ) : (
-          <Icon name="chevron.right" size={20} color={theme.textSecondary} />
-        )}
+        <Icon name="chevron.right" size={20} color={theme.textSecondary} />
       </Animated.View>
     </Pressable>
   );
@@ -1535,6 +1878,364 @@ function SpeakBody({ card, onRate }: { card: WordCard; onRate: (r: SrsRating) =>
   );
 }
 
+/**
+ * «Диктант» (Э2, спека B.4): услышь предложение → впиши ключевое слово.
+ * Прослушивание без ограничений (обычная + «черепаха»), ввод — паттерн TypeBody.
+ * Открытый ответ: без красного шейка; после ЛЮБОГО исхода показываем полное
+ * предложение с выделенным словом — иначе из ошибки нечему учиться.
+ */
+function DictationBody({
+  card,
+  typed,
+  onChange,
+  result,
+  note,
+  gradeFailed,
+  onSubmit,
+  onNext,
+  last,
+}: {
+  card: WordCard;
+  typed: string;
+  onChange: (s: string) => void;
+  result: 'correct' | 'partial' | 'wrong' | null;
+  note: { corrected: string; feedback: string } | null;
+  gradeFailed: boolean;
+  onSubmit: () => void;
+  onNext: () => void;
+  last: boolean;
+}) {
+  const theme = useTheme();
+  const t = useT();
+  const answered = result !== null;
+  const sentence = dictationSentence(card);
+  const borderColor = !answered
+    ? theme.border
+    : result === 'correct'
+      ? theme.success
+      : result === 'partial'
+        ? theme.warning
+        : theme.danger;
+
+  return (
+    <>
+      <Reveal distance={16} style={styles.testBody}>
+        <View style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={[styles.promptTag, { backgroundColor: theme.primarySoft }]}>
+            <ThemedText type="smallBold" style={{ color: theme.primary }}>
+              {t('Услышь и напиши слово')}
+            </ThemedText>
+          </View>
+          {/* Слушаем ЦЕЛОЕ предложение: обычная скорость + «черепаха» (B.4). */}
+          <View style={styles.audioPrompt}>
+            <SpeakButton text={sentence} language={card.learningLang} size={96} />
+            <SpeakButton text={sentence} language={card.learningLang} size={44} slow />
+          </View>
+          {/* Без autoFocus: на мобильном вебе он «прыгает» вьюпортом (B.7). */}
+          <TextInput
+            value={typed}
+            onChangeText={onChange}
+            editable={!answered}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder={t('Впиши слово')}
+            placeholderTextColor={theme.textSecondary}
+            returnKeyType="done"
+            onSubmitEditing={() => {
+              if (!answered && typed.trim()) onSubmit();
+            }}
+            style={[styles.typeInput, { borderColor, color: theme.text, backgroundColor: theme.backgroundElement }]}
+          />
+          {answered ? (
+            <>
+              <View style={styles.typeResultRow}>
+                {result === 'correct' ? (
+                  <>
+                    <Icon name="checkmark.circle.fill" size={18} color={theme.success} />
+                    <ThemedText type="smallBold" style={{ color: theme.success }}>
+                      {t('Верно!')}
+                    </ThemedText>
+                  </>
+                ) : result === 'partial' ? (
+                  // «Почти!» — янтарный штамп, НЕ красный: разошлась диакритика.
+                  <>
+                    <Icon name="exclamationmark.triangle.fill" size={18} color={theme.warning} />
+                    <ThemedText type="smallBold" style={{ color: theme.warning }}>
+                      {t('Почти!')}
+                    </ThemedText>
+                  </>
+                ) : (
+                  <>
+                    <Icon name="xmark.circle.fill" size={18} color={theme.danger} />
+                    <ThemedText type="smallBold" style={{ color: theme.danger }}>
+                      {card.word}
+                    </ThemedText>
+                  </>
+                )}
+                <SpeakButton text={card.word} language={card.learningLang} size={38} />
+              </View>
+              {result === 'partial' ? (
+                <ThemedText type="small" style={[styles.centerText, { color: theme.warning }]}>
+                  {t('Проверь умляут/акцент')}
+                </ThemedText>
+              ) : null}
+              {/* Полное предложение с выделенным словом — обязательно (B.4). */}
+              <View style={[styles.example, { backgroundColor: theme.backgroundElement }]}>
+                <HighlightedSentence sentence={sentence} word={card.word} />
+              </View>
+            </>
+          ) : null}
+        </View>
+
+        {/* Фидбек тренера на ошибке (подтягивается неблокирующе). */}
+        {result === 'wrong' && note ? (
+          <OpenAnswerFeedback corrected={note.corrected} feedback={note.feedback} lang={card.learningLang} />
+        ) : null}
+        {result === 'wrong' && gradeFailed ? (
+          <FadeIn>
+            <View style={[styles.fallbackPlate, { backgroundColor: theme.backgroundElement }]}>
+              <Icon name="info.circle.fill" size={16} color={theme.textSecondary} />
+              <ThemedText type="small" themeColor="textSecondary" style={styles.fallbackText}>
+                {t('Тренер недоступен — засчитано локально')}
+              </ThemedText>
+            </View>
+          </FadeIn>
+        ) : null}
+      </Reveal>
+      <View style={styles.footer}>
+        {answered ? (
+          <FadeIn key="next">
+            <Button title={last ? t('Завершить') : t('Дальше')} icon="arrow.right" onPress={onNext} />
+          </FadeIn>
+        ) : (
+          <Button title={t('Проверить')} icon="checkmark" onPress={onSubmit} disabled={!typed.trim()} />
+        )}
+      </View>
+    </>
+  );
+}
+
+/**
+ * «Напиши сам» (Э2, спека B.2): своё предложение со словом → оценка ИИ-тренера.
+ * Ожидание оценки — «переходное» состояние (ответ ученика крупно + «Тренер
+ * читает…» с мягкой пульсацией), не голый спиннер. Красного шейка и
+ * feedbackWrong тут не бывает — оценка творчества, не промах в угадайке.
+ */
+function WriteBody({
+  card,
+  typed,
+  onChange,
+  phase,
+  verdict,
+  note,
+  fallback,
+  onSubmit,
+  onNext,
+  last,
+}: {
+  card: WordCard;
+  typed: string;
+  onChange: (s: string) => void;
+  phase: 'input' | 'grading' | 'done';
+  verdict: GradeVerdict | null;
+  note: { corrected: string; feedback: string } | null;
+  fallback: 'auth' | 'limit' | 'unavailable' | null;
+  onSubmit: () => void;
+  onNext: () => void;
+  last: boolean;
+}) {
+  const theme = useTheme();
+  const t = useT();
+  // Пульсация строки «Тренер читает…» (Reveal/withTiming — спека B.2).
+  const pulse = useSharedValue(1);
+  useEffect(() => {
+    if (phase === 'grading') {
+      pulse.value = withRepeat(withTiming(0.35, { duration: 650 }), -1, true);
+    } else {
+      pulse.value = withTiming(1, { duration: 150 });
+    }
+  }, [phase, pulse]);
+  const pulseStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+
+  return (
+    <>
+      <Reveal distance={16} style={styles.testBody}>
+        <View style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={[styles.promptTag, { backgroundColor: theme.primarySoft }]}>
+            <ThemedText type="smallBold" style={{ color: theme.primary }}>
+              {t('Составь своё предложение')}
+            </ThemedText>
+          </View>
+          <View style={styles.promptWordRow}>
+            <ThemedText type="title" numberOfLines={2} adjustsFontSizeToFit style={styles.promptWord}>
+              {card.word}
+            </ThemedText>
+            <SpeakButton text={card.word} language={card.learningLang} />
+          </View>
+          <ThemedText type="small" themeColor="textSecondary">
+            {card.translation}
+          </ThemedText>
+          {phase === 'input' ? (
+            // БЕЗ autoFocus — прыжок вьюпорта на iOS Safari (B.7). На веб-
+            // клавиатуре отправка — Cmd/Ctrl+Enter или кнопка «Проверить».
+            <TextInput
+              value={typed}
+              onChangeText={onChange}
+              multiline
+              autoCapitalize="sentences"
+              autoCorrect={false}
+              placeholder={t('Напиши предложение с этим словом…')}
+              placeholderTextColor={theme.textSecondary}
+              onKeyPress={(e) => {
+                const ne = e.nativeEvent as { key?: string; metaKey?: boolean; ctrlKey?: boolean };
+                if (ne.key === 'Enter' && (ne.metaKey || ne.ctrlKey) && typed.trim()) onSubmit();
+              }}
+              style={[
+                styles.writeInput,
+                { borderColor: theme.border, color: theme.text, backgroundColor: theme.backgroundElement },
+              ]}
+            />
+          ) : (
+            // Переходное состояние и результат: ответ ученика крупно.
+            <ThemedText type="subtitle" style={styles.centerText}>
+              {typed}
+            </ThemedText>
+          )}
+          {phase === 'grading' ? (
+            <Animated.View style={pulseStyle}>
+              <ThemedText type="small" themeColor="textSecondary">
+                {t('Тренер читает…')}
+              </ThemedText>
+            </Animated.View>
+          ) : null}
+        </View>
+
+        {/* Карточка фидбека тренера — ПОД полем (B.2). */}
+        {phase === 'done' && verdict ? (
+          <OpenAnswerFeedback
+            verdict={verdict}
+            corrected={note?.corrected ?? ''}
+            feedback={note?.feedback ?? ''}
+            lang={card.learningLang}
+          />
+        ) : null}
+        {phase === 'done' && fallback ? (
+          <FadeIn>
+            <View style={[styles.fallbackPlate, { backgroundColor: theme.backgroundElement }]}>
+              <Icon
+                name={fallback === 'limit' ? 'checkmark.circle.fill' : 'info.circle.fill'}
+                size={16}
+                color={fallback === 'limit' ? theme.success : theme.textSecondary}
+              />
+              <ThemedText type="small" themeColor="textSecondary" style={styles.fallbackText}>
+                {fallback === 'limit'
+                  ? t('Принято ✓')
+                  : fallback === 'auth'
+                    ? t('Войди, чтобы тренер проверял ответы')
+                    : t('Тренер недоступен — ответ сохранён без оценки')}
+              </ThemedText>
+            </View>
+          </FadeIn>
+        ) : null}
+      </Reveal>
+      <View style={styles.footer}>
+        {phase === 'done' ? (
+          <FadeIn key="next">
+            <Button title={last ? t('Завершить') : t('Дальше')} icon="arrow.right" onPress={onNext} />
+          </FadeIn>
+        ) : phase === 'input' ? (
+          <Button title={t('Проверить')} icon="checkmark" onPress={onSubmit} disabled={!typed.trim()} />
+        ) : null}
+      </View>
+    </>
+  );
+}
+
+/**
+ * Карточка фидбека тренера (Э2, спека B.2): вердикт-пилюля → исправленный
+ * вариант с озвучкой → объяснение. Токены темы (card/border), тон нейтрально-
+ * тренерский: слова «неверно» нет — worst case это «Давай разберём» (primary).
+ */
+function OpenAnswerFeedback({
+  verdict,
+  corrected,
+  feedback,
+  lang,
+}: {
+  /** Без вердикта (диктант) пилюля не рисуется — штамп уже показан выше. */
+  verdict?: GradeVerdict;
+  corrected: string;
+  feedback: string;
+  lang: string;
+}) {
+  const theme = useTheme();
+  const t = useT();
+  const pill =
+    verdict === 'correct'
+      ? { text: t('Отлично!'), fg: theme.success, bg: theme.successSoft }
+      : verdict === 'partial'
+        ? { text: t('Почти!'), fg: theme.warning, bg: theme.warningSoft }
+        : verdict === 'wrong'
+          ? { text: t('Давай разберём'), fg: theme.primary, bg: theme.primarySoft }
+          : null;
+
+  return (
+    <FadeIn>
+      <View style={[styles.feedbackCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        {pill ? (
+          <View style={[styles.feedbackPill, { backgroundColor: pill.bg }]}>
+            <ThemedText type="smallBold" style={{ color: pill.fg }}>
+              {pill.text}
+            </ThemedText>
+          </View>
+        ) : null}
+        {corrected ? (
+          <View style={styles.feedbackCorrectedRow}>
+            <ThemedText type="default" style={styles.feedbackCorrected}>
+              {corrected}
+            </ThemedText>
+            <SpeakButton text={corrected} language={lang} size={38} />
+          </View>
+        ) : null}
+        {feedback ? (
+          <ThemedText type="small" themeColor="textSecondary">
+            {feedback}
+          </ThemedText>
+        ) : null}
+      </View>
+    </FadeIn>
+  );
+}
+
+/** Предложение диктанта с выделенным (bold) ключевым словом (B.4). */
+function HighlightedSentence({ sentence, word }: { sentence: string; word: string }) {
+  // Разбиваем по слову: capture-группа кладёт совпадения в нечётные индексы.
+  const parts = useMemo(() => {
+    const w = word.trim();
+    if (!w) return [sentence];
+    try {
+      const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return sentence.split(new RegExp(`\\b(${escaped})\\b`, 'gi'));
+    } catch {
+      return [sentence];
+    }
+  }, [sentence, word]);
+
+  return (
+    <ThemedText type="default" style={styles.centerText}>
+      {parts.map((p, i) =>
+        i % 2 === 1 ? (
+          <ThemedText key={i} type="default" style={styles.highlightWord}>
+            {p}
+          </ThemedText>
+        ) : (
+          p
+        ),
+      )}
+    </ThemedText>
+  );
+}
+
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three },
   centerText: { textAlign: 'center' },
@@ -1717,6 +2418,47 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   typeResultRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  // «Напиши сам» — многострочный ввод своего предложения
+  writeInput: {
+    alignSelf: 'stretch',
+    minHeight: 96,
+    borderRadius: Radius.md,
+    borderWidth: 2,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    fontSize: 17,
+    lineHeight: 22,
+    textAlignVertical: 'top',
+  },
+  // Карточка фидбека тренера (B.2)
+  feedbackCard: {
+    alignSelf: 'stretch',
+    gap: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+  },
+  feedbackPill: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one,
+    borderRadius: Radius.pill,
+  },
+  feedbackCorrectedRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  feedbackCorrected: { flex: 1, fontWeight: '600' },
+  // Плашка-фолбэк («Тренер недоступен», «Принято ✓» и т.п.)
+  fallbackPlate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    borderRadius: Radius.md,
+    alignSelf: 'stretch',
+  },
+  fallbackText: { flex: 1 },
+  // Выделенное слово в предложении диктанта (B.4)
+  highlightWord: { fontWeight: '700' },
 
   // Низ
   footer: { minHeight: 92, justifyContent: 'center' },

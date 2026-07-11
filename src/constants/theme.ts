@@ -33,8 +33,9 @@ export const Colors = {
     accentSoft: 'rgba(60,60,67,0.10)',
     accent2: '#8E8E93', // systemGray (вторичный нейтральный)
     accent2Soft: 'rgba(142,142,147,0.14)',
-    warning: '#FF9500',
-    warningSoft: 'rgba(255,149,0,0.14)',
+    /** Янтарный, НЕ равен gold: gold занят Premium/стриком, warning — «почти!»/предупреждения. */
+    warning: '#D9A400',
+    warningSoft: 'rgba(217,164,0,0.14)',
     successSoft: 'rgba(52,199,89,0.14)',
     dangerSoft: 'rgba(255,59,48,0.12)',
     goldSoft: 'rgba(255,149,0,0.14)',
@@ -64,8 +65,8 @@ export const Colors = {
     accentSoft: 'rgba(235,235,245,0.14)',
     accent2: '#98989F',
     accent2Soft: 'rgba(152,152,159,0.16)',
-    warning: '#FF9F0A',
-    warningSoft: 'rgba(255,159,10,0.18)',
+    warning: '#FFD60A',
+    warningSoft: 'rgba(255,214,10,0.18)',
     successSoft: 'rgba(48,209,88,0.18)',
     dangerSoft: 'rgba(255,69,58,0.18)',
     goldSoft: 'rgba(255,159,10,0.18)',

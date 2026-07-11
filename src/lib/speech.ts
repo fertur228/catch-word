@@ -116,6 +116,32 @@ export async function hasEnhancedVoice(language = 'en-US'): Promise<boolean> {
   });
 }
 
+/**
+ * Есть ли на устройстве TTS-голос для языка (гейт плитки «Диктант», B.3).
+ * Готча веба: speechSynthesis грузит голоса лениво — первый вызов часто
+ * возвращает ПУСТОЙ список (Chrome). Поэтому пустой список — ещё не «нет
+ * голоса»: ждём до ~1.5 с (повторные попытки каждые 300 мс), и если список
+ * так и не появился — доверяем дефолтному движку (true). false — только при
+ * ПОДТВЕРЖДЁННОМ отсутствии: голоса есть, а с нужным языковым префиксом нет.
+ */
+export async function hasVoiceForLang(lang: string): Promise<boolean> {
+  const base = lang.toLowerCase().split('-')[0];
+  for (let i = 0; i < 6; i += 1) {
+    let voices: Speech.Voice[] = [];
+    try {
+      // Нарочно мимо кэша loadVoices: он мог запомнить пустой «ленивый» список.
+      voices = await Speech.getAvailableVoicesAsync();
+    } catch {
+      voices = [];
+    }
+    if (voices.length > 0) {
+      return voices.some((v) => (v.language ?? '').toLowerCase().startsWith(base));
+    }
+    if (i < 5) await new Promise((r) => setTimeout(r, 300));
+  }
+  return true;
+}
+
 /** Сбросить кэш голосов (после скачивания нового голоса в настройках iOS). */
 export function resetVoiceCache() {
   voicesPromise = null;

@@ -12,6 +12,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -27,7 +28,14 @@ import {
   pushCard,
   uploadSticker,
 } from '@/lib/cloud-sync';
-import { fetchAgentQuests, getDailyQuests, matchesQuest, todayIndex, type DailyQuest } from '@/lib/daily-quest';
+import {
+  fetchAgentQuests,
+  getDailyQuests,
+  matchesQuest,
+  todayIndex,
+  type AgentExercise,
+  type DailyQuest,
+} from '@/lib/daily-quest';
 import { LEARNING_LANG, NATIVE_LANG } from '@/lib/mock-data';
 import { computeNextReview, freshSrs, isDue, isMastered } from '@/lib/srs';
 import type { CollectionStats, SrsRating, UserPrefs, WordCard } from '@/types';
@@ -117,14 +125,17 @@ interface CollectionContextValue {
   stats: CollectionStats;
   /** Карточки, которые пора повторить (dueAt<=now), самые «просроченные» сверху. */
   dueCards: WordCard[];
-  /** Оценить карточку в сессии повтора — пересчитать SRS и сохранить. */
-  reviewCard: (id: string, rating: SrsRating) => Promise<void>;
+  /** Оценить карточку в сессии повтора — пересчитать SRS и сохранить.
+   *  opts.holdMastery — интервал двигается, освоение нет (открытые ответы 0.5–0.8). */
+  reviewCard: (id: string, rating: SrsRating, opts?: { holdMastery?: boolean }) => Promise<void>;
 
   // --- Ежедневный квест (найти 3 предмета за день) ---
   /** Три сегодняшние цели (что найти и сфотографировать). */
   dailyQuests: DailyQuest[];
   /** Сообщение ночного агента-тренера (почему сегодня эти цели); null — квест из статического пула. */
   coachMessage: string | null;
+  /** Тренировка дня от ночного тренера (пусто — показываем обычные плитки). */
+  agentExercises: AgentExercise[];
   /** Слова целей, которые уже найдены сегодня. */
   questFoundWords: string[];
   /** Сколько из целей найдено сегодня (0..3). */
@@ -498,10 +509,13 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
   }, [activityByDay]);
 
   const reviewCard = useCallback(
-    async (id: string, rating: SrsRating) => {
+    async (id: string, rating: SrsRating, opts?: { holdMastery?: boolean }) => {
       const current = cards.find((c) => c.id === id);
       if (!current) return;
       const srs = computeNextReview(rating, current);
+      // «good без роста освоения» — для открытых ответов со score 0.5–0.8
+      // (интервал двигаем, но слово ещё не считаем продвинувшимся).
+      if (opts?.holdMastery) srs.mastery = current.mastery ?? 0;
       await db.updateCardSrs(id, srs);
       const updated = { ...current, ...srs };
       setCards((prev) => prev.map((c) => (c.id === id ? updated : c)));
@@ -517,22 +531,64 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
   // План храним вместе с uid: при выходе/смене аккаунта он просто перестаёт
   // подходить (производное значение), сбрасывать состояние не нужно.
   const staticQuests = useMemo(() => getDailyQuests(), []);
-  const [agentPlan, setAgentPlan] = useState<{ uid: string; quests: DailyQuest[]; coach: string | null } | null>(null);
+  const [agentPlan, setAgentPlan] = useState<{
+    uid: string;
+    quests: DailyQuest[];
+    coach: string | null;
+    exercises: AgentExercise[];
+    /** Пока null — план ещё грузится (hero показывает скелетон, не «скачок-замену»). */
+    loaded: boolean;
+  } | null>(null);
+  // agentReloadKey — принудительная перечитка плана (re-pull «вчерашней» вкладки).
+  const [agentReloadKey, setAgentReloadKey] = useState(0);
   useEffect(() => {
     if (!userId) return;
     let alive = true;
     fetchAgentQuests(userId)
       .then((plan) => {
-        if (alive && plan) setAgentPlan({ uid: userId, quests: plan.quests, coach: plan.coachMessage });
+        if (!alive) return;
+        if (plan) {
+          setAgentPlan({
+            uid: userId,
+            quests: plan.quests,
+            coach: plan.coachMessage,
+            exercises: plan.exercises,
+            loaded: true,
+          });
+        }
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [userId]);
+  }, [userId, agentReloadKey]);
   const agentActive = agentPlan !== null && agentPlan.uid === userId;
   const dailyQuests = agentActive ? agentPlan.quests : staticQuests;
   const coachMessage = agentActive ? agentPlan.coach : null;
+  const agentExercises = agentActive ? agentPlan.exercises : [];
+
+  // --- Re-pull «вчерашней» вкладки (движок v2, Э3) ---
+  // Вкладка, открытая со вчера, не видит ночные reschedule агента и затёрла бы
+  // их полным upsert'ом при первом же ответе. Вкладка снова видима и с
+  // последней синхронизации прошло >4 ч → перечитываем облако и план агента.
+  const lastPullRef = useRef(Date.now());
+  useEffect(() => {
+    if (typeof document === 'undefined' || !document.addEventListener) return;
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || !userId) return;
+      if (Date.now() - lastPullRef.current < 4 * 3_600_000) return;
+      lastPullRef.current = Date.now();
+      setAgentReloadKey((k) => k + 1);
+      pullCards(userId)
+        .then(async (cloud) => {
+          for (const c of cloud) await db.insertCard({ ...c, ownerId: userId });
+          setCards(cloud.map((c) => ({ ...c, ownerId: userId })).sort((a, b) => b.createdAt - a.createdAt));
+        })
+        .catch(() => {});
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [userId]);
 
   const completeQuestForWord = useCallback(
     async (cand: {
@@ -654,6 +710,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       reviewCard,
       dailyQuests,
       coachMessage,
+      agentExercises,
       questFoundWords: questFound.day === today ? questFound.words : [],
       questProgress: questFound.day === today ? questFound.words.length : 0,
       questDoneToday: questLastDay === today,
@@ -688,6 +745,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     reviewCard,
     dailyQuests,
     coachMessage,
+    agentExercises,
     questFound,
     questLastDay,
     questStreak,

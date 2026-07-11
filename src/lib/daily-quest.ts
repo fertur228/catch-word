@@ -175,10 +175,53 @@ export function getDailyQuests(): DailyQuest[] {
   return out;
 }
 
+/** Упражнение тренировки от ночного агента (контракт v1, движок v2 Э3). */
+export interface AgentExercise {
+  v: 1;
+  word: string;
+  kind: 'dictation' | 'cloze' | 'writeSentence';
+  /** Для dictation/cloze: предложение (в cloze — с пропуском «____»). */
+  sentence?: string;
+  /** Только для cloze: неверные варианты. */
+  distractors?: string[];
+  /** Для writeSentence: короткое задание на родном языке. */
+  prompt?: string;
+  /** «Почему это упражнение» — от тренера (для баннера/деталей). */
+  why?: string;
+}
+
+const EXERCISE_KINDS = new Set(['dictation', 'cloze', 'writeSentence']);
+
+/** Валидация упражнений на клиенте: незнакомая версия схемы/мусор — молча мимо. */
+function parseExercises(raw: unknown): AgentExercise[] {
+  if (!Array.isArray(raw)) return [];
+  const out: AgentExercise[] = [];
+  for (const item of raw.slice(0, 10)) {
+    const it = item as Partial<AgentExercise> | null;
+    if (!it || it.v !== 1) continue; // версия схемы: клиент не падает на будущих форматах
+    if (typeof it.word !== 'string' || !it.word.trim()) continue;
+    if (typeof it.kind !== 'string' || !EXERCISE_KINDS.has(it.kind)) continue;
+    out.push({
+      v: 1,
+      word: it.word.trim(),
+      kind: it.kind,
+      sentence: typeof it.sentence === 'string' && it.sentence.trim() ? it.sentence.trim() : undefined,
+      distractors: Array.isArray(it.distractors)
+        ? it.distractors.map((d) => String(d ?? '').trim()).filter(Boolean)
+        : undefined,
+      prompt: typeof it.prompt === 'string' && it.prompt.trim() ? it.prompt.trim() : undefined,
+      why: typeof it.why === 'string' && it.why.trim() ? it.why.trim() : undefined,
+    });
+  }
+  return out;
+}
+
 /** План дня от ночного агента-тренера (или null, если агент не отработал). */
 export interface AgentQuestPlan {
   quests: DailyQuest[];
   coachMessage: string | null;
+  /** Тренировка дня; пустой массив — обычные плитки режимов. */
+  exercises: AgentExercise[];
 }
 
 /**
@@ -191,7 +234,7 @@ export async function fetchAgentQuests(userId: string): Promise<AgentQuestPlan |
   try {
     const { data, error } = await supabase
       .from('daily_quests')
-      .select('quests, coach_message')
+      .select('quests, coach_message, exercises')
       .eq('user_id', userId)
       .eq('day_index', todayIndex())
       .maybeSingle();
@@ -214,6 +257,7 @@ export async function fetchAgentQuests(userId: string): Promise<AgentQuestPlan |
       coachMessage: typeof data.coach_message === 'string' && data.coach_message.trim()
         ? data.coach_message.trim()
         : null,
+      exercises: parseExercises(data.exercises),
     };
   } catch {
     return null;

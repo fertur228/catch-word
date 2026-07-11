@@ -29,7 +29,9 @@ export type QuizKind =
   | 'clozeExample'
   | 'chooseSynonym' // Выбрать синоним слова (проверяем связи слова, не только перевод)
   | 'typeWord' // Впиши: ввести слово с клавиатуры (регистр не важен)
-  | 'speakWord'; // Скажи вслух: произнести слово (на честность)
+  | 'speakWord' // Скажи вслух: произнести слово (на честность)
+  | 'dictation' // Диктант: услышать предложение → впечатать ключевое слово (движок v2, Э2)
+  | 'writeSentence'; // Составить СВОЁ предложение со словом → оценивает ИИ-тренер (Э2)
 
 /** Как показываем сам вопрос. */
 export type PromptMode = 'text' | 'image' | 'audio' | 'cloze';
@@ -39,10 +41,11 @@ export type OptionMode = 'text' | 'image';
  * Как пользователь отвечает:
  *  - choice — выбор из вариантов (MC);
  *  - type   — ввод слова с клавиатуры;
+ *  - write  — свободный текст (своё предложение) → оценка ИИ-тренером;
  *  - speak  — произнести вслух + самооценка;
  *  - intro  — знакомство, ответа нет (кнопка «Далее»).
  */
-export type AnswerMode = 'choice' | 'type' | 'speak' | 'intro';
+export type AnswerMode = 'choice' | 'type' | 'write' | 'speak' | 'intro';
 
 /** Один вариант ответа. */
 export interface QuizOption {
@@ -170,13 +173,18 @@ function labelOf(kind: QuizKind): string {
       return t('Впиши слово');
     case 'speakWord':
       return t('Скажи вслух');
+    case 'dictation':
+      return t('Услышь и напиши слово');
+    case 'writeSentence':
+      return t('Составь своё предложение');
   }
 }
 
 /** Как пользователь отвечает на вопрос данного вида. */
 function answerModeOf(kind: QuizKind): AnswerMode {
   if (kind === 'intro') return 'intro';
-  if (kind === 'typeWord') return 'type';
+  if (kind === 'typeWord' || kind === 'dictation') return 'type';
+  if (kind === 'writeSentence') return 'write';
   if (kind === 'speakWord') return 'speak';
   return 'choice';
 }
@@ -184,7 +192,7 @@ function answerModeOf(kind: QuizKind): AnswerMode {
 /** Как показываем вопрос для данного вида. */
 function promptModeOf(kind: QuizKind): PromptMode {
   if (kind === 'imageToWord' || kind === 'imageToTranslation') return 'image';
-  if (kind === 'audioToWord' || kind === 'audioToTranslation') return 'audio';
+  if (kind === 'audioToWord' || kind === 'audioToTranslation' || kind === 'dictation') return 'audio';
   if (kind === 'clozeExample') return 'cloze';
   return 'text';
 }
@@ -198,7 +206,46 @@ function promptTextOf(card: WordCard, kind: QuizKind): string {
   if (kind === 'chooseSynonym') return card.word;
   // Впиши/Скажи — подсказка это перевод (произвести нужно само слово).
   if (kind === 'typeWord' || kind === 'speakWord') return card.translation;
+  // «Напиши сам» — показываем слово и перевод, предложение сочиняет ученик.
+  if (kind === 'writeSentence') return card.word;
   return '';
+}
+
+/** Предложение для диктанта: первый пример со словом, иначе само слово. */
+export function dictationSentence(card: WordCard): string {
+  const w = card.word.trim();
+  if (w) {
+    const re = new RegExp(`\\b${escapeRe(w)}\\b`, 'i');
+    for (const ex of card.examples ?? []) {
+      if (re.test(ex)) return ex;
+    }
+  }
+  return card.word;
+}
+
+/** Нормализация свободного ввода: регистр/края/повторные пробелы не важны. */
+export function normalizeAnswer(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** Убрать диакритику (umlaut/акценты) — для «почти верно» в диктанте. */
+export function stripDiacritics(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ß/g, 'ss');
+}
+
+/**
+ * Локальная проверка диктанта (без LLM — спека Э2):
+ *  correct — точное совпадение после нормализации;
+ *  partial — расходится ТОЛЬКО диакритика (de/es: «проверь умляут/акцент»);
+ *  wrong   — всё остальное (фидбек добирается у ИИ-тренера).
+ */
+export function checkDictation(answer: string, expectedWord: string): 'correct' | 'partial' | 'wrong' {
+  const a = normalizeAnswer(answer);
+  const e = normalizeAnswer(expectedWord);
+  if (!a) return 'wrong';
+  if (a === e) return 'correct';
+  if (stripDiacritics(a) === stripDiacritics(e)) return 'partial';
+  return 'wrong';
 }
 
 /** Экранировать спецсимволы для RegExp. */
@@ -313,6 +360,8 @@ function buildSynonymOptions(card: WordCard, pool: WordCard[]): QuizOption[] | n
 /** Подходит ли формат данной карточке/пулу. */
 function isValid(card: WordCard, pool: WordCard[], kind: QuizKind): boolean {
   if (kind === 'clozeExample') return clozeSentence(card) != null;
+  // Диктант и «Напиши сам» применимы к любой карточке (голос TTS проверяет экран).
+  if (kind === 'dictation' || kind === 'writeSentence') return true;
   if (kind === 'chooseSynonym') return buildSynonymOptions(card, pool) != null;
   // Вопросы «с картинкой» — только для карточек с НАСТОЯЩИМ фото (не иконкой),
   // иначе получится «фото-вопрос», где на месте фото просто иконка категории.

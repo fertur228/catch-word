@@ -147,6 +147,14 @@ const ICONS: Record<string, Draw> = {
       <path d="m15 5 4 4" />
     </>
   ),
+  // «Напиши сам» (карандаш с линией — Lucide pencil-line)
+  'pencil.line': () => (
+    <>
+      <path d="M12 20h9" />
+      <path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.837a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z" />
+      <path d="m15 5 3 3" />
+    </>
+  ),
   trash: () => (
     <>
       <path d="M3 6h18" />
@@ -220,6 +228,13 @@ const ICONS: Record<string, Draw> = {
       <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill={c} stroke={c} />
       <path d="M15.54 8.46a5 5 0 0 1 0 7.07" fill="none" stroke={c} />
       <path d="M19.07 4.93a10 10 0 0 1 0 14.14" fill="none" stroke={c} />
+    </>
+  ),
+  // «Диктант» (ухо — Lucide ear)
+  ear: () => (
+    <>
+      <path d="M6 8.5a6.5 6.5 0 1 1 13 0c0 6-6 6-6 10a3.5 3.5 0 1 1-7 0" />
+      <path d="M15 8.5a2.5 2.5 0 0 0-5 0v1a2 2 0 1 1 0 4" />
     </>
   ),
   waveform: () => (
