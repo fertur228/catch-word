@@ -269,8 +269,18 @@ function visualKey(c: WordCard): string {
   return c.imageUri ? `img:${c.imageUri}` : `cat:${c.category ?? '—'}`;
 }
 
-/** Текстовые варианты: правильный + 3 дистрактора (AI → тема → пул → заглушки). */
-function buildTextOptions(card: WordCard, pool: WordCard[], kind: QuizKind): QuizOption[] {
+/**
+ * Текстовые варианты: правильный + 3 дистрактора.
+ * Приоритет: семантические соседи (pgvector, Э5) → AI-дистракторы карточки →
+ * та же тема → пул → заглушки. Соседи делают тест сложнее и честнее:
+ * «стол» → стул/полка/шкаф, а не гвоздь/солнце.
+ */
+function buildTextOptions(
+  card: WordCard,
+  pool: WordCard[],
+  kind: QuizKind,
+  neighbors?: Map<string, string[]>,
+): QuizOption[] {
   const correct = answerOf(card, kind);
   const seen = new Set<string>([correct]);
   const distractors: string[] = [];
@@ -282,6 +292,10 @@ function buildTextOptions(card: WordCard, pool: WordCard[], kind: QuizKind): Qui
     distractors.push(t);
   };
 
+  // Семантические соседи применимы там, где ответ — СЛОВО (не перевод).
+  if (!TRANSLATION_ANSWER.has(kind)) {
+    for (const w of neighbors?.get(card.id) ?? []) add(w);
+  }
   if (TRANSLATION_ANSWER.has(kind) && card.distractors) {
     for (const d of shuffle([...card.distractors])) add(d);
   }
@@ -371,7 +385,13 @@ function isValid(card: WordCard, pool: WordCard[], kind: QuizKind): boolean {
 }
 
 /** Собрать один вопрос выбранного вида. */
-function makeQuestion(card: WordCard, pool: WordCard[], kind: QuizKind, i: number): QuizQuestion {
+function makeQuestion(
+  card: WordCard,
+  pool: WordCard[],
+  kind: QuizKind,
+  i: number,
+  neighbors?: Map<string, string[]>,
+): QuizQuestion {
   const answerMode = answerModeOf(kind);
   const optionMode: OptionMode = kind === 'translationToImage' ? 'image' : 'text';
   // Варианты нужны только для выбора (choice); type/speak/intro — без вариантов.
@@ -379,10 +399,10 @@ function makeQuestion(card: WordCard, pool: WordCard[], kind: QuizKind, i: numbe
     answerMode !== 'choice'
       ? []
       : kind === 'chooseSynonym'
-        ? (buildSynonymOptions(card, pool) ?? buildTextOptions(card, pool, 'wordToTranslation'))
+        ? (buildSynonymOptions(card, pool) ?? buildTextOptions(card, pool, 'wordToTranslation', neighbors))
         : optionMode === 'image'
-          ? (buildImageOptions(card, pool) ?? buildTextOptions(card, pool, 'translationToWord'))
-          : buildTextOptions(card, pool, kind);
+          ? (buildImageOptions(card, pool) ?? buildTextOptions(card, pool, 'translationToWord', neighbors))
+          : buildTextOptions(card, pool, kind, neighbors);
   return {
     id: `${card.id}-${kind}-${i}`,
     kind,
@@ -394,6 +414,110 @@ function makeQuestion(card: WordCard, pool: WordCard[], kind: QuizKind, i: numbe
     options,
     answerMode,
   };
+}
+
+// ── Тренировка от тренера (движок v2, Э3): exercises → вопросы ──────────
+import type { AgentExercise } from '@/lib/daily-quest';
+
+/**
+ * Синтетическая карточка для цели вне коллекции: озвучка/итоги работают,
+ * SRS не двигается (id пустой — reviewCard такую не найдёт и тихо выйдет),
+ * телеметрия пишет card_id=null.
+ */
+function syntheticCard(word: string, pool: WordCard[]): WordCard {
+  return {
+    id: '',
+    emoji: '✨',
+    word,
+    translation: '',
+    ipa: '',
+    examples: [],
+    category: null,
+    learningLang: pool[0]?.learningLang ?? 'en-US',
+    nativeLang: pool[0]?.nativeLang ?? 'ru-RU',
+    createdAt: Date.now(),
+  };
+}
+
+/**
+ * Конвертер тренировки от агента в вопросы квиза (7 точек чек-листа B.6
+ * закрывает экран; здесь — только корректные QuizQuestion).
+ *  - dictation: предложение агента подкладывается ПЕРВЫМ примером карточки —
+ *    dictationSentence() возьмёт именно его;
+ *  - cloze: предложение с ____ от агента + его дистракторы (добор из пула);
+ *  - writeSentence: задание тренера (prompt) уходит в label.
+ */
+export function buildWorkoutQuiz(exercises: AgentExercise[], pool: WordCard[]): QuizQuestion[] {
+  const out: QuizQuestion[] = [];
+  exercises.forEach((ex, i) => {
+    const base =
+      pool.find((c) => c.word.trim().toLowerCase() === ex.word.toLowerCase()) ??
+      syntheticCard(ex.word, pool);
+    if (ex.kind === 'dictation') {
+      const card = ex.sentence ? { ...base, examples: [ex.sentence, ...base.examples] } : base;
+      out.push({
+        id: `workout-${i}-dictation`,
+        kind: 'dictation',
+        card,
+        label: t('Услышь и напиши слово'),
+        promptMode: 'audio',
+        prompt: '',
+        optionMode: 'text',
+        options: [],
+        answerMode: 'type',
+      });
+      return;
+    }
+    if (ex.kind === 'cloze' && ex.sentence?.includes('____')) {
+      // Варианты: слово + дистракторы агента, добор из пула до 4.
+      const seen = new Set<string>([base.word.toLowerCase()]);
+      const distractors: string[] = [];
+      for (const d of ex.distractors ?? []) {
+        const w = d.trim();
+        if (w && !seen.has(w.toLowerCase()) && distractors.length < OPTION_COUNT - 1) {
+          seen.add(w.toLowerCase());
+          distractors.push(w);
+        }
+      }
+      for (const other of shuffle([...pool])) {
+        if (distractors.length >= OPTION_COUNT - 1) break;
+        const w = other.word.trim();
+        if (w && !seen.has(w.toLowerCase())) {
+          seen.add(w.toLowerCase());
+          distractors.push(w);
+        }
+      }
+      out.push({
+        id: `workout-${i}-cloze`,
+        kind: 'clozeExample',
+        card: base,
+        label: t('Вставь пропущенное слово'),
+        promptMode: 'cloze',
+        prompt: ex.sentence,
+        optionMode: 'text',
+        options: shuffle([
+          { correct: true, text: base.word },
+          ...distractors.map((text) => ({ correct: false, text })),
+        ]),
+        answerMode: 'choice',
+      });
+      return;
+    }
+    if (ex.kind === 'writeSentence') {
+      out.push({
+        id: `workout-${i}-write`,
+        kind: 'writeSentence',
+        card: base,
+        label: ex.prompt || t('Составь своё предложение'),
+        promptMode: 'text',
+        prompt: base.word,
+        optionMode: 'text',
+        options: [],
+        answerMode: 'write',
+      });
+    }
+  });
+  return out;
 }
 
 /**
@@ -411,6 +535,7 @@ export function buildQuiz(
   pool: WordCard[] = cards,
   forceKind?: QuizKind,
   noIntro = false,
+  neighbors?: Map<string, string[]>,
 ): QuizQuestion[] {
   if (cards.length === 0) return [];
   let ordered = shuffle([...cards]);
@@ -427,6 +552,6 @@ export function buildQuiz(
     // иначе — адаптивный выбор (не ломаем сессию для карточек без примера и т.п.).
     const kind =
       forceKind && isValid(card, pool, forceKind) ? forceKind : kindForCard(card, pool, i, noIntro);
-    return makeQuestion(card, pool, kind, i);
+    return makeQuestion(card, pool, kind, i, neighbors);
   });
 }

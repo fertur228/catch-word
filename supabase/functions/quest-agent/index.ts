@@ -98,6 +98,15 @@ const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'get_vocab_map',
+      description:
+        'Карта словаря ученика: какие бытовые темы покрыты, а где дыры (тем нет или 1 слово). Используй, чтобы предлагать НОВЫЕ цели из непокрытых тем, а не по кругу из одной.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'get_review_stats',
       description:
         'Как ученик РЕАЛЬНО отвечал в последние дни (телеметрия): по словам — попытки/ошибки, по форматам заданий — где сыпется (на слух, письмо и т.п.). Слова с реальными ошибками важнее просто просроченных.',
@@ -329,6 +338,50 @@ async function toolGetHistory(ctx: Ctx, args: { days?: number }): Promise<unknow
   }));
 }
 
+// Эталон бытовых тем (v1 — по категориям; эмбеддинг-кластеры после GOOGLE_API_KEY).
+const VOCAB_REFERENCE: Record<string, string[]> = {
+  kitchen: ['cup', 'plate', 'fork', 'knife', 'bottle', 'kettle', 'pan', 'fridge'],
+  furniture: ['chair', 'table', 'sofa', 'bed', 'shelf', 'lamp', 'mirror', 'wardrobe'],
+  clothes: ['shirt', 'jacket', 'shoes', 'hat', 'socks', 'jeans', 'scarf', 'belt'],
+  bathroom: ['towel', 'soap', 'toothbrush', 'shampoo', 'comb', 'razor'],
+  office: ['pen', 'notebook', 'laptop', 'keyboard', 'scissors', 'stapler', 'folder'],
+  street: ['car', 'bench', 'tree', 'sign', 'bicycle', 'lantern', 'fence', 'mailbox'],
+  electronics: ['phone', 'charger', 'headphones', 'remote', 'camera', 'speaker'],
+  food: ['bread', 'apple', 'cheese', 'egg', 'milk', 'tomato', 'banana', 'butter'],
+};
+
+async function toolGetVocabMap(ctx: Ctx): Promise<unknown> {
+  const { data, error } = await ctx.admin
+    .from('word_cards')
+    .select('word, category')
+    .eq('user_id', ctx.userId)
+    .eq('learning_lang', ctx.learningLang)
+    .eq('native_lang', ctx.nativeLang)
+    .limit(500);
+  if (error) return { error: error.message };
+  const cards = data ?? [];
+  const have = new Set(cards.map((c) => String(c.word ?? '').trim().toLowerCase()));
+  const byCat = new Map<string, number>();
+  for (const c of cards) {
+    const k = String(c.category ?? 'без категории').toLowerCase();
+    byCat.set(k, (byCat.get(k) ?? 0) + 1);
+  }
+  const gaps: Array<{ theme: string; missing_examples: string[] }> = [];
+  for (const [theme, words] of Object.entries(VOCAB_REFERENCE)) {
+    const missing = words.filter((w) => !have.has(w));
+    // Дыра = покрыто меньше четверти эталона темы.
+    if (words.length - missing.length <= Math.floor(words.length / 4)) {
+      gaps.push({ theme, missing_examples: missing.slice(0, 5) });
+    }
+  }
+  return {
+    total_words: cards.length,
+    covered_themes: Object.fromEntries([...byCat.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)),
+    gaps,
+    note: 'gaps — темы, где у ученика почти пусто: хорошие кандидаты для новых целей (если это физические предметы вокруг него).',
+  };
+}
+
 async function toolGetReviewStats(ctx: Ctx, args: { days?: number }): Promise<unknown> {
   ctx.reviewStatsCalled = true;
   const days = Math.max(1, Math.min(14, Math.round(Number(args.days) || 7)));
@@ -418,6 +471,76 @@ async function toolReschedule(
   return { rescheduled: found.map((c) => c.word), new_due_in_days: days };
 }
 
+// ── Критик (движок v2, Э6): второй агент проверяет план до записи ───────
+//
+// Отдельный LLM-вызов (t=0, structured) с чеклистом. Не approved → фидбек
+// возвращается планировщику tool-сообщением, у него ОДИН ретрай; снова нет →
+// квест пишется без упражнений, outcome='critic_fallback' (демо не срывается).
+const CRITIC_SCHEMA = {
+  type: 'object',
+  properties: {
+    approved: { type: 'boolean' },
+    issues: { type: 'array', items: { type: 'string' }, maxItems: 5 },
+  },
+  required: ['approved', 'issues'],
+  additionalProperties: false,
+};
+
+async function criticReview(
+  plan: {
+    quests: QuestTarget[];
+    coach: string;
+    difficulty: string;
+    exercises: Exercise[];
+  },
+  recentTargets: string[],
+  learningLang: string,
+  nativeLang: string,
+): Promise<{ approved: boolean; issues: string[]; tokensIn: number; tokensOut: number }> {
+  const system = [
+    'Ты — строгий критик планов в языковом приложении TakeWord. Проверь план тренера по чеклисту и верни вердикт.',
+    'Чеклист (отклоняй ТОЛЬКО за реальные нарушения):',
+    `1. Ровно 3 цели, каждая — КОНКРЕТНЫЙ физический предмет на языке ${learningLang}, который реально найти дома/в офисе/на улице за минуту (кружка — да, «свобода»/«погода» — нет).`,
+    `2. coach_message — на языке ${nativeLang}, дружелюбный, без воды.`,
+    `3. Цели не повторяют недавние: ${recentTargets.length ? recentTargets.join(', ') : '(истории нет)'}.`,
+    `4. Упражнения корректны: предложения грамматичны и на ${learningLang}; в cloze пропуск ____ уместен и дистракторы не являются верными ответами; предложение диктанта содержит целевое слово.`,
+    'Мелкие стилистические придирки — НЕ повод отклонять. issues — коротко и конкретно.',
+  ].join('\n');
+  try {
+    const resp = await fetch(`${BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://catch-words.com',
+        'X-Title': 'TakeWord quest-critic',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        temperature: 0,
+        max_tokens: 300,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: JSON.stringify(plan) },
+        ],
+        response_format: { type: 'json_schema', json_schema: { name: 'critic', schema: CRITIC_SCHEMA } },
+      }),
+    });
+    if (!resp.ok) return { approved: true, issues: ['critic_unavailable'], tokensIn: 0, tokensOut: 0 };
+    const data = await resp.json();
+    const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? '{}');
+    return {
+      approved: parsed.approved !== false, // сомнение трактуем в пользу плана
+      issues: Array.isArray(parsed.issues) ? parsed.issues.map(String).slice(0, 5) : [],
+      tokensIn: data.usage?.prompt_tokens ?? 0,
+      tokensOut: data.usage?.completion_tokens ?? 0,
+    };
+  } catch {
+    // Критик недоступен — план не блокируем (критик улучшает, а не гейтит доступность).
+    return { approved: true, issues: ['critic_error'], tokensIn: 0, tokensOut: 0 };
+  }
+}
+
 // ── Агентный цикл для одного пользователя ───────────────────────────────
 async function runAgentForUser(
   admin: SupabaseClient,
@@ -461,6 +584,7 @@ async function runAgentForUser(
     dryRun,
   };
   let exercisesNudged = false; // однократный отказ finish без упражнений (квест важнее — второй раз принимаем)
+  let criticRetried = false; // у планировщика один ретрай после отказа критика
   const steps: Array<{ tool: string; args: unknown; result: unknown }> = [];
   let tokensIn = 0;
   let tokensOut = 0;
@@ -596,6 +720,46 @@ async function runAgentForUser(
           continue;
         }
 
+        // ── Критик (Э6): второй агент проверяет план до записи ──
+        const historyRaw = (await toolGetHistory(ctx, { days: 7 })) as
+          | Array<{ targets?: string[] }>
+          | { error: string };
+        const recentTargets = Array.isArray(historyRaw)
+          ? historyRaw.flatMap((h) => h.targets ?? [])
+          : [];
+        const critic = await criticReview(
+          {
+            quests,
+            coach: String(args.coach_message ?? ''),
+            difficulty: String(args.difficulty ?? 'normal'),
+            exercises,
+          },
+          recentTargets,
+          learningLang,
+          nativeLang,
+        );
+        tokensIn += critic.tokensIn;
+        tokensOut += critic.tokensOut;
+        steps.push({ tool: '_critic', args: {}, result: { approved: critic.approved, issues: critic.issues } });
+
+        let exercisesToWrite = exercises;
+        let criticFallback = false;
+        if (!critic.approved) {
+          if (!criticRetried) {
+            criticRetried = true;
+            messages.push(msg, {
+              role: 'tool', tool_call_id: call.id,
+              content: JSON.stringify({
+                error: `Критик отклонил план: ${critic.issues.join('; ')}. Исправь и вызови finish снова.`,
+              }),
+            });
+            continue;
+          }
+          // Второй отказ: квест важнее — пишем без упражнений, помечаем фолбэк.
+          exercisesToWrite = [];
+          criticFallback = true;
+        }
+
         if (!dryRun) {
           const { error: upErr } = await admin.from('daily_quests').upsert({
             user_id: userId,
@@ -603,7 +767,7 @@ async function runAgentForUser(
             quests,
             coach_message: String(args.coach_message ?? ''),
             difficulty: String(args.difficulty ?? 'normal'),
-            exercises,
+            exercises: exercisesToWrite,
             run_id: runId,
           });
           if (upErr) {
@@ -612,17 +776,17 @@ async function runAgentForUser(
           }
         }
         finalQuests = quests.map((q) => q.word);
-        finalExercises = exercises;
+        finalExercises = exercisesToWrite;
         finalDifficulty = String(args.difficulty ?? 'normal');
         steps.push({
           tool: 'finish',
           args: { reasoning: args.reasoning },
           result: {
             targets: finalQuests,
-            exercises: exercises.map((e) => `${e.kind}:${e.word}`),
+            exercises: exercisesToWrite.map((e) => `${e.kind}:${e.word}`),
           },
         });
-        outcome = 'ok';
+        outcome = criticFallback ? 'critic_fallback' : 'ok';
         break;
       }
 
@@ -632,6 +796,7 @@ async function runAgentForUser(
       else if (name === 'get_cards') result = await toolGetCards(ctx, args);
       else if (name === 'get_quest_history') result = await toolGetHistory(ctx, args);
       else if (name === 'get_review_stats') result = await toolGetReviewStats(ctx, args);
+      else if (name === 'get_vocab_map') result = await toolGetVocabMap(ctx);
       else if (name === 'reschedule_cards') result = await toolReschedule(ctx, args);
       else result = { error: `unknown tool: ${name}` };
 
@@ -661,6 +826,98 @@ async function runAgentForUser(
   return { outcome, runId, quests: finalQuests, exercises: finalExercises, difficulty: finalDifficulty };
 }
 
+// ── Дайджест недели (Э6): один LLM-вызов, не ReAct ──────────────────────
+async function runDigestForUser(
+  admin: SupabaseClient,
+  userId: string,
+): Promise<{ outcome: string; week_start?: string }> {
+  const { data: last } = await admin
+    .from('word_cards')
+    .select('learning_lang, native_lang')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  const learningLang = last?.[0]?.learning_lang ?? 'en-US';
+  const nativeLang = last?.[0]?.native_lang ?? 'ru-RU';
+
+  const since = new Date(Date.now() - 7 * DAY_MS).toISOString();
+  const { data: events } = await admin
+    .from('review_events')
+    .select('word, kind, correct, rating, score')
+    .eq('user_id', userId)
+    .eq('learning_lang', learningLang)
+    .eq('native_lang', nativeLang)
+    .gt('created_at', since)
+    .limit(1000);
+  const rows = events ?? [];
+  if (rows.length === 0) return { outcome: 'skipped_no_activity' };
+
+  const isMiss = (r: (typeof rows)[number]) =>
+    r.correct === false || r.rating === 'again' || (r.score != null && Number(r.score) < 0.5);
+  const byWord = new Map<string, { attempts: number; errors: number }>();
+  for (const r of rows) {
+    const v = byWord.get(String(r.word)) ?? { attempts: 0, errors: 0 };
+    v.attempts += 1;
+    if (isMiss(r)) v.errors += 1;
+    byWord.set(String(r.word), v);
+  }
+  const sorted = [...byWord.entries()];
+  const hard = sorted.filter(([, v]) => v.errors > 0).sort((a, b) => b[1].errors - a[1].errors).slice(0, 3);
+  const strong = sorted.filter(([, v]) => v.errors === 0 && v.attempts >= 2).slice(0, 3);
+  const stats = {
+    answers: rows.length,
+    errors: rows.filter(isMiss).length,
+    hard_words: hard.map(([w]) => w),
+    strong_words: strong.map(([w]) => w),
+  };
+
+  let digest = '';
+  try {
+    const resp = await fetch(`${BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://catch-words.com',
+        'X-Title': 'TakeWord coach-digest',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        temperature: 0,
+        max_tokens: 350,
+        messages: [
+          {
+            role: 'system',
+            content: `Ты — тренер TakeWord. Напиши ученику итог недели на языке ${nativeLang}: максимум 550 символов, связный тёплый текст без списков. Сначала что получилось, затем где спотыкался (назови слова), в конце — короткий план на следующую неделю.`,
+          },
+          { role: 'user', content: JSON.stringify(stats) },
+        ],
+      }),
+    });
+    if (!resp.ok) return { outcome: 'llm_error' };
+    const data = await resp.json();
+    digest = String(data.choices?.[0]?.message?.content ?? '').trim().slice(0, 600);
+  } catch {
+    return { outcome: 'llm_error' };
+  }
+  if (!digest) return { outcome: 'llm_error' };
+
+  // Понедельник текущей UTC-недели.
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setUTCDate(now.getUTCDate() - ((now.getUTCDay() + 6) % 7));
+  const weekStart = monday.toISOString().slice(0, 10);
+
+  const { error } = await admin.from('coach_digests').upsert({
+    user_id: userId,
+    week_start: weekStart,
+    digest,
+    stats,
+  });
+  if (error) return { outcome: 'db_error' };
+  return { outcome: 'ok', week_start: weekStart };
+}
+
 // ── HTTP-обвязка ─────────────────────────────────────────────────────────
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
@@ -680,6 +937,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // юзера, см. миграцию); 'debug' — то же самое руками, + поддержка dry_run.
   // Один юзер на запрос — принципиально: батч всех в одном запросе упирается
   // в WORKER_RESOURCE_LIMIT edge-воркера (проверено 10.07.2026).
+  // Дайджест недели (воскресный cron, fan-out по юзерам с активностью).
+  if (body.mode === 'digest') {
+    if (!body.user_id) return json({ error: 'user_id required' }, 400);
+    const res = await runDigestForUser(admin, String(body.user_id));
+    return json({ mode: 'digest', ...res });
+  }
+
   if (body.mode === 'debug' || body.mode === 'user') {
     if (!body.user_id) return json({ error: 'user_id required' }, 400);
     const dayIndex = Number.isFinite(Number(body.day_index)) ? Number(body.day_index) : todayIdx;
