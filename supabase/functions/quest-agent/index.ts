@@ -98,6 +98,19 @@ const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'get_review_stats',
+      description:
+        'Как ученик РЕАЛЬНО отвечал в последние дни (телеметрия): по словам — попытки/ошибки, по форматам заданий — где сыпется (на слух, письмо и т.п.). Слова с реальными ошибками важнее просто просроченных.',
+      parameters: {
+        type: 'object',
+        properties: { days: { type: 'integer', minimum: 1, maximum: 14 } },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'reschedule_cards',
       description:
         'Сдвинуть дату повторения карточек (интервальное повторение). Используй ОСТОРОЖНО и только когда это явно полезно: например, подтянуть на сегодня слово, которое войдёт в квест, или отложить то, что ученик явно знает. Максимум 10 карточек, не дальше чем на 30 дней.',
@@ -157,8 +170,8 @@ function systemPrompt(learningLang: string, nativeLang: string, dayIndex: number
     'ЦЕЛЬ: составь план дня, который максимально продвинет словарный запас ИМЕННО ЭТОГО ученика.',
     '',
     'Как работать:',
-    '1. Сначала посмотри состояние коллекции (get_collection_stats), затем сами карточки (get_cards) и историю квестов (get_quest_history).',
-    '2. Реши стратегию: закреплять забываемое (слабые/просроченные) или давать новое. Слабые и просроченные слова важнее новых.',
+    '1. Сначала ОБЯЗАТЕЛЬНО вызови get_collection_stats, get_review_stats (реальные ответы ученика) и get_cards; get_quest_history — по необходимости.',
+    '2. Реши стратегию: закреплять забываемое (слабые/просроченные) или давать новое. Приоритет: слова с РЕАЛЬНЫМИ ошибками из телеметрии > просроченные > новые. Если ученик сыпется в конкретном формате (например, на слух) — учти это в сложности.',
     '3. Цели квеста — КОНКРЕТНЫЕ ФИЗИЧЕСКИЕ ПРЕДМЕТЫ, которые реально найти дома/в офисе/на улице за минуту (кружка — да, «свобода» — нет).',
     '4. Если слабое слово — предмет, включи его в квест: ученик повторит его вживую. Если включаешь слабые слова в квест, подтяни их повторение на сегодня через reschedule_cards.',
     '5. Не повторяй цели из вчерашних квестов, если ученик их уже ловил (см. историю).',
@@ -251,6 +264,47 @@ async function toolGetHistory(ctx: Ctx, args: { days?: number }): Promise<unknow
   }));
 }
 
+async function toolGetReviewStats(ctx: Ctx, args: { days?: number }): Promise<unknown> {
+  const days = Math.max(1, Math.min(14, Math.round(Number(args.days) || 7)));
+  const since = new Date(Date.now() - days * DAY_MS).toISOString();
+  const { data, error } = await ctx.admin
+    .from('review_events')
+    .select('word, kind, correct, rating, score, response_ms')
+    .eq('user_id', ctx.userId)
+    .eq('learning_lang', ctx.learningLang)
+    .eq('native_lang', ctx.nativeLang)
+    .gt('created_at', since)
+    .limit(2000);
+  if (error) return { error: error.message };
+  const rows = data ?? [];
+  if (rows.length === 0) return { days, total_answers: 0, note: 'телеметрии пока нет' };
+
+  // Ошибка = явный неверный ответ, «забыл» или низкий score открытого ответа.
+  const isMiss = (r: (typeof rows)[number]) =>
+    r.correct === false || r.rating === 'again' || (r.score != null && Number(r.score) < 0.5);
+  const agg = (key: 'word' | 'kind') => {
+    const m = new Map<string, { attempts: number; errors: number }>();
+    for (const r of rows) {
+      const k = String(r[key] ?? '');
+      const v = m.get(k) ?? { attempts: 0, errors: 0 };
+      v.attempts += 1;
+      if (isMiss(r)) v.errors += 1;
+      m.set(k, v);
+    }
+    return [...m.entries()]
+      .map(([name, v]) => ({ [key]: name, ...v }))
+      .sort((a, b) => b.errors - a.errors || b.attempts - a.attempts);
+  };
+  const times = rows.map((r) => Number(r.response_ms)).filter((n) => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
+  return {
+    days,
+    total_answers: rows.length,
+    words_with_errors: agg('word').filter((w) => (w.errors as number) > 0).slice(0, 15),
+    formats: agg('kind').slice(0, 10),
+    median_response_ms: times.length ? times[Math.floor(times.length / 2)] : null,
+  };
+}
+
 async function toolReschedule(
   ctx: Ctx,
   args: { card_ids?: string[]; days_from_now?: number; reason?: string },
@@ -327,6 +381,7 @@ async function runAgentForUser(
   const steps: Array<{ tool: string; args: unknown; result: unknown }> = [];
   let tokensIn = 0;
   let tokensOut = 0;
+  let noToolStrikes = 0; // модель иногда игнорирует tool_choice=required и пишет текст
   let outcome = 'error';
   let finalQuests: string[] | undefined;
 
@@ -349,8 +404,14 @@ async function runAgentForUser(
           model: MODEL,
           messages,
           tools: TOOLS,
-          tool_choice: 'required', // текст вне инструментов не нужен никогда
-          temperature: 0,          // воспроизводимость: тот же ученик → тот же план (шлюз П3)
+          // Текст вне инструментов не нужен никогда. Если модель уже нарушила
+          // контракт (написала план текстом) и карточки прочитаны — принудительно
+          // форсируем именно finish: Gemini иногда игнорирует мягкий 'required'.
+          tool_choice:
+            noToolStrikes > 0 && ctx.readCalled
+              ? { type: 'function', function: { name: 'finish' } }
+              : 'required',
+          temperature: 0, // воспроизводимость: тот же ученик → тот же план (шлюз П3)
           max_tokens: 1200,
         }),
       });
@@ -364,8 +425,20 @@ async function runAgentForUser(
       const msg = data.choices?.[0]?.message;
       const call = msg?.tool_calls?.[0];
       if (!call) {
+        // Нарушение контракта — не роняем прогон, а возвращаем модель в цикл
+        // корректирующим сообщением (до 2 раз, дальше честный обрыв).
         steps.push({ tool: '_no_tool_call', args: { step }, result: msg?.content ?? null });
-        break;
+        noToolStrikes += 1;
+        if (noToolStrikes > 2) break;
+        messages.push(
+          { role: 'assistant', content: msg?.content ?? '' },
+          {
+            role: 'user',
+            content:
+              'Отвечай ТОЛЬКО вызовом инструмента. Если план готов — вызови finish с 3 целями, coach_message, difficulty и reasoning.',
+          },
+        );
+        continue;
       }
 
       let args: Record<string, unknown> = {};
@@ -425,6 +498,7 @@ async function runAgentForUser(
       if (name === 'get_collection_stats') result = await toolGetStats(ctx);
       else if (name === 'get_cards') result = await toolGetCards(ctx, args);
       else if (name === 'get_quest_history') result = await toolGetHistory(ctx, args);
+      else if (name === 'get_review_stats') result = await toolGetReviewStats(ctx, args);
       else if (name === 'reschedule_cards') result = await toolReschedule(ctx, args);
       else result = { error: `unknown tool: ${name}` };
 

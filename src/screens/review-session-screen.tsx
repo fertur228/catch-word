@@ -51,6 +51,8 @@ import { getLang, useT } from '@/lib/i18n';
 import { speakWord } from '@/lib/speech';
 import { buildQuiz, type QuizKind, type QuizQuestion } from '@/lib/quiz';
 import { buildSessionQueue, computeNextReview, hasReviewWork } from '@/lib/srs';
+import { todayIndex } from '@/lib/daily-quest';
+import { flushReviewEvents, logReviewEvent } from '@/lib/telemetry';
 import type { SrsRating, WordCard } from '@/types';
 
 /** Сколько карточек максимум в одной сессии повтора. */
@@ -239,11 +241,40 @@ export function ReviewSessionScreen() {
     return buildSessionQueue(cards, MAX_SESSION);
   }, [cards]);
 
+  // --- Телеметрия ответов (движок v2, Э1) ---
+  // day_index фиксируется на СТАРТЕ сессии (сессия через UTC-полночь не смешивает
+  // дни); response_ms — от показа вопроса до ответа.
+  const sessionDayRef = useRef(todayIndex());
+  const qShownAtRef = useRef(Date.now());
+  const logAnswer = useCallback(
+    (
+      card: WordCard,
+      kind: string,
+      data: { correct?: boolean | null; rating?: string | null; answer?: string | null },
+    ) => {
+      logReviewEvent({
+        cardId: card.id ?? null,
+        word: card.word,
+        dayIndex: sessionDayRef.current,
+        learningLang: card.learningLang,
+        nativeLang: card.nativeLang,
+        source: mode === 'flashcards' ? 'flashcards' : 'quiz',
+        kind,
+        responseMs: Date.now() - qShownAtRef.current,
+        ...data,
+      });
+      qShownAtRef.current = Date.now();
+    },
+    [mode],
+  );
+
   // Запустить сессию заданного режима по заданной очереди. Сбрасывает всё
   // прогресс-состояние, поэтому годится и для старта, и для «пройти заново».
   const startWith = useCallback(
     (m: Mode, q: WordCard[]) => {
       if (q.length === 0) return;
+      sessionDayRef.current = todayIndex();
+      qShownAtRef.current = Date.now();
       // Умный тест (любой режим кроме карточек) — free 1 попытка/день. Исчерпал —
       // мягкий лист с апселлом (без резкого прыжка на пейволл) и путём к карточкам.
       if (m !== 'flashcards' && !useTestAttempt()) {
@@ -320,6 +351,7 @@ export function ReviewSessionScreen() {
       lock.current = true;
       feedbackTap();
       if (rating === 'again') addMissed(card);
+      logAnswer(card, 'srs_rating', { rating });
       await reviewCard(card.id, rating);
       setReviewedCount((c) => c + 1);
       setRevealed(false);
@@ -328,7 +360,7 @@ export function ReviewSessionScreen() {
       if (next >= queue.length) setPhase('summary');
       lock.current = false;
     },
-    [queue, index, reviewCard, addMissed],
+    [queue, index, reviewCard, addMissed, logAnswer],
   );
 
   // --- Ответ на вопрос теста ---
@@ -357,15 +389,17 @@ export function ReviewSessionScreen() {
         );
       }
       speakWord(q.card.word, q.card.learningLang);
+      logAnswer(q.card, q.kind, { correct: opt.correct, answer: opt.text });
       // Верно → «вспомнил» (good), неверно → «забыл» (again): двигаем SRS.
       await reviewCard(q.card.id, opt.correct ? 'good' : 'again');
     },
-    [answered, quiz, qIndex, reviewCard, addMissed, promptShake],
+    [answered, quiz, qIndex, reviewCard, addMissed, promptShake, logAnswer],
   );
 
   // --- Переход к следующему вопросу теста / к итогу ---
   const onNextQuestion = useCallback(() => {
     if (!quiz) return;
+    qShownAtRef.current = Date.now();
     const next = qIndex + 1;
     if (next >= quiz.length) {
       setPhase('summary');
@@ -409,8 +443,9 @@ export function ReviewSessionScreen() {
       );
     }
     speakWord(q.card.word, q.card.learningLang);
+    logAnswer(q.card, q.kind, { correct, answer: typed });
     await reviewCard(q.card.id, correct ? 'good' : 'again');
-  }, [typeChecked, typed, quiz, qIndex, reviewCard, addMissed, promptShake]);
+  }, [typeChecked, typed, quiz, qIndex, reviewCard, addMissed, promptShake, logAnswer]);
 
   // --- «Скажи вслух»: самооценка (нет объективной проверки до ASR) ---
   const onSpeakRate = useCallback(
@@ -419,12 +454,18 @@ export function ReviewSessionScreen() {
       const q = quiz[qIndex];
       if (q) {
         if (rating === 'again') addMissed(q.card);
+        logAnswer(q.card, 'speakWord', { rating });
         await reviewCard(q.card.id, rating);
       }
       onNextQuestion();
     },
-    [quiz, qIndex, reviewCard, addMissed, onNextQuestion],
+    [quiz, qIndex, reviewCard, addMissed, onNextQuestion, logAnswer],
   );
+
+  // Конец сессии — досылаем хвост телеметрии, не дожидаясь таймера.
+  useEffect(() => {
+    if (phase === 'summary') flushReviewEvents();
+  }, [phase]);
 
   // --- Состояние: ждём загрузку коллекции ---
   if (loading || queue === null) {
