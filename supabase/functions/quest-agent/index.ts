@@ -153,6 +153,24 @@ const TOOLS = [
             type: 'string',
             description: 'Короткое (1-2 предложения) сообщение тренера на РОДНОМ языке ученика: почему сегодня именно эти цели. Конкретно, по-дружески, без воды.',
           },
+          exercises: {
+            type: 'array',
+            maxItems: 8,
+            description:
+              'Тренировка дня: 3–6 упражнений под слабые места из телеметрии. Форматы: dictation — предложение с целевым словом (продиктуем ученику); cloze — предложение с пропуском ____ вместо слова + 3 НЕВЕРНЫХ варианта в distractors; writeSentence — короткое задание «составь предложение…» в prompt. Слова — ТОЛЬКО из коллекции или целей квеста.',
+            items: {
+              type: 'object',
+              properties: {
+                word: { type: 'string', description: 'Целевое слово на изучаемом языке.' },
+                kind: { type: 'string', enum: ['dictation', 'cloze', 'writeSentence'] },
+                sentence: { type: 'string', description: 'Для dictation/cloze: предложение ≤120 символов; в cloze вместо слова — ____.' },
+                distractors: { type: 'array', items: { type: 'string' }, maxItems: 3, description: 'Только для cloze: 3 неверных варианта.' },
+                prompt: { type: 'string', description: 'Для writeSentence: короткое задание на родном языке ученика.' },
+                why: { type: 'string', description: 'Одна короткая причина: почему это упражнение (для трейса/баннера).' },
+              },
+              required: ['word', 'kind'],
+            },
+          },
           difficulty: { type: 'string', enum: ['easy', 'normal', 'hard'] },
           reasoning: { type: 'string', description: 'Твоя логика выбора, 2-3 предложения (для трейса, ученик не видит).' },
         },
@@ -176,8 +194,54 @@ function systemPrompt(learningLang: string, nativeLang: string, dayIndex: number
     '4. Если слабое слово — предмет, включи его в квест: ученик повторит его вживую. Если включаешь слабые слова в квест, подтяни их повторение на сегодня через reschedule_cards.',
     '5. Не повторяй цели из вчерашних квестов, если ученик их уже ловил (см. историю).',
     '6. Если коллекция пуста — дай 3 простых базовых предмета для новичка.',
-    '7. Закончи вызовом finish. Не пиши текст вне инструментов.',
+    '7. Вместе с finish передай exercises (3–6 упражнений). Формат КАЖДОГО выбирай по ошибкам форматов из get_review_stats, это главный сигнал: ошибки в audio-форматах → БОЛЬШИНСТВО упражнений dictation; ошибки в переводе/выборе → cloze; ошибок нет или серия успехов → продукция (writeSentence). Провалы вчера → difficulty easy; серия успехов → normal/hard.',
+    '8. Закончи вызовом finish. Не пиши текст вне инструментов.',
   ].join('\n');
+}
+
+// ── Валидация упражнений тренировки (guardrails Э3 — кодом, не промптом) ──
+interface Exercise {
+  v: 1;
+  word: string;
+  kind: 'dictation' | 'cloze' | 'writeSentence';
+  sentence?: string;
+  distractors?: string[];
+  prompt?: string;
+  why?: string;
+}
+
+/**
+ * Невалидное упражнение отбрасывается МОЛЧА (квест важнее тренировки):
+ * ≤8 штук, kind из белого списка, слово — только из allowedWords (коллекция +
+ * цели квеста), предложения ≤120 символов, cloze обязан содержать пропуск
+ * «____» и ≥2 дистракторов, dictation — предложение с целевым словом.
+ */
+function validateExercises(raw: unknown, allowedWords: Set<string>): Exercise[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Exercise[] = [];
+  for (const item of raw.slice(0, 10)) {
+    if (out.length >= 8) break;
+    const it = (item ?? {}) as Record<string, unknown>;
+    const word = String(it.word ?? '').trim();
+    const kind = String(it.kind ?? '') as Exercise['kind'];
+    if (!word || !['dictation', 'cloze', 'writeSentence'].includes(kind)) continue;
+    if (!allowedWords.has(word.toLowerCase())) continue;
+    const sentence = it.sentence != null ? String(it.sentence).trim().slice(0, 120) : '';
+    const distractors = Array.isArray(it.distractors)
+      ? it.distractors.map((d) => String(d ?? '').trim()).filter(Boolean).slice(0, 3)
+      : [];
+    const prompt = it.prompt != null ? String(it.prompt).trim().slice(0, 120) : '';
+    if (kind === 'dictation' && (!sentence || !sentence.toLowerCase().includes(word.toLowerCase()))) continue;
+    if (kind === 'cloze' && (!sentence || !sentence.includes('____') || distractors.length < 2)) continue;
+    const ex: Exercise = { v: 1, word, kind };
+    if (sentence) ex.sentence = sentence;
+    if (distractors.length) ex.distractors = distractors;
+    if (prompt) ex.prompt = prompt;
+    const why = it.why != null ? String(it.why).trim().slice(0, 80) : '';
+    if (why) ex.why = why;
+    out.push(ex);
+  }
+  return out;
 }
 
 // ── Реализация инструментов ─────────────────────────────────────────────
@@ -189,6 +253,7 @@ interface Ctx {
   learningLang: string;
   nativeLang: string;
   readCalled: boolean; // guardrail: finish только после чтения карточек
+  reviewStatsCalled: boolean; // guardrail: finish только после чтения телеметрии
   dryRun: boolean;     // debug: инструменты записи отвечают «понарошку» (проверка детерминированности)
 }
 
@@ -265,6 +330,7 @@ async function toolGetHistory(ctx: Ctx, args: { days?: number }): Promise<unknow
 }
 
 async function toolGetReviewStats(ctx: Ctx, args: { days?: number }): Promise<unknown> {
+  ctx.reviewStatsCalled = true;
   const days = Math.max(1, Math.min(14, Math.round(Number(args.days) || 7)));
   const since = new Date(Date.now() - days * DAY_MS).toISOString();
   const { data, error } = await ctx.admin
@@ -358,7 +424,13 @@ async function runAgentForUser(
   userId: string,
   dayIndex: number,
   dryRun = false,
-): Promise<{ outcome: string; runId: number | null; quests?: string[] }> {
+): Promise<{
+  outcome: string;
+  runId: number | null;
+  quests?: string[];
+  exercises?: Exercise[];
+  difficulty?: string;
+}> {
   // Активная пара языков = пара самой свежей карточки.
   const { data: last } = await admin
     .from('word_cards')
@@ -377,13 +449,26 @@ async function runAgentForUser(
   if (runErr || !runRow) return { outcome: 'error', runId: null };
   const runId = runRow.id as number;
 
-  const ctx: Ctx = { admin, userId, runId, dayIndex, learningLang, nativeLang, readCalled: false, dryRun };
+  const ctx: Ctx = {
+    admin,
+    userId,
+    runId,
+    dayIndex,
+    learningLang,
+    nativeLang,
+    readCalled: false,
+    reviewStatsCalled: false,
+    dryRun,
+  };
+  let exercisesNudged = false; // однократный отказ finish без упражнений (квест важнее — второй раз принимаем)
   const steps: Array<{ tool: string; args: unknown; result: unknown }> = [];
   let tokensIn = 0;
   let tokensOut = 0;
   let noToolStrikes = 0; // модель иногда игнорирует tool_choice=required и пишет текст
   let outcome = 'error';
   let finalQuests: string[] | undefined;
+  let finalExercises: Exercise[] | undefined;
+  let finalDifficulty: string | undefined;
 
   const messages: Array<Record<string, unknown>> = [
     { role: 'system', content: systemPrompt(learningLang, nativeLang, dayIndex) },
@@ -408,7 +493,7 @@ async function runAgentForUser(
           // контракт (написала план текстом) и карточки прочитаны — принудительно
           // форсируем именно finish: Gemini иногда игнорирует мягкий 'required'.
           tool_choice:
-            noToolStrikes > 0 && ctx.readCalled
+            noToolStrikes > 0 && ctx.readCalled && ctx.reviewStatsCalled
               ? { type: 'function', function: { name: 'finish' } }
               : 'required',
           temperature: 0, // воспроизводимость: тот же ученик → тот же план (шлюз П3)
@@ -456,6 +541,15 @@ async function runAgentForUser(
           steps.push({ tool: 'finish', args, result: 'guard: rejected — no reads yet' });
           continue;
         }
+        // Guardrail: план без взгляда на реальные ответы ученика — не план.
+        if (!ctx.reviewStatsCalled) {
+          messages.push(msg, {
+            role: 'tool', tool_call_id: call.id,
+            content: JSON.stringify({ error: 'Сначала вызови get_review_stats (реальные ответы ученика), потом решай.' }),
+          });
+          steps.push({ tool: 'finish', args, result: 'guard: rejected — review stats not read' });
+          continue;
+        }
         const rawQuests = Array.isArray(args.quests) ? (args.quests as Record<string, unknown>[]) : [];
         if (rawQuests.length !== 3) {
           messages.push(msg, {
@@ -473,6 +567,35 @@ async function runAgentForUser(
           ipa: q.ipa != null ? String(q.ipa) : '',
           dayIndex,
         }));
+        // Упражнения тренировки: слова — только из коллекции или целей квеста.
+        const { data: ownWords } = await admin
+          .from('word_cards')
+          .select('word')
+          .eq('user_id', userId)
+          .eq('learning_lang', learningLang)
+          .eq('native_lang', nativeLang)
+          .limit(500);
+        const allowed = new Set<string>(
+          (ownWords ?? []).map((r: { word: unknown }) => String(r.word).toLowerCase()),
+        );
+        for (const q of quests) allowed.add(q.word.toLowerCase());
+        const exercises = validateExercises(args.exercises, allowed);
+
+        // Guardrail: тренировка — обязательная часть плана. Один отказ с
+        // подсказкой; если модель и со второго раза не дала валидных
+        // упражнений — принимаем квест без них (квест важнее).
+        if (exercises.length === 0 && !exercisesNudged) {
+          exercisesNudged = true;
+          messages.push(msg, {
+            role: 'tool', tool_call_id: call.id,
+            content: JSON.stringify({
+              error: 'Добавь в exercises 3–6 упражнений (dictation/cloze/writeSentence) под цели квеста и слабые слова. dictation/cloze — с полем sentence (в cloze пропуск ____ и 3 distractors).',
+            }),
+          });
+          steps.push({ tool: 'finish', args: { reasoning: args.reasoning }, result: 'guard: rejected — no exercises' });
+          continue;
+        }
+
         if (!dryRun) {
           const { error: upErr } = await admin.from('daily_quests').upsert({
             user_id: userId,
@@ -480,6 +603,7 @@ async function runAgentForUser(
             quests,
             coach_message: String(args.coach_message ?? ''),
             difficulty: String(args.difficulty ?? 'normal'),
+            exercises,
             run_id: runId,
           });
           if (upErr) {
@@ -488,7 +612,16 @@ async function runAgentForUser(
           }
         }
         finalQuests = quests.map((q) => q.word);
-        steps.push({ tool: 'finish', args: { reasoning: args.reasoning }, result: finalQuests });
+        finalExercises = exercises;
+        finalDifficulty = String(args.difficulty ?? 'normal');
+        steps.push({
+          tool: 'finish',
+          args: { reasoning: args.reasoning },
+          result: {
+            targets: finalQuests,
+            exercises: exercises.map((e) => `${e.kind}:${e.word}`),
+          },
+        });
         outcome = 'ok';
         break;
       }
@@ -525,7 +658,7 @@ async function runAgentForUser(
       cost_usd: tokensIn * PRICE_IN + tokensOut * PRICE_OUT,
     })
     .eq('id', runId);
-  return { outcome, runId, quests: finalQuests };
+  return { outcome, runId, quests: finalQuests, exercises: finalExercises, difficulty: finalDifficulty };
 }
 
 // ── HTTP-обвязка ─────────────────────────────────────────────────────────
