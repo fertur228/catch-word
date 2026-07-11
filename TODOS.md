@@ -2,6 +2,16 @@
 
 Отложенный скоуп из ревью плана «движок v2» (/autoplan 11.07.2026, docs/PLAN-engine-v2.md).
 
+- [ ] **Юнит-раннер для чистых функций** (P2, S) — в репо нет юнит-инфраструктуры (только
+  Playwright/smoke). Завести vitest (или node:test+tsx) и покрыть: checkDictation/
+  normalizeAnswer/stripDiacritics, buildWorkoutQuiz, маппинг score→SRS, validateExercises
+  (вынести из quest-agent/index.ts в модуль + deno test). Из Э2/Э3: код написан, тесты — долг.
+- [ ] **GOOGLE_API_KEY (AI Studio)** (P2, S) — завести ключ и переключить embed-cards с
+  gte-small (384, англоцентричен) на gemini-embedding (768, мультиязычный: de/es/zh);
+  пересчёт: truncate card_embeddings → джоб добьёт сам. Сейчас работает на gte-small.
+- [ ] **Подписаться на алерты**: приложение ntfy (или https://ntfy.sh в браузере) → топик
+  `takeword-agent-fertur228` — туда приходит «ночной агент не в порядке» (00:30 UTC).
+
 - [ ] **Экран «Ночной отчёт тренера» для пользователя** (P3, M) — прозрачность: что агент
   делал ночью (двигал повторения, собирал тренировку). Why: доверие + вау-эффект. Депендс:
   edge-endpoint к agent_runs (RLS закрывает прямой доступ).

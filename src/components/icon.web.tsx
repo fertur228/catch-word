@@ -247,6 +247,16 @@ const ICONS: Record<string, Draw> = {
       <path d="M22 13v-2" />
     </>
   ),
+  // «Расскажи о фото» (микрофон — Lucide mic, капсула залита)
+  'mic.fill': (c) => (
+    <>
+      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" fill={c} stroke={c} />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke={c} />
+      <path d="M12 19v3" fill="none" stroke={c} />
+    </>
+  ),
+  // Стоп записи (залитый квадрат со скруглением)
+  'stop.fill': (c) => <rect x="6" y="6" width="12" height="12" rx="2" fill={c} stroke={c} />,
   'tortoise.fill': (c) => (
     <>
       <path

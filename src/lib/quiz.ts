@@ -31,7 +31,8 @@ export type QuizKind =
   | 'typeWord' // Впиши: ввести слово с клавиатуры (регистр не важен)
   | 'speakWord' // Скажи вслух: произнести слово (на честность)
   | 'dictation' // Диктант: услышать предложение → впечатать ключевое слово (движок v2, Э2)
-  | 'writeSentence'; // Составить СВОЁ предложение со словом → оценивает ИИ-тренер (Э2)
+  | 'writeSentence' // Составить СВОЁ предложение со словом → оценивает ИИ-тренер (Э2)
+  | 'describePhoto'; // Расскажи о фото: описать СВОЙ снимок голосом/текстом → ИИ-тренер (Э4)
 
 /** Как показываем сам вопрос. */
 export type PromptMode = 'text' | 'image' | 'audio' | 'cloze';
@@ -177,6 +178,8 @@ function labelOf(kind: QuizKind): string {
       return t('Услышь и напиши слово');
     case 'writeSentence':
       return t('Составь своё предложение');
+    case 'describePhoto':
+      return t('Расскажи о фото');
   }
 }
 
@@ -184,14 +187,15 @@ function labelOf(kind: QuizKind): string {
 function answerModeOf(kind: QuizKind): AnswerMode {
   if (kind === 'intro') return 'intro';
   if (kind === 'typeWord' || kind === 'dictation') return 'type';
-  if (kind === 'writeSentence') return 'write';
+  // «Расскажи о фото» — та же механика write: свободный текст → оценка тренера.
+  if (kind === 'writeSentence' || kind === 'describePhoto') return 'write';
   if (kind === 'speakWord') return 'speak';
   return 'choice';
 }
 
 /** Как показываем вопрос для данного вида. */
 function promptModeOf(kind: QuizKind): PromptMode {
-  if (kind === 'imageToWord' || kind === 'imageToTranslation') return 'image';
+  if (kind === 'imageToWord' || kind === 'imageToTranslation' || kind === 'describePhoto') return 'image';
   if (kind === 'audioToWord' || kind === 'audioToTranslation' || kind === 'dictation') return 'audio';
   if (kind === 'clozeExample') return 'cloze';
   return 'text';
@@ -379,7 +383,8 @@ function isValid(card: WordCard, pool: WordCard[], kind: QuizKind): boolean {
   if (kind === 'chooseSynonym') return buildSynonymOptions(card, pool) != null;
   // Вопросы «с картинкой» — только для карточек с НАСТОЯЩИМ фото (не иконкой),
   // иначе получится «фото-вопрос», где на месте фото просто иконка категории.
-  if (kind === 'imageToWord' || kind === 'imageToTranslation') return !!card.imageUri;
+  if (kind === 'imageToWord' || kind === 'imageToTranslation' || kind === 'describePhoto')
+    return !!card.imageUri;
   if (kind === 'translationToImage') return !!card.imageUri && buildImageOptions(card, pool) != null;
   return true;
 }
@@ -518,6 +523,33 @@ export function buildWorkoutQuiz(exercises: AgentExercise[], pool: WordCard[]): 
     }
   });
   return out;
+}
+
+/**
+ * «Расскажи о фото» (движок v2, Э4, спека B.5): сессия до `count` карточек с
+ * НАСТОЯЩИМ фото (imageUri). Приоритет — просроченные по dueAt (самые «старые»
+ * сверху), затем те, чей повтор ближе. Механика ответа — write (оценка тренера).
+ */
+export function buildSpeakPhotoQuiz(cards: WordCard[], count = 5): QuizQuestion[] {
+  const now = Date.now();
+  const withPhoto = cards.filter((c) => !!c.imageUri);
+  const due = withPhoto
+    .filter((c) => (c.dueAt ?? 0) <= now)
+    .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0));
+  const rest = withPhoto
+    .filter((c) => (c.dueAt ?? 0) > now)
+    .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0));
+  return [...due, ...rest].slice(0, count).map((card, i) => ({
+    id: `speakphoto-${card.id}-${i}`,
+    kind: 'describePhoto' as const,
+    card,
+    label: t('Расскажи о фото'),
+    promptMode: 'image' as const,
+    prompt: '',
+    optionMode: 'text' as const,
+    options: [],
+    answerMode: 'write' as const,
+  }));
 }
 
 /**

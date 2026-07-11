@@ -15,7 +15,7 @@
  * Данные — мок (см. src/lib/mock-data.ts). Бэкенда и реального SRS-сервера нет.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { SFSymbol } from 'expo-symbols';
@@ -46,21 +46,26 @@ import { Sticker } from '@/components/sticker';
 import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useAuth } from '@/lib/auth-context';
 import { useCollection } from '@/lib/collection-context';
+import { getPref, setPref } from '@/lib/db';
 import { feedbackCorrect, feedbackTap, feedbackWrong } from '@/lib/feedback';
 import { getLang, useT } from '@/lib/i18n';
 import { gradeAnswer, type GradeVerdict } from '@/lib/grade';
 import { hasVoiceForLang, speakWord } from '@/lib/speech';
 import {
   buildQuiz,
+  buildSpeakPhotoQuiz,
+  buildWorkoutQuiz,
   checkDictation,
   dictationSentence,
   type QuizKind,
   type QuizQuestion,
 } from '@/lib/quiz';
 import { buildSessionQueue, computeNextReview, hasReviewWork } from '@/lib/srs';
-import { todayIndex } from '@/lib/daily-quest';
+import { fetchCoachDigest, todayIndex, type CoachDigest } from '@/lib/daily-quest';
 import { flushReviewEvents, logReviewEvent } from '@/lib/telemetry';
+import { fetchNeighbors } from '@/lib/semantic';
 import type { SrsRating, WordCard } from '@/types';
 
 /** Сколько карточек максимум в одной сессии повтора. */
@@ -68,7 +73,8 @@ const MAX_SESSION = 20;
 /** Сколько недель показываем в карте активности (совпадает с подписью «N недель»). */
 const REVIEW_WEEKS = 18;
 /** Цвета иконок-плиток режимов (как в дизайне): оранж / синий / бирюза / фиолет
- *  + индиго «Диктант» и роза «Напиши сам» — задания тренера (Э2, спека B.3). */
+ *  + индиго «Диктант», роза «Напиши сам», зелёный «Расскажи о фото» —
+ *  задания тренера (Э2/Э4, спека B.3). */
 const MODE_TILE = {
   flash: '#FF9500',
   listen: '#0A84FF',
@@ -76,11 +82,23 @@ const MODE_TILE = {
   smart: '#AF52DE',
   dictation: '#5856D6',
   write: '#FF2D55',
+  speakPhoto: '#34C759',
 };
 /** Этапы сессии. */
 type Phase = 'intro' | 'flashcards' | 'test' | 'summary';
+/**
+ * Прогресс «Тренировки от тренера» в key_value (Э3, спека B.1): день фиксируем
+ * todayIndex(), nextIdx — сколько вопросов уже отвечено (для «Продолжить»),
+ * done — тренировка дня пройдена целиком.
+ */
+const PREF_WORKOUT = 'agent_workout';
+interface WorkoutPref {
+  day: number;
+  nextIdx: number;
+  done: boolean;
+}
 /** Режим тренировки, выбранный на интро-экране. */
-type Mode = 'flashcards' | 'smart' | 'listen' | 'sentence' | 'dictation' | 'write';
+type Mode = 'flashcards' | 'smart' | 'listen' | 'sentence' | 'dictation' | 'write' | 'speakPhoto';
 
 /** Фиксированный формат вопроса для режима (undefined = адаптивный «Умный тест»). */
 function forceKindFor(m: Mode): QuizKind | undefined {
@@ -89,6 +107,38 @@ function forceKindFor(m: Mode): QuizKind | undefined {
   if (m === 'dictation') return 'dictation';
   if (m === 'write') return 'writeSentence';
   return undefined;
+}
+
+/**
+ * Решение «STT недоступен» запоминается навсегда (Э4): на iOS WebKit API
+ * СУЩЕСТВУЕТ, но без Siri&Dictation молча даёт 'service-not-allowed'/ноль
+ * результатов — деградируем ПО ОШИБКЕ, не по наличию API. Сбрасывать не нужно.
+ */
+const PREF_STT_UNAVAILABLE = 'stt_unavailable';
+/** Закрытый крестиком дайджест недели: храним weekStart, чтобы не показать снова. */
+const PREF_DIGEST_DISMISSED = 'digest_dismissed';
+/** Таймаут «мёртвого» распознавания (Э4): 8 с без единого сигнала → текст. */
+const STT_DEAD_MS = 8_000;
+
+/**
+ * Конструктор Web Speech API. ТОЛЬКО веб (натив/SSR → undefined: там сразу
+ * текстовый ввод). Наличие конструктора ≠ работоспособность — см. Э4.
+ */
+// any: нестандартизованный браузерный API (webkit-префикс), типов в проекте нет.
+function getSpeechRecognitionCtor(): (new () => any) | undefined {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+  const w = window as any;
+  return w.webkitSpeechRecognition || w.SpeechRecognition || undefined;
+}
+
+/** Понедельник ПРОШЛОЙ недели (UTC, YYYY-MM-DD) — нижняя граница «свежего» дайджеста. */
+function lastWeekMondayIso(): string {
+  const now = new Date();
+  const sinceMonday = (now.getUTCDay() + 6) % 7; // дней с понедельника этой недели
+  const monday = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - sinceMonday - 7),
+  );
+  return monday.toISOString().slice(0, 10);
 }
 
 /** Склонение слова «слово» по числу (1 слово / 2 слова / 5 слов). */
@@ -109,6 +159,16 @@ function pluralModes(n: number): string {
   if (b === 1) return 'режим';
   if (b > 1 && b < 5) return 'режима';
   return 'режимов';
+}
+
+/** Склонение слова «упражнение» по числу (1 упражнение / 2 упражнения / 5 упражнений). */
+function pluralExercises(n: number): string {
+  const a = Math.abs(n) % 100;
+  const b = a % 10;
+  if (a > 10 && a < 20) return 'упражнений';
+  if (b === 1) return 'упражнение';
+  if (b > 1 && b < 5) return 'упражнения';
+  return 'упражнений';
 }
 
 /** Склонение слова «день» по числу (1 день / 2 дня / 5 дней). */
@@ -134,6 +194,7 @@ export function ReviewSessionScreen() {
   const theme = useTheme();
   const t = useT();
   const router = useRouter();
+  const { session } = useAuth();
   const {
     loading,
     cards,
@@ -146,6 +207,8 @@ export function ReviewSessionScreen() {
     activityByDay,
     reviewStreak,
     recordTestSession,
+    agentExercises,
+    coachMessage,
   } = useCollection();
 
   // Очередь фиксируем один раз (снимок), чтобы она не «съезжала», когда
@@ -199,12 +262,113 @@ export function ReviewSessionScreen() {
   // Есть ли TTS-голос изучаемого языка (гейт плитки «Диктант», B.3).
   const [voiceOk, setVoiceOk] = useState(true);
 
+  // --- «Расскажи о фото» (движок v2, Э4, спека B.5) ---
+  // Карточки с НАСТОЯЩИМ фото — гейт видимости плитки (B.3): 0 → empty-плитка в камеру.
+  const photoCards = useMemo(() => cards.filter((c) => !!c.imageUri), [cards]);
+  // STT недоступен: решение запомнено после первой ошибки распознавания (Э4).
+  const [sttUnavailable, setSttUnavailable] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    getPref(PREF_STT_UNAVAILABLE)
+      .then((v) => {
+        if (alive && v === '1') setSttUnavailable(true);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const markSttUnavailable = useCallback(() => {
+    setSttUnavailable(true);
+    void setPref(PREF_STT_UNAVAILABLE, '1');
+  }, []);
+
+  // --- Дайджест недели от тренера (Э6-клиент) ---
+  // Карточка «Итоги недели» на интро: пн–вт, если есть сводка за прошлую
+  // неделю и её ещё не закрыли крестиком. Любая ошибка → карточки просто нет.
+  const [digest, setDigest] = useState<CoachDigest | null>(null);
+  useEffect(() => {
+    const dow = new Date().getDay(); // 1 — понедельник, 2 — вторник
+    if (dow !== 1 && dow !== 2) return;
+    const uid = session?.user?.id;
+    if (!uid) return;
+    let alive = true;
+    Promise.all([fetchCoachDigest(uid), getPref(PREF_DIGEST_DISMISSED)])
+      .then(([d, dismissed]) => {
+        if (!alive || !d) return;
+        if (d.weekStart < lastWeekMondayIso()) return; // сводка старее прошлой недели
+        if (dismissed === d.weekStart) return; // уже закрывали
+        setDigest(d);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [session?.user?.id]);
+  const dismissDigest = useCallback(() => {
+    feedbackTap();
+    if (digest) void setPref(PREF_DIGEST_DISMISSED, digest.weekStart);
+    setDigest(null);
+  }, [digest]);
+
+  // --- «Тренировка от тренера» (движок v2, Э3, спека B.1) ---
+  // Идёт ли сейчас именно тренировка (а не обычный тест): телеметрия source
+  // 'workout', свой заголовок итога и персист прогресса.
+  const [isWorkout, setIsWorkout] = useState(false);
+  // Сохранённый прогресс тренировки дня; null — ещё читаем из key_value
+  // (пока null и тренировка есть — держим общий лоадер, чтобы hero не «скакал»).
+  const [workoutPref, setWorkoutPref] = useState<WorkoutPref | null>(null);
+  // Смещение «Продолжить»: сколько вопросов срезано с начала при возобновлении.
+  const workoutOffsetRef = useRef(0);
+  useEffect(() => {
+    let alive = true;
+    getPref(PREF_WORKOUT)
+      .then((raw) => {
+        if (!alive) return;
+        if (raw) {
+          try {
+            const p = JSON.parse(raw) as Partial<WorkoutPref> | null;
+            if (
+              p &&
+              typeof p.day === 'number' &&
+              typeof p.nextIdx === 'number' &&
+              typeof p.done === 'boolean'
+            ) {
+              setWorkoutPref({ day: p.day, nextIdx: p.nextIdx, done: p.done });
+              return;
+            }
+          } catch {
+            /* битый json — начинаем с чистого */
+          }
+        }
+        setWorkoutPref({ day: -1, nextIdx: 0, done: false });
+      })
+      .catch(() => {
+        if (alive) setWorkoutPref({ day: -1, nextIdx: 0, done: false });
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const saveWorkoutPref = useCallback((p: WorkoutPref) => {
+    setWorkoutPref(p);
+    void setPref(PREF_WORKOUT, JSON.stringify(p));
+  }, []);
+  // Сколько вопросов реально соберётся из упражнений агента (невалидные молча
+  // отброшены — считаем по фактическим вопросам, buildWorkoutQuiz детерминирован).
+  const workoutTotal = useMemo(
+    () => (agentExercises.length > 0 ? buildWorkoutQuiz(agentExercises, cards).length : 0),
+    [agentExercises, cards],
+  );
+
   // Слова, которые не дались в этой сессии (тест — неверный ответ, карточки —
   // оценка «Забыл»). Используем для блока «Разбор ошибок» и кнопки «Повторить
   // ошибки» на экране итога. Дедуплицируем по id.
   const [missed, setMissed] = useState<WordCard[]>([]);
   const addMissed = useCallback((card: WordCard) => {
-    setMissed((prev) => (prev.some((c) => c.id === card.id) ? prev : [...prev, card]));
+    // Синтетические карточки тренировки имеют id='' — дедуплицируем по слову.
+    const keyOf = (c: WordCard) => c.id || c.word.toLowerCase();
+    setMissed((prev) => (prev.some((c) => keyOf(c) === keyOf(card)) ? prev : [...prev, card]));
   }, []);
 
   // Салют при верном ответе, шейк промпта при неверном, празднование идеальной сессии.
@@ -225,6 +389,7 @@ export function ReviewSessionScreen() {
     setRevealed(false);
     setReviewedCount(0);
     setMissed([]);
+    setIsWorkout(false);
   }, [prefs.learningLang, prefs.nativeLang]);
 
   // Сборка очереди. Пересобираем, ПОКА не начата сессия (phase 'intro') и очередь
@@ -300,6 +465,21 @@ export function ReviewSessionScreen() {
 
   // Собрать свежую очередь «с нуля» (для «Пройти ещё раз»): сначала то, что пора
   // повторить, иначе — случайная тренировка. Тот же приоритет, что при первом входе.
+  // --- Умные дистракторы (Э5): семантические соседи карточек очереди ---
+  // Тянем в фоне при готовности очереди; не успели/ошибка → квиз соберётся на
+  // старых правилах (категория/пул) — разницы в UX нет, только в качестве.
+  const neighborsRef = useRef<Map<string, string[]> | undefined>(undefined);
+  useEffect(() => {
+    if (!queue || queue.length === 0) return;
+    let alive = true;
+    fetchNeighbors(queue).then((map) => {
+      if (alive && map.size) neighborsRef.current = map;
+    });
+    return () => {
+      alive = false;
+    };
+  }, [queue]);
+
   const buildFreshQueue = useCallback((): WordCard[] => {
     if (cards.length === 0) return [];
     setPractice(!hasReviewWork(cards));
@@ -324,19 +504,26 @@ export function ReviewSessionScreen() {
       },
     ) => {
       logReviewEvent({
-        cardId: card.id ?? null,
+        // Синтетическая карточка тренировки (id='') → card_id=null (Э3, B.6).
+        cardId: card.id || null,
         word: card.word,
         dayIndex: sessionDayRef.current,
         learningLang: card.learningLang,
         nativeLang: card.nativeLang,
-        source: mode === 'flashcards' ? 'flashcards' : 'quiz',
+        source: isWorkout ? 'workout' : mode === 'flashcards' ? 'flashcards' : 'quiz',
         kind,
         responseMs: Date.now() - qShownAtRef.current,
         ...data,
       });
       qShownAtRef.current = Date.now();
+      // Тренировка: двигаем сохранённый прогресс после каждого ответа — при
+      // брошенной сессии «Продолжить» стартует ровно с этого места (Э3, п.4).
+      if (isWorkout) {
+        const next = workoutOffsetRef.current + qIndex + 1;
+        saveWorkoutPref({ day: sessionDayRef.current, nextIdx: next, done: next >= workoutTotal });
+      }
     },
-    [mode],
+    [mode, isWorkout, qIndex, workoutTotal, saveWorkoutPref],
   );
 
   // Сброс пер-вопросного состояния открытых ответов (диктант / «Напиши сам»).
@@ -366,6 +553,7 @@ export function ReviewSessionScreen() {
       }
       // Тест начат — фиксируем в журнале активности (для хитмапа/стрика).
       if (m !== 'flashcards') recordTestSession();
+      setIsWorkout(false);
       setQueue(q);
       setMode(m);
       setMissed([]);
@@ -385,11 +573,14 @@ export function ReviewSessionScreen() {
       } else {
         // Умный тест — 10 вопросов из ВСЕЙ коллекции, форматы вперемешку и без
         // «знакомства» (все 10 — настоящие вопросы). «На слух» / «Слово в
-        // предложение» идут по очереди с фиксированным форматом.
+        // предложение» идут по очереди с фиксированным форматом. «Расскажи о
+        // фото» — своя сборка: до 5 карточек с фото, просроченные сверху (Э4).
         setQuiz(
           m === 'smart'
-            ? buildQuiz(cards, 10, cards, undefined, true)
-            : buildQuiz(q, q.length, cards, forceKindFor(m)),
+            ? buildQuiz(cards, 10, cards, undefined, true, neighborsRef.current)
+            : m === 'speakPhoto'
+              ? buildSpeakPhotoQuiz(q)
+              : buildQuiz(q, q.length, cards, forceKindFor(m), false, neighborsRef.current),
         );
         setQIndex(0);
         setSelected(null);
@@ -399,6 +590,42 @@ export function ReviewSessionScreen() {
       }
     },
     [cards, useTestAttempt, recordTestSession, resetOpenAnswer],
+  );
+
+  // --- Запуск «Тренировки от тренера» (Э3, B.1) ---
+  // Тренировка — ежедневный подарок тренера: попытку умного теста НЕ тратит
+  // (useTestAttempt не зовём, гейт обычных плиток не трогаем), но в журнал
+  // активности идёт как обычный тест (хитмап/стрик). skip>0 — «Продолжить»:
+  // срезаем уже отвеченные вопросы (buildWorkoutQuiz детерминирован по
+  // exercises, перемешивание вариантов cloze — допустимо).
+  const startWorkout = useCallback(
+    (skip = 0) => {
+      const questions = buildWorkoutQuiz(agentExercises, cards).slice(skip);
+      if (questions.length === 0) return;
+      feedbackTap();
+      sessionDayRef.current = todayIndex();
+      qShownAtRef.current = Date.now();
+      workoutOffsetRef.current = skip;
+      recordTestSession();
+      setIsWorkout(true);
+      setMode('smart'); // итог/празднование считаются как у теста
+      setMissed([]);
+      // Хвосты открытых ответов прошлой сессии (Э2): фидбек, кап, «без оценки».
+      gradeTokenRef.current += 1;
+      setCoachNotes(new Map());
+      setLimitHit(false);
+      setUngraded(0);
+      setTyped('');
+      setTypeChecked(null);
+      resetOpenAnswer();
+      setQuiz(questions);
+      setQIndex(0);
+      setSelected(null);
+      setAnswered(false);
+      setScore(0);
+      setPhase('test');
+    },
+    [agentExercises, cards, recordTestSession, resetOpenAnswer],
   );
 
   // --- Пройти ещё раз тем же режимом (свежая очередь) ---
@@ -417,11 +644,14 @@ export function ReviewSessionScreen() {
   }, [buildFreshQueue]);
 
   // --- Повторить только ошибки тестом ---
+  // Синтетические карточки тренировки (id='') в повтор не берём: их нет в
+  // коллекции, SRS по ним не двигается, а тест без перевода не собрать.
+  const retryableMissed = useMemo(() => missed.filter((c) => c.id), [missed]);
   const onRetryMissed = useCallback(() => {
-    if (missed.length === 0) return;
+    if (retryableMissed.length === 0) return;
     feedbackTap();
-    startWith('smart', missed);
-  }, [missed, startWith]);
+    startWith('smart', retryableMissed);
+  }, [retryableMissed, startWith]);
 
   // Действия апселл-листа: на пейволл или к бесплатным карточкам (не запираем наглухо).
   const onLimitPremium = useCallback(() => {
@@ -571,7 +801,8 @@ export function ReviewSessionScreen() {
     feedbackTap();
     addMissed(q.card);
     const token = gradeTokenRef.current;
-    const cardId = q.card.id;
+    // Ключ разбора ошибок: у синтетических карточек тренировки id='' — берём слово.
+    const cardId = q.card.id || q.card.word;
     gradeAnswer({
       task: 'dictation',
       word: q.card.word,
@@ -595,7 +826,8 @@ export function ReviewSessionScreen() {
     await reviewCard(q.card.id, 'again');
   }, [dictResult, typed, quiz, qIndex, reviewCard, addMissed, logAnswer]);
 
-  // --- «Напиши сам»: свободное предложение → оценка ИИ-тренера (Э2, B.2) ---
+  // --- «Напиши сам» / «Расскажи о фото»: свободный ответ → оценка ИИ-тренера
+  // (Э2/Э4, B.2). Механика одна: вердикты, звуки, SRS-маппинг по score, фолбэки.
   const onWriteSubmit = useCallback(async () => {
     if (writePhase !== 'input' || !quiz) return;
     const q = quiz[qIndex];
@@ -603,7 +835,7 @@ export function ReviewSessionScreen() {
     const token = gradeTokenRef.current;
     setWritePhase('grading');
     const res = await gradeAnswer({
-      task: 'write_sentence',
+      task: q.kind === 'describePhoto' ? 'describe_photo' : 'write_sentence',
       word: q.card.word,
       userAnswer: typed,
       learningLang: q.card.learningLang,
@@ -625,7 +857,10 @@ export function ReviewSessionScreen() {
         feedbackTap();
         if (res.corrected || res.feedback) {
           setCoachNotes((prev) =>
-            new Map(prev).set(q.card.id, { corrected: res.corrected, feedback: res.feedback }),
+            new Map(prev).set(q.card.id || q.card.word, {
+              corrected: res.corrected,
+              feedback: res.feedback,
+            }),
           );
         }
       }
@@ -669,12 +904,19 @@ export function ReviewSessionScreen() {
   );
 
   // Конец сессии — досылаем хвост телеметрии, не дожидаясь таймера.
+  // Для тренировки итог = done: hero переходит в «Тренировка выполнена».
   useEffect(() => {
-    if (phase === 'summary') flushReviewEvents();
-  }, [phase]);
+    if (phase !== 'summary') return;
+    flushReviewEvents();
+    if (isWorkout) {
+      saveWorkoutPref({ day: sessionDayRef.current, nextIdx: workoutTotal, done: true });
+    }
+  }, [phase, isWorkout, workoutTotal, saveWorkoutPref]);
 
   // --- Состояние: ждём загрузку коллекции ---
-  if (loading || queue === null) {
+  // Прогресс тренировки (key_value) ещё не прочитан → тоже держим лоадер:
+  // иначе hero мигнёт «ready» и перескочит в «done»/«Продолжить» (B.1, pending).
+  if (loading || queue === null || (agentExercises.length > 0 && workoutPref === null)) {
     return (
       <Screen>
         <View style={styles.center}>
@@ -705,6 +947,16 @@ export function ReviewSessionScreen() {
   // ===================== ИНТРО: выбор режима =====================
   if (phase === 'intro') {
     const n = queue.length;
+    // Состояние hero-тренировки (B.1): ready / in-progress / done. Прогресс из
+    // key_value валиден только для сегодняшнего дня (todayIndex).
+    const todayIdx = todayIndex();
+    const wp = workoutPref;
+    const workoutState: 'ready' | 'in-progress' | 'done' =
+      wp && wp.day === todayIdx && (wp.done || wp.nextIdx >= workoutTotal)
+        ? 'done'
+        : wp && wp.day === todayIdx && wp.nextIdx > 0
+          ? 'in-progress'
+          : 'ready';
     return (
       <Screen scroll>
         <View style={styles.intro}>
@@ -720,7 +972,81 @@ export function ReviewSessionScreen() {
             </ThemedText>
           </Reveal>
 
-          {/* Hero: статус + стрик + быстрый старт тренировки */}
+          {/* Hero-подмена (Э3, B.1.1): тренировка от тренера на сегодня есть →
+              hero ПОДМЕНЯЕТСЯ тренировкой. Никакого отдельного баннера-соседа:
+              точка входа одна. Пусто → обычный hero, как раньше. */}
+          {workoutTotal > 0 ? (
+            <Reveal delay={100}>
+              <View style={[styles.heroCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                <View style={styles.heroPills}>
+                  {workoutState === 'done' ? (
+                    <View style={[styles.pill, { backgroundColor: theme.successSoft }]}>
+                      <Icon name="checkmark.circle.fill" size={14} color={theme.success} />
+                      <ThemedText type="small" style={[styles.pillText, { color: theme.success }]}>
+                        {t('Тренировка от тренера')}
+                      </ThemedText>
+                    </View>
+                  ) : (
+                    <View style={[styles.pill, { backgroundColor: theme.primarySoft }]}>
+                      <Icon name="sparkles" size={13} color={theme.primary} />
+                      <ThemedText type="small" style={[styles.pillText, { color: theme.primary }]}>
+                        {t('Тренировка от тренера')}
+                      </ThemedText>
+                    </View>
+                  )}
+                  <View style={[styles.pill, { backgroundColor: theme.goldSoft }]}>
+                    <Icon name="flame.fill" size={13} color={theme.gold} />
+                    <ThemedText type="small" style={[styles.pillText, { color: theme.gold }]}>
+                      {getLang() === 'en'
+                        ? `${reviewStreak} ${reviewStreak === 1 ? 'day' : 'days'}`
+                        : `${reviewStreak} ${pluralDays(reviewStreak)}`}
+                    </ThemedText>
+                  </View>
+                </View>
+                {workoutState === 'done' ? (
+                  // done: галочка + для Premium повтор; free — плитки ниже, как раньше.
+                  <>
+                    <ThemedText type="subtitle" style={styles.heroTitle}>
+                      {t('Тренировка выполнена')}
+                    </ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {t('Новая тренировка будет завтра')}
+                    </ThemedText>
+                    {isPremium ? (
+                      <Button
+                        title={t('Пройти ещё раз')}
+                        icon="arrow.counterclockwise"
+                        onPress={() => startWorkout(0)}
+                      />
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    {/* «Почему эти слова» от тренера — 2 строки, НЕ режем в одну (B.1). */}
+                    <ThemedText type="subtitle" style={styles.heroTitle} numberOfLines={2}>
+                      {coachMessage ?? t('Тренер собрал упражнения по твоим ответам')}
+                    </ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {getLang() === 'en'
+                        ? `${workoutTotal} ${workoutTotal === 1 ? 'exercise' : 'exercises'}`
+                        : `${workoutTotal} ${pluralExercises(workoutTotal)}`}
+                    </ThemedText>
+                    <Button
+                      title={
+                        workoutState === 'in-progress'
+                          ? `${t('Продолжить')} (${Math.min(wp?.nextIdx ?? 0, workoutTotal)}/${workoutTotal})`
+                          : t('Начать тренировку')
+                      }
+                      icon={workoutState === 'in-progress' ? 'play.fill' : 'bolt.fill'}
+                      onPress={() =>
+                        startWorkout(workoutState === 'in-progress' ? (wp?.nextIdx ?? 0) : 0)
+                      }
+                    />
+                  </>
+                )}
+              </View>
+            </Reveal>
+          ) : (
           <Reveal delay={100}>
             <View style={[styles.heroCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
               <View style={styles.heroPills}>
@@ -769,6 +1095,32 @@ export function ReviewSessionScreen() {
               />
             </View>
           </Reveal>
+          )}
+
+          {/* Итоги недели от тренера (Э6-клиент): пн–вт, между hero и плитками.
+              Закрывается крестиком — weekStart запоминается в pref. */}
+          {digest ? (
+            <Reveal delay={120}>
+              <View style={[styles.digestCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                <View style={styles.digestHeader}>
+                  <Icon name="sparkles" size={16} color={theme.primary} />
+                  <ThemedText type="smallBold" style={styles.digestTitle}>
+                    {t('Итоги недели от тренера')}
+                  </ThemedText>
+                  <Pressable
+                    onPress={dismissDigest}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('Закрыть')}>
+                    <Icon name="xmark" size={16} color={theme.textSecondary} />
+                  </Pressable>
+                </View>
+                <ThemedText type="small" themeColor="textSecondary" numberOfLines={6}>
+                  {digest.digest}
+                </ThemedText>
+              </View>
+            </Reveal>
+          ) : null}
 
           {/* Задания тренера — открытые ответы с ИИ-оценкой (Э2, B.1/B.3).
               Free после исчерпания: запертые режимы свёрнуты в один блок ниже. */}
@@ -798,6 +1150,30 @@ export function ReviewSessionScreen() {
                     subtitle={t('Составь своё предложение')}
                     onPress={() => startWith('write', queue)}
                   />
+                </Reveal>
+                {/* «Расскажи о фото» (Э4, B.3): есть фото → сессия описаний;
+                    0 фото → плитка НЕ исчезает, а ведёт на камеру (empty). */}
+                <Reveal delay={220}>
+                  {photoCards.length > 0 ? (
+                    <ModeCard
+                      icon="mic.fill"
+                      color={MODE_TILE.speakPhoto}
+                      title={t('Расскажи о фото')}
+                      subtitle={t('Опиши свой снимок голосом')}
+                      onPress={() => startWith('speakPhoto', photoCards)}
+                    />
+                  ) : (
+                    <ModeCard
+                      icon="mic.fill"
+                      color={MODE_TILE.speakPhoto}
+                      title={t('Расскажи о фото')}
+                      subtitle={t('Сначала поймай пару предметов')}
+                      onPress={() => {
+                        feedbackTap();
+                        router.replace('/(tabs)');
+                      }}
+                    />
+                  )}
                 </Reveal>
               </View>
             </>
@@ -853,7 +1229,7 @@ export function ReviewSessionScreen() {
               // Один блок вместо шести замков (B.1, п.4): не пугаем пейволлом.
               <Reveal delay={270}>
                 <PremiumModesCard
-                  count={4 + (voiceOk ? 1 : 0)}
+                  count={4 + (voiceOk ? 1 : 0) + (photoCards.length > 0 ? 1 : 0)}
                   onPress={() => {
                     feedbackTap();
                     setLimitSheet(true);
@@ -915,7 +1291,11 @@ export function ReviewSessionScreen() {
           </Reveal>
           <Reveal delay={80}>
             <ThemedText type="subtitle" style={styles.centerText}>
-              {perfect ? t('Идеально!') : t('Готово!')}
+              {isWorkout
+                ? t('Тренировка от тренера выполнена')
+                : perfect
+                  ? t('Идеально!')
+                  : t('Готово!')}
             </ThemedText>
           </Reveal>
           <Reveal delay={140}>
@@ -960,7 +1340,7 @@ export function ReviewSessionScreen() {
               <View style={[styles.mistakesCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
                 {missed.map((card, i) => (
                   <View
-                    key={card.id}
+                    key={card.id || card.word}
                     style={[
                       styles.mistakeRow,
                       i > 0 ? { borderTopWidth: 1, borderTopColor: theme.border } : null,
@@ -975,9 +1355,9 @@ export function ReviewSessionScreen() {
                       </ThemedText>
                       {/* Исправленный вариант тренера (диктант/«Напиши сам») —
                           главная ценность фидбека, не теряем её на итоге (B.6). */}
-                      {coachNotes.get(card.id)?.corrected ? (
+                      {coachNotes.get(card.id || card.word)?.corrected ? (
                         <ThemedText type="small" style={{ color: theme.primary }} numberOfLines={2}>
-                          {t('Тренер:')} {coachNotes.get(card.id)?.corrected}
+                          {t('Тренер:')} {coachNotes.get(card.id || card.word)?.corrected}
                         </ThemedText>
                       ) : null}
                     </View>
@@ -985,7 +1365,9 @@ export function ReviewSessionScreen() {
                   </View>
                 ))}
               </View>
-              <Button title={`${t('Повторить ошибки')} · ${missed.length}`} icon="arrow.counterclockwise" onPress={onRetryMissed} />
+              {retryableMissed.length > 0 ? (
+                <Button title={`${t('Повторить ошибки')} · ${retryableMissed.length}`} icon="arrow.counterclockwise" onPress={onRetryMissed} />
+              ) : null}
             </Reveal>
           ) : null}
 
@@ -1002,7 +1384,12 @@ export function ReviewSessionScreen() {
           ) : null}
 
           <Reveal delay={300} style={styles.summaryActions}>
-            <Button title={t('Пройти ещё раз')} icon="play.fill" onPress={onRestart} />
+            {/* Тренировка — подарок дня: повтор в тот же день только у Premium (B.1 п.5). */}
+            {!isWorkout ? (
+              <Button title={t('Пройти ещё раз')} icon="play.fill" onPress={onRestart} />
+            ) : isPremium ? (
+              <Button title={t('Пройти ещё раз')} icon="play.fill" onPress={() => startWorkout(0)} />
+            ) : null}
             <Button title={t('К режимам')} icon="chevron.left" variant="ghost" onPress={onChangeMode} />
           </Reveal>
         </View>
@@ -1090,6 +1477,22 @@ export function ReviewSessionScreen() {
             onNext={onNextQuestion}
             last={qIndex + 1 >= total}
             shakeStyle={promptShakeStyle}
+          />
+        ) : q.answerMode === 'write' && q.kind === 'describePhoto' ? (
+          <SpeakPhotoBody
+            key={q.id}
+            card={q.card}
+            typed={typed}
+            onChange={setTyped}
+            phase={writePhase}
+            verdict={writeVerdict}
+            note={writeNote}
+            fallback={writeFallback}
+            sttOff={sttUnavailable}
+            onSttFail={markSttUnavailable}
+            onSubmit={onWriteSubmit}
+            onNext={onNextQuestion}
+            last={qIndex + 1 >= total}
           />
         ) : q.answerMode === 'write' ? (
           <WriteBody
@@ -2152,6 +2555,376 @@ function WriteBody({
 }
 
 /**
+ * «Расскажи о фото» (Э4, спека B.5): своё фото крупно → запись голосом →
+ * редактируемый транскрипт → оценка ИИ-тренера (та же механика write,
+ * task 'describe_photo'). Фазы: idle → recording → transcribed → оценка (B.2).
+ *
+ * Web Speech API — деградация ПО ОШИБКЕ, не по наличию (Э4): на iOS WebKit
+ * конструктор СУЩЕСТВУЕТ, но без Siri&Dictation молча отдаёт
+ * 'service-not-allowed'/ноль результатов. Первая ошибка / ноль результатов /
+ * 8 с без признаков жизни → текстовый ввод (тот же экран) + память в pref.
+ * Натив/нет API вообще → текстовый ввод сразу, без кнопки записи.
+ */
+function SpeakPhotoBody({
+  card,
+  typed,
+  onChange,
+  phase,
+  verdict,
+  note,
+  fallback,
+  sttOff,
+  onSttFail,
+  onSubmit,
+  onNext,
+  last,
+}: {
+  card: WordCard;
+  typed: string;
+  onChange: (s: string) => void;
+  phase: 'input' | 'grading' | 'done';
+  verdict: GradeVerdict | null;
+  note: { corrected: string; feedback: string } | null;
+  fallback: 'auth' | 'limit' | 'unavailable' | null;
+  /** STT недоступен (нет API / уже ловили ошибку) → сразу текстовый ввод. */
+  sttOff: boolean;
+  /** Ошибка распознавания → запомнить «текст навсегда» (pref 'stt_unavailable'). */
+  onSttFail: () => void;
+  onSubmit: () => void;
+  onNext: () => void;
+  last: boolean;
+}) {
+  const theme = useTheme();
+  const t = useT();
+  // Фазы записи по B.5 (только пока родительская фаза 'input').
+  const [recPhase, setRecPhase] = useState<'idle' | 'recording' | 'transcribed'>('idle');
+  const [seconds, setSeconds] = useState(0);
+  // Мягкое «Не расслышал…» — и при пустом транскрипте, и при падении в текст.
+  const [misheard, setMisheard] = useState(false);
+  const recRef = useRef<any>(null); // экземпляр SpeechRecognition (нет типов)
+  const gotResultRef = useRef(false);
+  const transcriptRef = useRef('');
+  const deadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Пульс красной точки записи (B.5: recording — пульсирующий индикатор).
+  const recPulse = useSharedValue(1);
+  useEffect(() => {
+    if (recPhase === 'recording') {
+      recPulse.value = withRepeat(withTiming(0.25, { duration: 600 }), -1, true);
+    } else {
+      recPulse.value = withTiming(1, { duration: 150 });
+    }
+  }, [recPhase, recPulse]);
+  const recPulseStyle = useAnimatedStyle(() => ({ opacity: recPulse.value }));
+
+  // «Тренер читает…» — то же переходное состояние, что у «Напиши сам» (B.2).
+  const pulse = useSharedValue(1);
+  useEffect(() => {
+    if (phase === 'grading') {
+      pulse.value = withRepeat(withTiming(0.35, { duration: 650 }), -1, true);
+    } else {
+      pulse.value = withTiming(1, { duration: 150 });
+    }
+  }, [phase, pulse]);
+  const pulseStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+
+  const stopTimers = () => {
+    if (deadTimerRef.current) {
+      clearTimeout(deadTimerRef.current);
+      deadTimerRef.current = null;
+    }
+    if (tickRef.current) {
+      clearInterval(tickRef.current);
+      tickRef.current = null;
+    }
+  };
+
+  // Размонтирование посреди записи (ушли с вопроса) — глушим всё.
+  useEffect(
+    () => () => {
+      if (deadTimerRef.current) clearTimeout(deadTimerRef.current);
+      if (tickRef.current) clearInterval(tickRef.current);
+      try {
+        recRef.current?.abort?.();
+      } catch {
+        /* уже остановлен */
+      }
+      recRef.current = null;
+    },
+    [],
+  );
+
+  /** Ошибка распознавания → текстовый ввод + память (правило Э4). */
+  const failToText = () => {
+    stopTimers();
+    try {
+      recRef.current?.abort?.();
+    } catch {
+      /* уже остановлен */
+    }
+    recRef.current = null;
+    setRecPhase('idle');
+    setMisheard(true);
+    onSttFail();
+  };
+
+  const startRecording = () => {
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) {
+      // API нет вообще (Safari старый/Firefox/натив) → текст сразу.
+      onSttFail();
+      return;
+    }
+    feedbackTap();
+    setMisheard(false);
+    gotResultRef.current = false;
+    transcriptRef.current = '';
+    let rec: any; // экземпляр SpeechRecognition (нет типов)
+    try {
+      rec = new Ctor();
+    } catch {
+      failToText();
+      return;
+    }
+    rec.lang = card.learningLang;
+    rec.interimResults = false;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+    // Сервис подал признак жизни (услышал речь) → «мёртвый» таймер не нужен:
+    // дальше исходы разберут onresult/onend (в т.ч. пустой результат).
+    rec.onspeechstart = () => {
+      if (recRef.current !== rec) return;
+      if (deadTimerRef.current) {
+        clearTimeout(deadTimerRef.current);
+        deadTimerRef.current = null;
+      }
+    };
+    rec.onresult = (e: any) => {
+      if (recRef.current !== rec) return;
+      gotResultRef.current = true;
+      transcriptRef.current = String(e?.results?.[0]?.[0]?.transcript ?? '').trim();
+    };
+    rec.onerror = () => {
+      // ЛЮБАЯ первая ошибка ('service-not-allowed', 'not-allowed', 'no-speech'…)
+      // → текст + память: детект «есть ли API» на iOS лжёт, ошибка — не лжёт.
+      if (recRef.current !== rec) return;
+      failToText();
+    };
+    rec.onend = () => {
+      if (recRef.current !== rec) return;
+      stopTimers();
+      recRef.current = null;
+      if (!gotResultRef.current) {
+        // Ноль результатов — iOS-паттерн «молчаливого» WebKit → текст + память.
+        setRecPhase('idle');
+        setMisheard(true);
+        onSttFail();
+        return;
+      }
+      const text = transcriptRef.current;
+      if (!text) {
+        // Транскрипт пришёл, но пустой → мягкий ретрай, STT НЕ хороним.
+        setRecPhase('idle');
+        setMisheard(true);
+        return;
+      }
+      onChange(text);
+      setRecPhase('transcribed');
+    };
+    recRef.current = rec;
+    setSeconds(0);
+    tickRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+    // 8 с без единого признака жизни распознавания → текст (Э4).
+    deadTimerRef.current = setTimeout(() => {
+      if (recRef.current === rec) failToText();
+    }, STT_DEAD_MS);
+    try {
+      rec.start();
+      setRecPhase('recording');
+    } catch {
+      failToText();
+    }
+  };
+
+  const stopRecording = () => {
+    feedbackTap();
+    try {
+      recRef.current?.stop();
+    } catch {
+      /* уже остановлен */
+    }
+  };
+
+  const timer = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  // Текстовый режим: тот же экран, только вместо кнопки записи — поле ввода.
+  // Нет API вообще (натив/старый Safari/Firefox) → текст сразу, pref не нужен;
+  // sttOff — запомненная ошибка распознавания (Э4).
+  const hasApi = useMemo(() => !!getSpeechRecognitionCtor(), []);
+  const textMode = sttOff || !hasApi;
+
+  return (
+    <>
+      <Reveal distance={16} style={styles.testBody}>
+        <View style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={[styles.promptTag, { backgroundColor: theme.primarySoft }]}>
+            <ThemedText type="smallBold" style={{ color: theme.primary }}>
+              {t('Расскажи о фото')}
+            </ThemedText>
+          </View>
+          {/* Своё фото — крупно: собственный снимок и есть материал урока (Э4). */}
+          <Sticker imageUri={card.imageUri} category={card.category} size={168} />
+          <View style={styles.promptWordRow}>
+            <ThemedText type="subtitle" numberOfLines={1} adjustsFontSizeToFit style={styles.speakPhotoWord}>
+              {card.word}
+            </ThemedText>
+            <SpeakButton text={card.word} language={card.learningLang} size={38} />
+          </View>
+          {phase === 'input' ? (
+            <>
+              {recPhase !== 'transcribed' ? (
+                <ThemedText type="small" themeColor="textSecondary" style={styles.centerText}>
+                  {t('Опиши снимок 1–2 предложениями на изучаемом языке')}
+                </ThemedText>
+              ) : null}
+              {misheard ? (
+                <ThemedText type="small" style={[styles.centerText, { color: theme.warning }]}>
+                  {t('Не расслышал, попробуй ещё раз или напиши текстом')}
+                </ThemedText>
+              ) : null}
+              {textMode ? (
+                // Фолбэк: текстовый ввод (тот же экран, паттерн «Напиши сам»).
+                <TextInput
+                  value={typed}
+                  onChangeText={onChange}
+                  multiline
+                  autoCapitalize="sentences"
+                  autoCorrect={false}
+                  placeholder={t('Напиши 1–2 предложения об этом снимке…')}
+                  placeholderTextColor={theme.textSecondary}
+                  onKeyPress={(e) => {
+                    const ne = e.nativeEvent as { key?: string; metaKey?: boolean; ctrlKey?: boolean };
+                    if (ne.key === 'Enter' && (ne.metaKey || ne.ctrlKey) && typed.trim()) onSubmit();
+                  }}
+                  style={[
+                    styles.writeInput,
+                    { borderColor: theme.border, color: theme.text, backgroundColor: theme.backgroundElement },
+                  ]}
+                />
+              ) : recPhase === 'idle' ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('Записать')}
+                  onPress={startRecording}
+                  style={[styles.recordBtn, { backgroundColor: MODE_TILE.speakPhoto }]}>
+                  <Icon name="mic.fill" size={30} color="#FFFFFF" />
+                </Pressable>
+              ) : recPhase === 'recording' ? (
+                <>
+                  <View style={styles.recordRow}>
+                    <Animated.View
+                      style={[styles.recDot, { backgroundColor: theme.danger }, recPulseStyle]}
+                    />
+                    <ThemedText type="smallBold" style={{ color: theme.danger }}>
+                      {timer}
+                    </ThemedText>
+                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('Остановить запись')}
+                    onPress={stopRecording}
+                    style={[styles.recordBtn, { backgroundColor: theme.danger }]}>
+                    <Icon name="stop.fill" size={26} color="#FFFFFF" />
+                  </Pressable>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {t('Идёт запись — говори')}
+                  </ThemedText>
+                </>
+              ) : (
+                // transcribed: распознанный текст РЕДАКТИРУЕМ (B.5).
+                <>
+                  <TextInput
+                    value={typed}
+                    onChangeText={onChange}
+                    multiline
+                    autoCapitalize="sentences"
+                    autoCorrect={false}
+                    placeholder={t('Распознанный текст — поправь, если нужно')}
+                    placeholderTextColor={theme.textSecondary}
+                    style={[
+                      styles.writeInput,
+                      { borderColor: theme.border, color: theme.text, backgroundColor: theme.backgroundElement },
+                    ]}
+                  />
+                  <Button
+                    title={t('Записать заново')}
+                    icon="arrow.counterclockwise"
+                    variant="ghost"
+                    onPress={() => {
+                      onChange('');
+                      startRecording();
+                    }}
+                  />
+                </>
+              )}
+            </>
+          ) : (
+            // Переходное состояние и результат: ответ ученика крупно (B.2).
+            <ThemedText type="subtitle" style={styles.centerText}>
+              {typed}
+            </ThemedText>
+          )}
+          {phase === 'grading' ? (
+            <Animated.View style={pulseStyle}>
+              <ThemedText type="small" themeColor="textSecondary">
+                {t('Тренер читает…')}
+              </ThemedText>
+            </Animated.View>
+          ) : null}
+        </View>
+
+        {/* Карточка фидбека тренера — ПОД полем, механика write (B.2). */}
+        {phase === 'done' && verdict ? (
+          <OpenAnswerFeedback
+            verdict={verdict}
+            corrected={note?.corrected ?? ''}
+            feedback={note?.feedback ?? ''}
+            lang={card.learningLang}
+          />
+        ) : null}
+        {phase === 'done' && fallback ? (
+          <FadeIn>
+            <View style={[styles.fallbackPlate, { backgroundColor: theme.backgroundElement }]}>
+              <Icon
+                name={fallback === 'limit' ? 'checkmark.circle.fill' : 'info.circle.fill'}
+                size={16}
+                color={fallback === 'limit' ? theme.success : theme.textSecondary}
+              />
+              <ThemedText type="small" themeColor="textSecondary" style={styles.fallbackText}>
+                {fallback === 'limit'
+                  ? t('Принято ✓')
+                  : fallback === 'auth'
+                    ? t('Войди, чтобы тренер проверял ответы')
+                    : t('Тренер недоступен — ответ сохранён без оценки')}
+              </ThemedText>
+            </View>
+          </FadeIn>
+        ) : null}
+      </Reveal>
+      <View style={styles.footer}>
+        {phase === 'done' ? (
+          <FadeIn key="next">
+            <Button title={last ? t('Завершить') : t('Дальше')} icon="arrow.right" onPress={onNext} />
+          </FadeIn>
+        ) : phase === 'input' && (textMode || recPhase === 'transcribed') ? (
+          <Button title={t('Проверить')} icon="checkmark" onPress={onSubmit} disabled={!typed.trim()} />
+        ) : null}
+      </View>
+    </>
+  );
+}
+
+/**
  * Карточка фидбека тренера (Э2, спека B.2): вердикт-пилюля → исправленный
  * вариант с озвучкой → объяснение. Токены темы (card/border), тон нейтрально-
  * тренерский: слова «неверно» нет — worst case это «Давай разберём» (primary).
@@ -2446,6 +3219,27 @@ const styles = StyleSheet.create({
   },
   feedbackCorrectedRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   feedbackCorrected: { flex: 1, fontWeight: '600' },
+  // «Расскажи о фото» (Э4, B.5): слово под фото, круглая кнопка записи, индикатор
+  speakPhotoWord: { flexShrink: 1, textAlign: 'center' },
+  recordBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recordRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  recDot: { width: 12, height: 12, borderRadius: 6 },
+  // Итоги недели от тренера (Э6-клиент)
+  digestCard: {
+    alignSelf: 'stretch',
+    gap: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+  },
+  digestHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  digestTitle: { flex: 1 },
   // Плашка-фолбэк («Тренер недоступен», «Принято ✓» и т.п.)
   fallbackPlate: {
     flexDirection: 'row',

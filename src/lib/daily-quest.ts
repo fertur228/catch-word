@@ -264,6 +264,38 @@ export async function fetchAgentQuests(userId: string): Promise<AgentQuestPlan |
   }
 }
 
+/** Недельный дайджест тренера (Э6): сводка «слова недели, где рос, где сыпался». */
+export interface CoachDigest {
+  /** Понедельник недели, за которую написана сводка (YYYY-MM-DD). */
+  weekStart: string;
+  /** Текст сводки (родной язык, ≤600 символов — guardrail на сервере). */
+  digest: string;
+}
+
+/**
+ * Последний дайджест недели из coach_digests (пишет воскресный cron-агент).
+ * RLS пускает только к своим строкам. Любая проблема (нет строки, сеть,
+ * кривые данные) → null — пользователь ошибку не видит никогда.
+ */
+export async function fetchCoachDigest(userId: string): Promise<CoachDigest | null> {
+  try {
+    const { data, error } = await supabase
+      .from('coach_digests')
+      .select('week_start, digest')
+      .eq('user_id', userId)
+      .order('week_start', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return null;
+    const weekStart = typeof data.week_start === 'string' ? data.week_start.slice(0, 10) : '';
+    const digest = typeof data.digest === 'string' ? data.digest.trim() : '';
+    if (!weekStart || !digest) return null;
+    return { weekStart, digest };
+  } catch {
+    return null;
+  }
+}
+
 /** Нормализация для сравнения: нижний регистр, без артикля, схлопнутые пробелы. */
 function normQuest(s: string): string {
   return s.trim().toLowerCase().replace(/^(a|an|the)\s+/, '').replace(/\s+/g, ' ');
