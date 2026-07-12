@@ -32,7 +32,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
 const DAY_MS = 86_400_000;
-const MAX_STEPS = 8;                    // потолок цикла — защита от зацикливания
+const MAX_STEPS = 12;                   // потолок цикла (телеметрия+упражнения+критик едят шаги)
 const MAX_RESCHEDULE = 10;              // максимум карточек за одну ночь
 const MAX_RESCHEDULE_DAYS = 30;         // due_at не дальше чем на месяц
 const RUN_DEADLINE_MS = 330_000;        // общий дедлайн cron-прогона (лимит edge ~400s)
@@ -197,7 +197,7 @@ function systemPrompt(learningLang: string, nativeLang: string, dayIndex: number
     'ЦЕЛЬ: составь план дня, который максимально продвинет словарный запас ИМЕННО ЭТОГО ученика.',
     '',
     'Как работать:',
-    '1. Сначала ОБЯЗАТЕЛЬНО вызови get_collection_stats, get_review_stats (реальные ответы ученика) и get_cards; get_quest_history — по необходимости.',
+    '1. Сначала ОБЯЗАТЕЛЬНО вызови get_collection_stats, get_review_stats (реальные ответы ученика) и get_cards; get_quest_history — по необходимости. Каждый инструмент — не более ОДНОГО раза: если телеметрии/карточек нет, просто продолжай без них, повторный вызов ничего не изменит.',
     '2. Реши стратегию: закреплять забываемое (слабые/просроченные) или давать новое. Приоритет: слова с РЕАЛЬНЫМИ ошибками из телеметрии > просроченные > новые. Если ученик сыпется в конкретном формате (например, на слух) — учти это в сложности.',
     '3. Цели квеста — КОНКРЕТНЫЕ ФИЗИЧЕСКИЕ ПРЕДМЕТЫ, которые реально найти дома/в офисе/на улице за минуту (кружка — да, «свобода» — нет).',
     '4. Если слабое слово — предмет, включи его в квест: ученик повторит его вживую. Если включаешь слабые слова в квест, подтяни их повторение на сегодня через reschedule_cards.',
@@ -589,6 +589,10 @@ async function runAgentForUser(
   let tokensIn = 0;
   let tokensOut = 0;
   let noToolStrikes = 0; // модель иногда игнорирует tool_choice=required и пишет текст
+  // Анти-цикл (ночь 11.07: 6× get_collection_stats подряд при пустой телеметрии
+  // и t=0): повторный вызов инструмента с теми же аргументами не исполняем —
+  // возвращаем подсказку двигаться дальше. Смена содержимого выбивает из цикла.
+  const seenCalls = new Set<string>();
   let outcome = 'error';
   let finalQuests: string[] | undefined;
   let finalExercises: Exercise[] | undefined;
@@ -791,6 +795,17 @@ async function runAgentForUser(
       }
 
       // Обычные инструменты.
+      const callKey = `${name}:${JSON.stringify(args)}`;
+      if (seenCalls.has(callKey) && name !== 'reschedule_cards') {
+        const nudge = {
+          error:
+            'Ты уже вызывал этот инструмент с этими аргументами — результат не изменился. Не повторяйся: посмотри карточки (get_cards), если ещё не смотрел, и вызывай finish.',
+        };
+        steps.push({ tool: name, args, result: 'guard: duplicate call' });
+        messages.push(msg, { role: 'tool', tool_call_id: call.id, content: JSON.stringify(nudge) });
+        continue;
+      }
+      seenCalls.add(callKey);
       let result: unknown;
       if (name === 'get_collection_stats') result = await toolGetStats(ctx);
       else if (name === 'get_cards') result = await toolGetCards(ctx, args);

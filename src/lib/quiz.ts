@@ -252,6 +252,46 @@ export function checkDictation(answer: string, expectedWord: string): 'correct' 
   return 'wrong';
 }
 
+export type DictationResult = 'correct' | 'partial' | 'partial-word' | 'wrong';
+
+/** Пунктуация не решает судьбу диктанта: точки/запятые/кавычки — мимо. */
+function stripPunctuation(s: string): string {
+  return s.replace(/[.,!?;:'"«»„“”‘’…()\-—]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Проверка диктанта ЦЕЛЫМ ПРЕДЛОЖЕНИЕМ (решение основателя 12.07):
+ *  correct      — предложение совпало (регистр/пробелы/пунктуация не важны);
+ *  partial      — разошлась только диакритика («проверь умляут/акцент»);
+ *  partial-word — предложение не совпало, но ИЗУЧАЕМОЕ слово написано верно;
+ *  wrong        — ключевое слово не написано (фидбек добирается у тренера).
+ * Карточка без примера (sentence == слово) → старая проверка по слову.
+ */
+export function checkDictationSentence(
+  answer: string,
+  sentence: string,
+  word: string,
+): DictationResult {
+  if (normalizeAnswer(sentence) === normalizeAnswer(word)) return checkDictation(answer, word);
+  const a = stripPunctuation(normalizeAnswer(answer));
+  const e = stripPunctuation(normalizeAnswer(sentence));
+  if (!a) return 'wrong';
+  if (a === e) return 'correct';
+  if (stripDiacritics(a) === stripDiacritics(e)) return 'partial';
+  // Слово на месте (с точностью до диакритики, по границам слов)?
+  const w = escapeRe(stripDiacritics(stripPunctuation(normalizeAnswer(word))));
+  const re = new RegExp(`(^|[^\\p{L}\\p{N}])${w}($|[^\\p{L}\\p{N}])`, 'u');
+  if (re.test(stripDiacritics(a))) return 'partial-word';
+  return 'wrong';
+}
+
+/** Подпись диктанта: с примером диктуем предложение, без — только слово. */
+export function dictationLabel(card: WordCard): string {
+  return dictationSentence(card) !== card.word
+    ? t('Напиши предложение, которое услышал')
+    : t('Услышь и напиши слово');
+}
+
 /** Экранировать спецсимволы для RegExp. */
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -412,7 +452,7 @@ function makeQuestion(
     id: `${card.id}-${kind}-${i}`,
     kind,
     card,
-    label: labelOf(kind),
+    label: kind === 'dictation' ? dictationLabel(card) : labelOf(kind),
     promptMode: promptModeOf(kind),
     prompt: promptTextOf(card, kind),
     optionMode,
@@ -464,7 +504,7 @@ export function buildWorkoutQuiz(exercises: AgentExercise[], pool: WordCard[]): 
         id: `workout-${i}-dictation`,
         kind: 'dictation',
         card,
-        label: t('Услышь и напиши слово'),
+        label: dictationLabel(card),
         promptMode: 'audio',
         prompt: '',
         optionMode: 'text',

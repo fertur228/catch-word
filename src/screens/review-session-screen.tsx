@@ -57,8 +57,10 @@ import {
   buildQuiz,
   buildSpeakPhotoQuiz,
   buildWorkoutQuiz,
-  checkDictation,
+  checkDictationSentence,
+  dictationLabel,
   dictationSentence,
+  type DictationResult,
   type QuizKind,
   type QuizQuestion,
 } from '@/lib/quiz';
@@ -240,7 +242,7 @@ export function ReviewSessionScreen() {
 
   // --- Открытые ответы (движок v2, Э2): «Диктант» и «Напиши сам» ---
   // Диктант: локальный вердикт + фидбек тренера (подтягивается только на ошибке).
-  const [dictResult, setDictResult] = useState<'correct' | 'partial' | 'wrong' | null>(null);
+  const [dictResult, setDictResult] = useState<DictationResult | null>(null);
   const [dictNote, setDictNote] = useState<{ corrected: string; feedback: string } | null>(null);
   const [dictGradeFailed, setDictGradeFailed] = useState(false);
   // «Напиши сам»: input → grading («Тренер читает…») → done (фидбек или фолбэк).
@@ -775,12 +777,16 @@ export function ReviewSessionScreen() {
     if (dictResult !== null || !quiz) return;
     const q = quiz[qIndex];
     if (!q || !typed.trim()) return;
-    const verdict = checkDictation(typed, q.card.word);
+    // Диктант целым предложением (решение основателя 12.07): пунктуация не
+    // важна; «слово верно, предложение нет» — янтарное «почти», БЕЗ вызова
+    // тренера (LLM зовём только на wrong — экономим на каждом ответе).
+    const verdict = checkDictationSentence(typed, dictationSentence(q.card), q.card.word);
     setDictResult(verdict);
     logAnswer(q.card, q.kind, {
       correct: verdict === 'correct',
       answer: typed,
-      score: verdict === 'correct' ? 1 : verdict === 'partial' ? 0.8 : 0,
+      score:
+        verdict === 'correct' ? 1 : verdict === 'partial' ? 0.8 : verdict === 'partial-word' ? 0.6 : 0,
     });
     if (verdict === 'correct') {
       setScore((s) => s + 1);
@@ -789,9 +795,9 @@ export function ReviewSessionScreen() {
       await reviewCard(q.card.id, 'good');
       return;
     }
-    if (verdict === 'partial') {
-      // «Почти!»: разошлась только диакритика — интервал двигаем, освоение
-      // держим; в missed не попадает и идеальную сессию не ломает (B.2).
+    if (verdict === 'partial' || verdict === 'partial-word') {
+      // «Почти!»: диакритика или предложение с огрехами при верном слове —
+      // интервал двигаем, освоение держим; не missed, идеал не ломает (B.2).
       feedbackTap();
       await reviewCard(q.card.id, 'good', { holdMastery: true });
       return;
@@ -2301,7 +2307,7 @@ function DictationBody({
   card: WordCard;
   typed: string;
   onChange: (s: string) => void;
-  result: 'correct' | 'partial' | 'wrong' | null;
+  result: DictationResult | null;
   note: { corrected: string; feedback: string } | null;
   gradeFailed: boolean;
   onSubmit: () => void;
@@ -2312,11 +2318,13 @@ function DictationBody({
   const t = useT();
   const answered = result !== null;
   const sentence = dictationSentence(card);
+  // С примером диктуем и пишем ЦЕЛОЕ предложение; без примера — только слово.
+  const sentenceMode = sentence !== card.word;
   const borderColor = !answered
     ? theme.border
     : result === 'correct'
       ? theme.success
-      : result === 'partial'
+      : result === 'partial' || result === 'partial-word'
         ? theme.warning
         : theme.danger;
 
@@ -2326,7 +2334,7 @@ function DictationBody({
         <View style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={[styles.promptTag, { backgroundColor: theme.primarySoft }]}>
             <ThemedText type="smallBold" style={{ color: theme.primary }}>
-              {t('Услышь и напиши слово')}
+              {dictationLabel(card)}
             </ThemedText>
           </View>
           {/* Слушаем ЦЕЛОЕ предложение: обычная скорость + «черепаха» (B.4). */}
@@ -2339,11 +2347,13 @@ function DictationBody({
             value={typed}
             onChangeText={onChange}
             editable={!answered}
+            multiline={sentenceMode}
             autoCapitalize="none"
             autoCorrect={false}
-            placeholder={t('Впиши слово')}
+            placeholder={sentenceMode ? t('Напиши всё предложение…') : t('Впиши слово')}
             placeholderTextColor={theme.textSecondary}
             returnKeyType="done"
+            blurOnSubmit
             onSubmitEditing={() => {
               if (!answered && typed.trim()) onSubmit();
             }}
@@ -2359,8 +2369,9 @@ function DictationBody({
                       {t('Верно!')}
                     </ThemedText>
                   </>
-                ) : result === 'partial' ? (
-                  // «Почти!» — янтарный штамп, НЕ красный: разошлась диакритика.
+                ) : result === 'partial' || result === 'partial-word' ? (
+                  // «Почти!» — янтарный штамп, НЕ красный: диакритика или
+                  // огрехи предложения при верном ключевом слове.
                   <>
                     <Icon name="exclamationmark.triangle.fill" size={18} color={theme.warning} />
                     <ThemedText type="smallBold" style={{ color: theme.warning }}>
@@ -2380,6 +2391,10 @@ function DictationBody({
               {result === 'partial' ? (
                 <ThemedText type="small" style={[styles.centerText, { color: theme.warning }]}>
                   {t('Проверь умляут/акцент')}
+                </ThemedText>
+              ) : result === 'partial-word' ? (
+                <ThemedText type="small" style={[styles.centerText, { color: theme.warning }]}>
+                  {t('Слово верно — сверь предложение с оригиналом')}
                 </ThemedText>
               ) : null}
               {/* Полное предложение с выделенным словом — обязательно (B.4). */}
@@ -2655,8 +2670,18 @@ function SpeakPhotoBody({
     [],
   );
 
-  /** Ошибка распознавания → текстовый ввод + память (правило Э4). */
-  const failToText = () => {
+  // Временный текстовый режим ЭТОГО вопроса: сбой записи не хоронит голос —
+  // кнопка «Записать голосом» остаётся (фикс 12.07: раньше любой сбой писал
+  // pref и запись пропадала навсегда).
+  const [localText, setLocalText] = useState(false);
+
+  /**
+   * Сбой распознавания → текстовый ввод. permanent=true ТОЛЬКО для реального
+   * запрета сервиса ('service-not-allowed'/'not-allowed' — iOS без Siri &
+   * Dictation, запрет микрофона): тогда пишем pref. Всё остальное (не
+   * расслышал, сеть, таймаут) — временно, с кнопкой повторной записи.
+   */
+  const failToText = (permanent: boolean) => {
     stopTimers();
     try {
       recRef.current?.abort?.();
@@ -2666,7 +2691,8 @@ function SpeakPhotoBody({
     recRef.current = null;
     setRecPhase('idle');
     setMisheard(true);
-    onSttFail();
+    if (permanent) onSttFail();
+    else setLocalText(true);
   };
 
   const startRecording = () => {
@@ -2678,13 +2704,14 @@ function SpeakPhotoBody({
     }
     feedbackTap();
     setMisheard(false);
+    setLocalText(false);
     gotResultRef.current = false;
     transcriptRef.current = '';
     let rec: any; // экземпляр SpeechRecognition (нет типов)
     try {
       rec = new Ctor();
     } catch {
-      failToText();
+      failToText(false);
       return;
     }
     rec.lang = card.learningLang;
@@ -2705,21 +2732,23 @@ function SpeakPhotoBody({
       gotResultRef.current = true;
       transcriptRef.current = String(e?.results?.[0]?.[0]?.transcript ?? '').trim();
     };
-    rec.onerror = () => {
-      // ЛЮБАЯ первая ошибка ('service-not-allowed', 'not-allowed', 'no-speech'…)
-      // → текст + память: детект «есть ли API» на iOS лжёт, ошибка — не лжёт.
+    rec.onerror = (e: any) => {
       if (recRef.current !== rec) return;
-      failToText();
+      // Навсегда — только реальный запрет сервиса/микрофона (iOS без Siri &
+      // Dictation, denied permission). 'no-speech'/'network'/прочее — временно.
+      const code = String(e?.error ?? '');
+      failToText(code === 'service-not-allowed' || code === 'not-allowed');
     };
     rec.onend = () => {
       if (recRef.current !== rec) return;
       stopTimers();
       recRef.current = null;
       if (!gotResultRef.current) {
-        // Ноль результатов — iOS-паттерн «молчаливого» WebKit → текст + память.
+        // Ноль результатов (в т.ч. «молчаливый» iOS-WebKit) → текст ВРЕМЕННО:
+        // кнопка «Записать голосом» остаётся, юзер решает сам.
         setRecPhase('idle');
         setMisheard(true);
-        onSttFail();
+        setLocalText(true);
         return;
       }
       const text = transcriptRef.current;
@@ -2735,15 +2764,15 @@ function SpeakPhotoBody({
     recRef.current = rec;
     setSeconds(0);
     tickRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
-    // 8 с без единого признака жизни распознавания → текст (Э4).
+    // 8 с без единого признака жизни распознавания → текст (временно, Э4).
     deadTimerRef.current = setTimeout(() => {
-      if (recRef.current === rec) failToText();
+      if (recRef.current === rec) failToText(false);
     }, STT_DEAD_MS);
     try {
       rec.start();
       setRecPhase('recording');
     } catch {
-      failToText();
+      failToText(false);
     }
   };
 
@@ -2761,7 +2790,9 @@ function SpeakPhotoBody({
   // Нет API вообще (натив/старый Safari/Firefox) → текст сразу, pref не нужен;
   // sttOff — запомненная ошибка распознавания (Э4).
   const hasApi = useMemo(() => !!getSpeechRecognitionCtor(), []);
-  const textMode = sttOff || !hasApi;
+  const textMode = sttOff || !hasApi || localText;
+  // Вернуться к голосу можно всегда, кроме подтверждённого запрета сервиса.
+  const canRetryVoice = hasApi && !sttOff;
 
   return (
     <>
@@ -2794,31 +2825,50 @@ function SpeakPhotoBody({
               ) : null}
               {textMode ? (
                 // Фолбэк: текстовый ввод (тот же экран, паттерн «Напиши сам»).
-                <TextInput
-                  value={typed}
-                  onChangeText={onChange}
-                  multiline
-                  autoCapitalize="sentences"
-                  autoCorrect={false}
-                  placeholder={t('Напиши 1–2 предложения об этом снимке…')}
-                  placeholderTextColor={theme.textSecondary}
-                  onKeyPress={(e) => {
-                    const ne = e.nativeEvent as { key?: string; metaKey?: boolean; ctrlKey?: boolean };
-                    if (ne.key === 'Enter' && (ne.metaKey || ne.ctrlKey) && typed.trim()) onSubmit();
-                  }}
-                  style={[
-                    styles.writeInput,
-                    { borderColor: theme.border, color: theme.text, backgroundColor: theme.backgroundElement },
-                  ]}
-                />
+                <>
+                  <TextInput
+                    value={typed}
+                    onChangeText={onChange}
+                    multiline
+                    autoCapitalize="sentences"
+                    autoCorrect={false}
+                    placeholder={t('Напиши 1–2 предложения об этом снимке…')}
+                    placeholderTextColor={theme.textSecondary}
+                    onKeyPress={(e) => {
+                      const ne = e.nativeEvent as { key?: string; metaKey?: boolean; ctrlKey?: boolean };
+                      if (ne.key === 'Enter' && (ne.metaKey || ne.ctrlKey) && typed.trim()) onSubmit();
+                    }}
+                    style={[
+                      styles.writeInput,
+                      { borderColor: theme.border, color: theme.text, backgroundColor: theme.backgroundElement },
+                    ]}
+                  />
+                  {canRetryVoice ? (
+                    // Сбой записи — не приговор: вернуться к голосу можно всегда.
+                    <Button
+                      title={t('Записать голосом')}
+                      icon="mic.fill"
+                      variant="ghost"
+                      onPress={startRecording}
+                    />
+                  ) : null}
+                </>
               ) : recPhase === 'idle' ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t('Записать')}
-                  onPress={startRecording}
-                  style={[styles.recordBtn, { backgroundColor: MODE_TILE.speakPhoto }]}>
-                  <Icon name="mic.fill" size={30} color="#FFFFFF" />
-                </Pressable>
+                <>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('Записать')}
+                    onPress={startRecording}
+                    style={[styles.recordBtn, { backgroundColor: MODE_TILE.speakPhoto }]}>
+                    <Icon name="mic.fill" size={30} color="#FFFFFF" />
+                  </Pressable>
+                  <Button
+                    title={t('Напиши текстом')}
+                    icon="pencil.line"
+                    variant="ghost"
+                    onPress={() => setLocalText(true)}
+                  />
+                </>
               ) : recPhase === 'recording' ? (
                 <>
                   <View style={styles.recordRow}>
@@ -3252,7 +3302,8 @@ const styles = StyleSheet.create({
   },
   fallbackText: { flex: 1 },
   // Выделенное слово в предложении диктанта (B.4)
-  highlightWord: { fontWeight: '700' },
+  // Изучаемое слово в предложении: жирное И подчёркнутое (решение 12.07).
+  highlightWord: { fontWeight: '700', textDecorationLine: 'underline' },
 
   // Низ
   footer: { minHeight: 92, justifyContent: 'center' },
