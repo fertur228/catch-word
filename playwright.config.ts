@@ -3,8 +3,10 @@ import { defineConfig, devices } from '@playwright/test';
 /**
  * Playwright E2E для веб-версии TakeWord.
  *
- * По умолчанию гоняем против ЖИВОГО прода (catch-words.com), чтобы ловить именно
- * то, что видят тестеры. Можно нацелить на локальную сборку/превью через BASE_URL.
+ * По умолчанию гоняем против ЖИВОГО прода приложения (app.catch-words.com), чтобы
+ * ловить именно то, что видят тестеры. На catch-words.com теперь отдельный лендинг
+ * (web-landing/), приложение живёт на поддомене. Можно нацелить на локальную
+ * сборку/превью через BASE_URL.
  *
  *   npm run test:e2e            # весь набор против прода
  *   npm run test:e2e:ui        # интерактивный режим
@@ -23,7 +25,7 @@ export default defineConfig({
   timeout: 45_000,
   expect: { timeout: 15_000 },
   use: {
-    baseURL: process.env.BASE_URL ?? 'https://catch-words.com',
+    baseURL: process.env.BASE_URL ?? 'https://app.catch-words.com',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

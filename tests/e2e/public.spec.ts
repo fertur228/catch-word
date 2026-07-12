@@ -18,6 +18,7 @@ test.describe('Публичные страницы', () => {
     const errors = trackFatalErrors(page);
     await page.goto('/welcome');
     // Ключевые смысловые блоки лендинга (react-native-web → текст в DOM).
+    // Маркетинговые страницы (marketing)/ НЕ обёрнуты в t() — текст остаётся русским.
     await expect(page.getByText(/Наведи камеру/i).first()).toBeVisible();
     await expect(page.getByText(/Поймай слово/i).first()).toBeVisible();
     expect(errors, `JS-краши: ${errors.join('; ')}`).toHaveLength(0);
@@ -26,14 +27,15 @@ test.describe('Публичные страницы', () => {
   test('вход /sign-in — форма на месте и интерактивна', async ({ page }) => {
     await page.goto('/sign-in');
     // Поля email/пароль (по placeholder) + кнопки входа.
-    await expect(page.getByPlaceholder('Введите email')).toBeVisible();
-    await expect(page.getByPlaceholder('Введите пароль')).toBeVisible();
-    await expect(page.getByText('Войти', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText(/Продолжить с Google/i)).toBeVisible();
-    await expect(page.getByText(/Зарегистрироваться/i)).toBeVisible();
+    // Приложение по умолчанию на en — строки из src/lib/i18n-en.ts.
+    await expect(page.getByPlaceholder('Enter your email')).toBeVisible();
+    await expect(page.getByPlaceholder('Enter your password')).toBeVisible();
+    await expect(page.getByText('Sign in', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/Continue with Google/i)).toBeVisible();
+    await expect(page.getByText(/Sign up/i)).toBeVisible();
     // Поле реально принимает ввод.
-    await page.getByPlaceholder('Введите email').fill('probe@example.com');
-    await expect(page.getByPlaceholder('Введите email')).toHaveValue('probe@example.com');
+    await page.getByPlaceholder('Enter your email').fill('probe@example.com');
+    await expect(page.getByPlaceholder('Enter your email')).toHaveValue('probe@example.com');
   });
 
   test('тарифы /pricing — цены совпадают с реальными (Polar)', async ({ page }) => {
@@ -59,8 +61,9 @@ test.describe('Публичные страницы', () => {
     const errors = trackFatalErrors(page);
     await page.goto('/payment-success');
     // Экран показывает какое-то из состояний (проверка/успех/ждём) — не белый экран.
+    // Экран обёрнут в t() → английские строки из i18n-en.ts.
     await expect(
-      page.getByText(/Проверяем оплату|Premium активирован|Оплата прошла/i).first(),
+      page.getByText(/Checking your payment|Premium activated|Payment received/i).first(),
     ).toBeVisible();
     expect(errors, `JS-краши: ${errors.join('; ')}`).toHaveLength(0);
   });

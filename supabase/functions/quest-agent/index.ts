@@ -23,6 +23,7 @@
 //                                       (крон бежит в 22:00 UTC = 03:00 Алматы)
 //   {mode:'debug', user_id, day_index?} — один юзер, по умолчанию текущий день
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { validateExercises, type Exercise } from './validate.ts';
 
 const BASE_URL = Deno.env.get('RECOGNIZE_BASE_URL') ?? 'https://openrouter.ai/api/v1';
 const MODEL = Deno.env.get('RECOGNIZE_MODEL') ?? 'google/gemini-2.5-flash';
@@ -206,51 +207,6 @@ function systemPrompt(learningLang: string, nativeLang: string, dayIndex: number
     '7. Вместе с finish передай exercises (3–6 упражнений). Формат КАЖДОГО выбирай по ошибкам форматов из get_review_stats, это главный сигнал: ошибки в audio-форматах → БОЛЬШИНСТВО упражнений dictation; ошибки в переводе/выборе → cloze; ошибок нет или серия успехов → продукция (writeSentence). Провалы вчера → difficulty easy; серия успехов → normal/hard.',
     '8. Закончи вызовом finish. Не пиши текст вне инструментов.',
   ].join('\n');
-}
-
-// ── Валидация упражнений тренировки (guardrails Э3 — кодом, не промптом) ──
-interface Exercise {
-  v: 1;
-  word: string;
-  kind: 'dictation' | 'cloze' | 'writeSentence';
-  sentence?: string;
-  distractors?: string[];
-  prompt?: string;
-  why?: string;
-}
-
-/**
- * Невалидное упражнение отбрасывается МОЛЧА (квест важнее тренировки):
- * ≤8 штук, kind из белого списка, слово — только из allowedWords (коллекция +
- * цели квеста), предложения ≤120 символов, cloze обязан содержать пропуск
- * «____» и ≥2 дистракторов, dictation — предложение с целевым словом.
- */
-function validateExercises(raw: unknown, allowedWords: Set<string>): Exercise[] {
-  if (!Array.isArray(raw)) return [];
-  const out: Exercise[] = [];
-  for (const item of raw.slice(0, 10)) {
-    if (out.length >= 8) break;
-    const it = (item ?? {}) as Record<string, unknown>;
-    const word = String(it.word ?? '').trim();
-    const kind = String(it.kind ?? '') as Exercise['kind'];
-    if (!word || !['dictation', 'cloze', 'writeSentence'].includes(kind)) continue;
-    if (!allowedWords.has(word.toLowerCase())) continue;
-    const sentence = it.sentence != null ? String(it.sentence).trim().slice(0, 120) : '';
-    const distractors = Array.isArray(it.distractors)
-      ? it.distractors.map((d) => String(d ?? '').trim()).filter(Boolean).slice(0, 3)
-      : [];
-    const prompt = it.prompt != null ? String(it.prompt).trim().slice(0, 120) : '';
-    if (kind === 'dictation' && (!sentence || !sentence.toLowerCase().includes(word.toLowerCase()))) continue;
-    if (kind === 'cloze' && (!sentence || !sentence.includes('____') || distractors.length < 2)) continue;
-    const ex: Exercise = { v: 1, word, kind };
-    if (sentence) ex.sentence = sentence;
-    if (distractors.length) ex.distractors = distractors;
-    if (prompt) ex.prompt = prompt;
-    const why = it.why != null ? String(it.why).trim().slice(0, 80) : '';
-    if (why) ex.why = why;
-    out.push(ex);
-  }
-  return out;
 }
 
 // ── Реализация инструментов ─────────────────────────────────────────────
@@ -502,7 +458,7 @@ async function criticReview(
     'Чеклист (отклоняй ТОЛЬКО за реальные нарушения):',
     `1. Ровно 3 цели, каждая — КОНКРЕТНЫЙ физический предмет на языке ${learningLang}, который реально найти дома/в офисе/на улице за минуту (кружка — да, «свобода»/«погода» — нет).`,
     `2. coach_message — на языке ${nativeLang}, дружелюбный, без воды.`,
-    `3. Цели не повторяют недавние: ${recentTargets.length ? recentTargets.join(', ') : '(истории нет)'}.`,
+    `3. Цели не повторяют недавние: ${recentTargets.length ? recentTargets.join(', ') : '(истории нет)'}. Повтор — это ТОЛЬКО дословное совпадение одной из 3 целей плана со словом из этого списка; близкие по теме слова повтором НЕ считаются. Прежде чем отклонить за повтор, процитируй в issues совпавшее слово.`,
     `4. Упражнения корректны: предложения грамматичны и на ${learningLang}; в cloze пропуск ____ уместен и дистракторы не являются верными ответами; предложение диктанта содержит целевое слово.`,
     'Мелкие стилистические придирки — НЕ повод отклонять. issues — коротко и конкретно.',
   ].join('\n');
