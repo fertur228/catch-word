@@ -13,7 +13,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
-const FREE = ['3 скана в день', 'Коллекция и повторение (SRS)', 'Озвучка слов', 'Квест дня', '1 пара языков'];
+const FREE = ['5 сканов в день', 'Коллекция и повторение (SRS)', 'Озвучка слов', 'Квест дня', '1 пара языков'];
 const PREMIUM = [
   'Безлимит сканов',
   'Все языковые пары',
@@ -29,7 +29,7 @@ export default function Pricing() {
     <MarketingShell>
       <Head>
         <title>Тарифы TakeWord — Free навсегда или Premium с безлимитом</title>
-        <meta name="description" content="Free навсегда: 3 скана в день, коллекция и повторение. Premium — безлимит сканов, все языки, синхронизация и AI-примеры. От $6.99. Сравните тарифы TakeWord." />
+        <meta name="description" content="Free навсегда: 5 сканов в день, коллекция и повторение. Premium — безлимит сканов, все языки, синхронизация и AI-примеры. От $6.99. Сравните тарифы TakeWord." />
         <link rel="canonical" href={`${SITE_URL}/pricing`} />
         <meta property="og:title" content="Тарифы TakeWord — Free и Premium" />
         <meta property="og:description" content="Начни бесплатно. Premium снимает лимит сканов и открывает все языки. От $6.99." />

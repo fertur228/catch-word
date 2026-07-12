@@ -40,7 +40,7 @@ import { LEARNING_LANG, NATIVE_LANG } from '@/lib/mock-data';
 import { computeNextReview, freshSrs, isDue, isMastered } from '@/lib/srs';
 import type { CollectionStats, SrsRating, UserPrefs, WordCard } from '@/types';
 
-const FREE_SCAN_LIMIT = 3; // 3 бесплатных скана В ДЕНЬ (синхр. с RPC consume_scan)
+const FREE_SCAN_LIMIT = 5; // 5 бесплатных сканов В ДЕНЬ (синхр. с RPC consume_scan, миграция 20260713110000)
 const FREE_TEST_LIMIT = 1; // 1 бесплатная попытка умного теста В ДЕНЬ
 const FREE_PAIR_LIMIT = 2; // free — максимум 2 пары языков (курса); 3-я → paywall
 

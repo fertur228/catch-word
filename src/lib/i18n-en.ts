@@ -10,7 +10,7 @@ export const EN: Record<string, string> = {
   "10 вопросов, форматы вперемешку": "10 questions, mixed formats",
   "2 пары языков": "2 language pairs",
   "2–3 примера + грамматика": "2–3 examples + grammar",
-  "3 скана в день": "3 scans a day",
+  "5 сканов в день": "5 scans a day",
   "5 дней": "5 days",
   "7 дней бесплатно": "7 days free",
   "Email": "Email",
