@@ -284,6 +284,12 @@ export function ReviewSessionScreen() {
     setSttUnavailable(true);
     void setPref(PREF_STT_UNAVAILABLE, '1');
   }, []);
+  // Самовосстановление (фикс 12.07): удачная запись стирает пометку — в т.ч.
+  // «протухшую» от старого бага, когда любой сбой хоронил голос навсегда.
+  const clearSttUnavailable = useCallback(() => {
+    setSttUnavailable(false);
+    void setPref(PREF_STT_UNAVAILABLE, '0');
+  }, []);
 
   // --- Дайджест недели от тренера (Э6-клиент) ---
   // Карточка «Итоги недели» на интро: пн–вт, если есть сводка за прошлую
@@ -1496,6 +1502,7 @@ export function ReviewSessionScreen() {
             fallback={writeFallback}
             sttOff={sttUnavailable}
             onSttFail={markSttUnavailable}
+            onSttWorked={clearSttUnavailable}
             onSubmit={onWriteSubmit}
             onNext={onNextQuestion}
             last={qIndex + 1 >= total}
@@ -2590,6 +2597,7 @@ function SpeakPhotoBody({
   fallback,
   sttOff,
   onSttFail,
+  onSttWorked,
   onSubmit,
   onNext,
   last,
@@ -2603,8 +2611,10 @@ function SpeakPhotoBody({
   fallback: 'auth' | 'limit' | 'unavailable' | null;
   /** STT недоступен (нет API / уже ловили ошибку) → сразу текстовый ввод. */
   sttOff: boolean;
-  /** Ошибка распознавания → запомнить «текст навсегда» (pref 'stt_unavailable'). */
+  /** Подтверждённый запрет сервиса → запомнить «текст по умолчанию» (pref). */
   onSttFail: () => void;
+  /** Удачная запись → стереть пометку (самовосстановление после сбоев). */
+  onSttWorked: () => void;
   onSubmit: () => void;
   onNext: () => void;
   last: boolean;
@@ -2760,6 +2770,9 @@ function SpeakPhotoBody({
       }
       onChange(text);
       setRecPhase('transcribed');
+      // Запись сработала → стираем возможную пометку «голос недоступен»
+      // (самовосстановление: следующий вопрос снова стартует с микрофона).
+      onSttWorked();
     };
     recRef.current = rec;
     setSeconds(0);
@@ -2791,8 +2804,10 @@ function SpeakPhotoBody({
   // sttOff — запомненная ошибка распознавания (Э4).
   const hasApi = useMemo(() => !!getSpeechRecognitionCtor(), []);
   const textMode = sttOff || !hasApi || localText;
-  // Вернуться к голосу можно всегда, кроме подтверждённого запрета сервиса.
-  const canRetryVoice = hasApi && !sttOff;
+  // Пометка sttOff решает только СТАРТОВЫЙ режим (текст по умолчанию), но
+  // кнопка «Записать голосом» доступна всегда, пока API существует: сбой —
+  // не приговор, а удачная запись стирает пометку (onSttWorked).
+  const canRetryVoice = hasApi;
 
   return (
     <>
