@@ -3,6 +3,7 @@
  * data URL (или blob URL), поэтому просто превращаем его в Blob и грузим.
  * Уже-загруженные http(s)-URL возвращаем как есть.
  */
+import { seedImageCache } from '@/lib/image-cache';
 import { supabase } from '@/lib/supabase';
 
 const BUCKET = 'stickers';
@@ -23,12 +24,18 @@ export async function uploadSticker(
     const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
       contentType: isPng ? 'image/png' : 'image/jpeg',
       upsert: true,
+      // Стикер не меняется — годовой кэш вместо дефолтного часа.
+      cacheControl: '31536000',
     });
     if (error) {
       console.warn('uploadSticker web:', error.message);
       return null;
     }
-    return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+    const url = supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+    // Блоб уже в руках: сеем локальный кэш, чтобы облачный URL на этом
+    // устройстве вообще никогда не скачивался из сети.
+    await seedImageCache(url, blob);
+    return url;
   } catch (e) {
     console.warn('uploadSticker web failed:', e);
     return null;

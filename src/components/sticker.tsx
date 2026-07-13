@@ -14,6 +14,7 @@ import { Icon } from '@/components/icon';
 import type { ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryIcon } from '@/lib/category-icon';
+import { useCachedImageUri } from '@/lib/image-cache';
 
 export function Sticker({
   imageUri,
@@ -36,6 +37,9 @@ export function Sticker({
 }) {
   const theme = useTheme();
   const radius = size * 0.28;
+  // На вебе облачный URL подменяется локально закэшированным objectURL
+  // (мгновенно при повторных показах); на нативе возвращается как есть.
+  const displayUri = useCachedImageUri(imageUri);
 
   // Определяем иконку и цвета фона/иконки, когда нет реального фото.
   const ci = categoryIcon(category);
@@ -61,7 +65,7 @@ export function Sticker({
       ]}>
       {imageUri ? (
         <Image
-          source={{ uri: imageUri }}
+          source={displayUri ? { uri: displayUri } : undefined}
           style={{ width: '100%', height: '100%', borderRadius: radius * 0.7 }}
           // «contain» — фото вписывается ЦЕЛИКОМ и авто-масштабируется под любой
           // размер (маленькая плитка / большая карточка), ничего не обрезается.

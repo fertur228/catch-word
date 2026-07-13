@@ -23,6 +23,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
+import { useCachedImageUri } from '@/lib/image-cache';
 import { isMastered } from '@/lib/srs';
 import type { WordCard } from '@/types';
 
@@ -42,6 +43,8 @@ export function WordTile({
   const reduce = useReduceMotion();
   const learned = isMastered(card);
   const hasPhoto = Boolean(card.imageUri);
+  // На вебе — локально закэшированный objectURL вместо повторной загрузки из Supabase.
+  const photoUri = useCachedImageUri(card.imageUri);
 
   const scale = useSharedValue(1);
   const glow = useSharedValue(0);
@@ -71,7 +74,7 @@ export function WordTile({
         <View style={styles.mediaWrap}>
           {hasPhoto ? (
             <Image
-              source={{ uri: card.imageUri! }}
+              source={photoUri ? { uri: photoUri } : undefined}
               style={styles.photo}
               contentFit="contain"
               transition={150}

@@ -49,6 +49,9 @@ export async function uploadSticker(
     const { error } = await supabase.storage.from(BUCKET).upload(path, bytes, {
       contentType: ext === 'png' ? 'image/png' : 'image/jpeg',
       upsert: true,
+      // Стикер карточки не меняется — пусть браузер/CDN кэшируют его на год,
+      // а не на дефолтный час (медленная загрузка фото на вебе).
+      cacheControl: '31536000',
     });
     if (error) {
       console.warn('uploadSticker:', error.message);
