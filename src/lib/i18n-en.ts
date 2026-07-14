@@ -335,7 +335,6 @@ export const EN: Record<string, string> = {
   "Профиль": "Profile",
   "РЕЖИМЫ": "MODES",
   "Разбор ошибок": "Mistake review",
-  "Разрешить камеру": "Allow camera",
   "Распознанный текст — поправь, если нужно": "Recognized text — fix it if needed",
   "Распознаю предмет…": "Recognizing object…",
   "Расскажи о фото": "Talk about your photo",
