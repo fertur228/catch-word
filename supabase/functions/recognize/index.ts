@@ -9,9 +9,15 @@
 //   RECOGNIZE_MODEL    — модель (дефолт google/gemini-2.5-flash-lite)
 //   RECOGNIZE_API_KEY  — ключ провайдера (секрет функции)
 //
-// Запрос  (POST JSON): { image, learningLang, nativeLang, maxObjects? }
+// Запрос  (POST JSON): { image, learningLang, nativeLang, maxObjects?, wantMasks? }
 // Ответ           : { objects: [ { word, translation, ipa, category, emoji, bbox,
-//                     confidence, examples[], note, distractors[] } ] }
+//                     confidence, examples[], note, distractors[], mask?, maskBox? } ] }
+//
+// wantMasks (веб): ПАРАЛЛЕЛЬНЫЙ второй вызов модели за масками сегментации в
+// каноническом формате Gemini (box_2d 0..1000 + base64-PNG маска). Отдельный
+// вызов, потому что маски — специально обученный формат: под json_schema модель
+// «фантазирует» битый base64 (проверено), а без схемы отдаёт валидный PNG.
+// Ошибка сегментации не роняет распознавание — объекты придут без mask.
 //
 // examples/note/distractors — «живой» учебный контент в том же вызове (почти
 // бесплатно): 2 примера с этим словом, короткая заметка-мнемоника и правдоподобные
@@ -99,6 +105,95 @@ const SCHEMA = {
   },
 };
 
+/**
+ * Маски сегментации: канонический промпт Gemini (см. доки Google по segmentation).
+ * ВАЖНО: без response_format — структурный вывод ломает обученный формат масок.
+ */
+function buildSegPrompt(maxObjects: number): string {
+  const what =
+    maxObjects <= 1
+      ? 'the single MOST PROMINENT foreground object'
+      : `the prominent foreground objects (at most ${maxObjects})`;
+  return (
+    `Give the segmentation masks for ${what}. ` +
+    'Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", ' +
+    'the segmentation mask in key "mask", and the text label in the key "label". Use descriptive labels.'
+  );
+}
+
+/** box_2d [ymin,xmin,ymax,xmax] в долях тысячи → наш bbox [x,y,w,h] в долях 1. */
+function box2dToBbox(b: unknown): number[] | null {
+  if (!Array.isArray(b) || b.length !== 4) return null;
+  const [ymin, xmin, ymax, xmax] = b.map((n) => Math.max(0, Math.min(1000, Number(n) || 0)));
+  if (xmax <= xmin || ymax <= ymin) return null;
+  return [xmin / 1000, ymin / 1000, (xmax - xmin) / 1000, (ymax - ymin) / 1000];
+}
+
+/** Пересечение-над-объединением двух bbox [x,y,w,h] — для матчинга масок к объектам. */
+function iou(a: number[], b: number[]): number {
+  const x1 = Math.max(a[0], b[0]);
+  const y1 = Math.max(a[1], b[1]);
+  const x2 = Math.min(a[0] + a[2], b[0] + b[2]);
+  const y2 = Math.min(a[1] + a[3], b[1] + b[3]);
+  const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  const union = a[2] * a[3] + b[2] * b[3] - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+/** Параллельный вызов за масками. Любая ошибка → [] (маски — best-effort). */
+async function fetchSegmentation(
+  apiKey: string,
+  dataUrl: string,
+  maxObjects: number,
+): Promise<{ box: number[]; mask: string }[]> {
+  try {
+    const resp = await fetch(`${BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://catch-words.com',
+        'X-Title': 'TakeWord',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        // Маска ~1–3КБ base64 на предмет; с запасом на сцену из 8.
+        max_tokens: 12000,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: buildSegPrompt(maxObjects) },
+              { type: 'image_url', image_url: { url: dataUrl } },
+            ],
+          },
+        ],
+      }),
+    });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    let text = String(data?.choices?.[0]?.message?.content ?? '');
+    // JSON приходит в ```json-ограде — срезаем.
+    text = text.replace(/^```(?:json)?\s*/m, '').replace(/```\s*$/m, '').trim();
+    const arr = JSON.parse(text);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      // deno-lint-ignore no-explicit-any
+      .map((it: any) => {
+        const box = box2dToBbox(it?.box_2d);
+        const mask = typeof it?.mask === 'string' ? it.mask.trim() : '';
+        // Валидный data-URI PNG разумного размера, иначе выбрасываем.
+        const ok = box && mask.startsWith('data:image/png;base64,') && mask.length < 300_000;
+        return ok ? { box: box as number[], mask } : null;
+      })
+      .filter((x): x is { box: number[]; mask: string } => x !== null)
+      .slice(0, maxObjects);
+  } catch (e) {
+    console.error('[recognize] segmentation failed:', String(e).slice(0, 200));
+    return [];
+  }
+}
+
 function buildPrompt(
   learningLang: string,
   nativeLang: string,
@@ -114,6 +209,7 @@ function buildPrompt(
     `You are an expert at naming physical objects to help someone learn ${learningLang}.`,
     intro,
     'Be accurate: give the SPECIFIC everyday noun a native speaker would use, not a vague category (e.g. "mug" not "cup", "sneaker" not "shoe"). Use the generic object name, never a brand.',
+    'Look closely before answering: use shape, material, size and surrounding context to tell similar objects apart (e.g. thermos vs bottle, notebook vs book, monitor vs TV).',
     'If the photo is imperfect (blurry, partial, odd angle), still give your single best guess and lower confidence accordingly. Return an empty list ONLY if there is genuinely no discernible object.',
     'For each object return:',
     `- word: the object's common name in ${learningLang} — a single, lowercase, singular noun.`,
@@ -146,7 +242,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   let body: {
-    image?: string; learningLang?: string; nativeLang?: string; maxObjects?: number; questWords?: unknown;
+    image?: string; learningLang?: string; nativeLang?: string; maxObjects?: number;
+    questWords?: unknown; wantMasks?: boolean;
   };
   try {
     body = await req.json();
@@ -206,6 +303,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
       try { await admin.rpc('refund_scan', { p_user: userId }); } catch { /* best-effort */ }
     }
   };
+
+  // Маски (веб): стартуем ПАРАЛЛЕЛЬНО с распознаванием — стена времени не растёт.
+  const wantMasks = body.wantMasks === true;
+  const segP = wantMasks
+    ? fetchSegmentation(apiKey, dataUrl, maxObjects)
+    : Promise.resolve([] as { box: number[]; mask: string }[]);
 
   let resp: Response;
   try {
@@ -298,6 +401,32 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }))
     .filter((o: { word: string }) => o.word.length > 0)
     .slice(0, maxObjects);
+
+  // Прикрепляем маски: каждому объекту — сегмент с максимальным IoU его bbox
+  // (жадно, сегмент используется один раз). maskBox — регион САМОЙ маски
+  // (маска обучена под свой box_2d, он может чуть отличаться от нашего bbox).
+  const segs = await segP;
+  if (segs.length > 0) {
+    const used = new Set<number>();
+    for (const o of objects as ({ bbox: number[] | null } & Record<string, unknown>)[]) {
+      let best = -1;
+      let bestIou = 0;
+      for (let i = 0; i < segs.length; i++) {
+        if (used.has(i)) continue;
+        // Один предмет без bbox + единственный сегмент — очевидный матч.
+        const score = o.bbox ? iou(o.bbox, segs[i].box) : objects.length === 1 && segs.length === 1 ? 1 : 0;
+        if (score > bestIou) {
+          bestIou = score;
+          best = i;
+        }
+      }
+      if (best >= 0 && bestIou >= 0.1) {
+        used.add(best);
+        o.mask = segs[best].mask;
+        o.maskBox = segs[best].box;
+      }
+    }
+  }
 
   return json({ objects, model: MODEL, scan: scanInfo });
 });

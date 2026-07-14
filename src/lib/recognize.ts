@@ -34,10 +34,15 @@ export class ScanLimitError extends Error {
   }
 }
 
-/** Длинная сторона при отправке (меньше токенов/трафика). */
-const MAX_EDGE = 1024;
+/**
+ * Длинная сторона при отправке. 1536/0.85 вместо 1024/0.6: агрессивный
+ * препроцессинг резал точность (готча в памяти команды), а Gemini тайлит
+ * по 768px — 1536 стоит столько же токенов, деталей заметно больше.
+ */
+const MAX_EDGE = 1536;
+const JPEG_QUALITY = 0.85;
 /** Жёсткий таймаут запроса распознавания. */
-const TIMEOUT_MS = 15000;
+const TIMEOUT_MS = 20000;
 
 /** Один распознанный предмет (что вернул /recognize). */
 export interface RecognizedObject {
@@ -59,6 +64,10 @@ export interface RecognizedObject {
   synonyms?: string[];
   /** Точное слово-цель квеста, которому предмет соответствует семантически, или "". */
   questMatch?: string;
+  /** Маска сегментации (data-URI PNG) — только веб (wantMasks); на нативе вырезает Vision. */
+  mask?: string | null;
+  /** Регион маски [x,y,w,h] в долях 0..1. */
+  maskBox?: number[] | null;
 }
 
 /** Готов ли бэкенд распознавания (есть URL и ключ). */
@@ -88,7 +97,7 @@ async function prepareImage(photoUri: string) {
         ? { resize: { width: MAX_EDGE } }
         : { resize: { height: MAX_EDGE } };
   return manipulateAsync(photoUri, [action], {
-    compress: 0.6,
+    compress: JPEG_QUALITY,
     format: SaveFormat.JPEG,
     base64: true,
   });
@@ -162,12 +171,16 @@ export async function recognizePhoto(
 /**
  * Вырезать предмет «по рамке» (кроп bbox) из подготовленного фото и сохранить
  * в постоянную папку. bbox в долях 0..1. Без bbox — сохраняем кадр целиком.
+ * mask/maskBox — только для сигнатурного паритета с recognize.web.ts: на нативе
+ * вырезку по контуру делает Vision (subject-lift), маски сервера не нужны.
  */
 export async function cropToSticker(
   preparedUri: string,
   width: number,
   height: number,
   bbox: number[] | null,
+  _mask?: string | null,
+  _maskBox?: number[] | null,
 ): Promise<string | null> {
   try {
     let uri = preparedUri;

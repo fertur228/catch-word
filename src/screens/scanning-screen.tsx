@@ -173,8 +173,15 @@ export function ScanningScreen() {
           if (reco && reco.objects.length > 0) {
             items = [];
             for (const obj of reco.objects) {
-              const cut = obj.bbox
-                ? await cropToSticker(reco.prepared.uri, reco.prepared.width, reco.prepared.height, obj.bbox)
+              const cut = obj.bbox || obj.mask
+                ? await cropToSticker(
+                    reco.prepared.uri,
+                    reco.prepared.width,
+                    reco.prepared.height,
+                    obj.bbox,
+                    obj.mask,
+                    obj.maskBox,
+                  )
                 : null;
               items.push({ result: toScanResult(obj, prefs.learningLang), cutoutUri: cut });
             }
@@ -247,12 +254,15 @@ export function ScanningScreen() {
 
           if (liftedUri) {
             cutoutUri = await persistImage(liftedUri).catch(() => null);
-          } else if (reco && primary && primary.bbox) {
+          } else if (reco && primary && (primary.bbox || primary.mask)) {
+            // Веб: с маской сегментации вырез идёт по контуру + белая обводка.
             cutoutUri = await cropToSticker(
               reco.prepared.uri,
               reco.prepared.width,
               reco.prepared.height,
               primary.bbox,
+              primary.mask,
+              primary.maskBox,
             );
           }
           if (!cutoutUri) cutoutUri = await persistImage(scanUri).catch(() => null);
