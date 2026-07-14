@@ -3,7 +3,7 @@
  *
  * Что делает:
  *  - корректно запрашивает доступ к камере (`useCameraPermissions`):
- *    загрузка → экран-приглашение «Разрешить камеру» → живое превью;
+ *    загрузка → экран-приглашение (кнопка «Продолжить») → живое превью;
  *  - показывает живое превью (`CameraView`) — активно только когда вкладка
  *    в фокусе (`useIsFocused` через `useFocusEffect`), чтобы беречь батарею;
  *  - премиальный оверлей поверх камеры:
@@ -286,7 +286,11 @@ export function CameraScreen() {
             </ThemedText>
           </Reveal>
           <Reveal delay={200} style={styles.permissionAction}>
-            <Button title={t('Разрешить камеру')} icon="camera.fill" onPress={requestPermission} />
+            {/* Guideline 5.1.1(iv): на кнопке ПЕРЕД системным запросом нельзя
+                слова вида «Разрешить/Allow» — только нейтральные «Продолжить/
+                Continue» (отказ ревью 14.07.2026, билд 6). Решение о доступе
+                юзер принимает в СИСТЕМНОМ диалоге, наша кнопка лишь ведёт к нему. */}
+            <Button title={t('Продолжить')} icon="camera.fill" onPress={requestPermission} />
             {!permission.canAskAgain ? (
               <ThemedText type="small" themeColor="textSecondary" style={styles.textCenter}>
                 {t('Доступ был запрещён. Включить можно в Настройках iOS → TakeWord → Камера.')}
