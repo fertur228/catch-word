@@ -40,7 +40,17 @@ import { LEARNING_LANG, NATIVE_LANG } from '@/lib/mock-data';
 import { computeNextReview, freshSrs, isDue, isMastered } from '@/lib/srs';
 import type { CollectionStats, SrsRating, UserPrefs, WordCard } from '@/types';
 
-const FREE_SCAN_LIMIT = 5; // 5 бесплатных сканов В ДЕНЬ (синхр. с RPC consume_scan, миграция 20260713110000)
+// Дефолт free-лимита (5/день) — работает, пока конфиг не загружен/недоступен.
+// Реальные лимиты живут в app_config.scan_limits (миграция 20260714120000):
+// free_daily (N/день), free_total (lifetime-квота) — можно A/B без редеплоя.
+const FREE_SCAN_LIMIT = 5;
+
+/** Конфиг лимитов из app_config.scan_limits (null = кап выключен). */
+interface ScanLimitsConfig {
+  freeDaily: number | null;
+  freeTotal: number | null;
+}
+const DEFAULT_SCAN_LIMITS: ScanLimitsConfig = { freeDaily: FREE_SCAN_LIMIT, freeTotal: null };
 const FREE_TEST_LIMIT = 1; // 1 бесплатная попытка умного теста В ДЕНЬ
 const FREE_PAIR_LIMIT = 2; // free — максимум 2 пары языков (курса); 3-я → paywall
 
@@ -206,6 +216,9 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
   const [cards, setCards] = useState<WordCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [scansLeft, setScansLeft] = useState(FREE_SCAN_LIMIT);
+  const [scanLimits, setScanLimits] = useState<ScanLimitsConfig>(DEFAULT_SCAN_LIMITS);
+  // Отображаемый лимит: дневной, если включён; иначе lifetime-квота; иначе дефолт.
+  const freeScanLimit = scanLimits.freeDaily ?? scanLimits.freeTotal ?? FREE_SCAN_LIMIT;
   const [prefs, setPrefs] = useState<UserPrefs>(DEFAULT_PREFS);
   const [questLastDay, setQuestLastDay] = useState(-1);
   const [questStreak, setQuestStreak] = useState(0);
@@ -372,10 +385,38 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
 
   const refundScan = useCallback(() => {
     if (isPremium) return;
-    setScansLeft((n) => Math.min(FREE_SCAN_LIMIT, n + 1));
-  }, [isPremium]);
+    setScansLeft((n) => Math.min(freeScanLimit, n + 1));
+  }, [isPremium, freeScanLimit]);
 
   const markScansExhausted = useCallback(() => setScansLeft(0), []);
+
+  // Конфиг лимитов из app_config (A/B «N/день vs M total» без редеплоя).
+  // Ошибка/старый бэкенд без таблицы → остаёмся на дефолте 5/день.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('app_config')
+          .select('value')
+          .eq('key', 'scan_limits')
+          .maybeSingle();
+        const v = data?.value as { free_daily?: number | null; free_total?: number | null } | null;
+        if (!alive || !v) return;
+        const freeDaily = typeof v.free_daily === 'number' ? v.free_daily : null;
+        const freeTotal = typeof v.free_total === 'number' ? v.free_total : null;
+        // Оба капа выключены = «бесплатный безлимит» — такого режима нет,
+        // сервер в этом случае тоже откатывается к 5/день (см. миграцию).
+        if (freeDaily == null && freeTotal == null) return;
+        setScanLimits({ freeDaily, freeTotal });
+      } catch {
+        /* сеть/старый бэкенд — дефолт */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Серверный остаток бесплатных сканов для ВОШЕДШЕГО free-пользователя.
   // (Гость — счётчик локальный; premium — безлимит.) Делает счётчик устойчивым к
@@ -388,14 +429,22 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       try {
         const { data } = await supabase
           .from('scan_usage')
-          .select('used, updated_at')
+          .select('used, used_total, updated_at')
           .eq('user_id', userId)
           .maybeSingle();
         if (!alive || !data) return;
         // Дневной лимит: если последняя активность была не сегодня (UTC) — счётчик
         // уже «сброшен» (сервер обнулит при следующем скане), показываем полный остаток.
         const usedToday = isSameUtcDay(data.updated_at as string | null) ? (data.used ?? 0) : 0;
-        setScansLeft(Math.max(0, FREE_SCAN_LIMIT - usedToday));
+        // Остаток = минимум по включённым капам (дневному и lifetime).
+        const byDay =
+          scanLimits.freeDaily != null ? scanLimits.freeDaily - usedToday : Number.POSITIVE_INFINITY;
+        const byTotal =
+          scanLimits.freeTotal != null
+            ? scanLimits.freeTotal - ((data.used_total as number | null) ?? 0)
+            : Number.POSITIVE_INFINITY;
+        const left = Math.min(byDay, byTotal);
+        setScansLeft(Math.max(0, Number.isFinite(left) ? left : FREE_SCAN_LIMIT - usedToday));
       } catch {
         /* сеть недоступна — оставляем текущее значение */
       }
@@ -403,7 +452,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     return () => {
       alive = false;
     };
-  }, [userId, isPremium]);
+  }, [userId, isPremium, scanLimits]);
 
   // Очистить коллекцию ТЕКУЩЕГО курса (активной пары языков). Слова других
   // пар остаются. Стартовые после этого не пересоздаются.
@@ -684,7 +733,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       loading,
       isPremium,
       scansLeft: isPremium ? 9999 : scansLeft,
-      scanLimit: isPremium ? 9999 : FREE_SCAN_LIMIT,
+      scanLimit: isPremium ? 9999 : freeScanLimit,
       addCard,
       removeCard,
       clearCollection,
@@ -723,6 +772,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     loading,
     isPremium,
     scansLeft,
+    freeScanLimit,
     addCard,
     removeCard,
     clearCollection,
