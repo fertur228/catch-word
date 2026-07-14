@@ -9,7 +9,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BRAND_BLUE, PrimaryButton } from '@/components/auth-kit';
+import { PrimaryButton } from '@/components/auth-kit';
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -67,12 +67,12 @@ export function VerifyEmailScreen() {
   return (
     <ThemedView style={[styles.root, { paddingTop: insets.top + Spacing.two, paddingBottom: insets.bottom + Spacing.four }]}>
       <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back} accessibilityLabel={t('Назад')}>
-        <Icon name="chevron.left" size={24} color={BRAND_BLUE} />
+        <Icon name="chevron.left" size={24} color={theme.primary} />
       </Pressable>
 
       <View style={styles.header}>
         <View style={[styles.mark, { backgroundColor: theme.primarySoft }]}>
-          <Icon name="envelope.fill" size={30} color={BRAND_BLUE} />
+          <Icon name="envelope.fill" size={30} color={theme.primary} />
         </View>
         <ThemedText type="subtitle" style={styles.h}>
           {t('Проверьте почту')}
@@ -81,7 +81,7 @@ export function VerifyEmailScreen() {
           {t('Мы отправили 6-значный код на')}
         </ThemedText>
         {mail ? (
-          <ThemedText type="smallBold" style={{ color: BRAND_BLUE }}>
+          <ThemedText type="smallBold" style={{ color: theme.primary }}>
             {mail}
           </ThemedText>
         ) : null}
@@ -98,7 +98,7 @@ export function VerifyEmailScreen() {
                 styles.cell,
                 {
                   backgroundColor: theme.background,
-                  borderColor: active || code[i] ? BRAND_BLUE : theme.border,
+                  borderColor: active || code[i] ? theme.primary : theme.border,
                 },
               ]}>
               <ThemedText type="title" style={styles.cellText}>
@@ -128,7 +128,7 @@ export function VerifyEmailScreen() {
         <ThemedText type="small" themeColor="textSecondary">
           {t('Не получили код?')}{' '}
         </ThemedText>
-        <ThemedText type="small" style={{ color: BRAND_BLUE, fontWeight: '700' }}>
+        <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
           {t('Отправить снова')}
         </ThemedText>
       </Pressable>

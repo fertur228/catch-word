@@ -21,8 +21,8 @@ import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { useT } from '@/lib/i18n';
 
 const LOGO = require('../../assets/images/logo.png');
-/** Фирменный синий из логотипа — фон сплеша совпадает с подложкой PNG. */
-const BRAND_BLUE = '#1678B2';
+/** Графит подложки логотипа — фон сплеша совпадает с фоном PNG (бренд ч/б). */
+const BRAND_GRAPHITE = '#1C1C1E';
 
 export function AnimatedSplash({ onDone }: { onDone: () => void }) {
   const reduce = useReduceMotion();
@@ -71,7 +71,7 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
 
 const styles = StyleSheet.create({
   root: {
-    backgroundColor: BRAND_BLUE,
+    backgroundColor: BRAND_GRAPHITE,
     alignItems: 'center',
     justifyContent: 'center',
     // Слоган держим вплотную к вордмарку — большой зазор смотрелся оторванно.

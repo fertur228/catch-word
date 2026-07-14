@@ -1,7 +1,8 @@
 /**
  * Общие элементы экранов авторизации (вход/регистрация/подтверждение) —
- * поле с подписью и основная синяя кнопка. Стиль близок к примеру Qustar,
- * но темизирован (light/dark) и в фирменном синем TakeWord.
+ * поле с подписью и основная кнопка. Стиль близок к примеру Qustar, но в
+ * графитовом акценте приложения (фидбэк тестеров 14.07: синий онбординг
+ * конфликтовал с ч/б продуктом — бренд теперь монохромный везде).
  */
 import {
   ActivityIndicator,
@@ -16,9 +17,6 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-
-/** Фирменный синий из логотипа — акцент кнопок и ссылок на экранах входа. */
-export const BRAND_BLUE = '#1678B2';
 
 /** Поле ввода с подписью сверху (Email, Пароль, Имя, …). */
 export function AuthField({ label, style, ...input }: { label: string } & TextInputProps) {
@@ -41,7 +39,7 @@ export function AuthField({ label, style, ...input }: { label: string } & TextIn
   );
 }
 
-/** Основная кнопка действия (синяя, во всю ширину). */
+/** Основная кнопка действия (графит, во всю ширину). */
 export function PrimaryButton({
   title,
   onPress,
@@ -53,18 +51,19 @@ export function PrimaryButton({
   loading?: boolean;
   disabled?: boolean;
 }) {
+  const theme = useTheme();
   return (
     <Pressable
       onPress={onPress}
       disabled={loading || disabled}
       style={({ pressed }) => [
         styles.btn,
-        { backgroundColor: BRAND_BLUE, opacity: disabled ? 0.5 : pressed ? 0.9 : 1 },
+        { backgroundColor: theme.primary, opacity: disabled ? 0.5 : pressed ? 0.9 : 1 },
       ]}>
       {loading ? (
-        <ActivityIndicator color="#FFFFFF" />
+        <ActivityIndicator color={theme.onPrimary} />
       ) : (
-        <Text style={styles.btnLabel}>{title}</Text>
+        <Text style={[styles.btnLabel, { color: theme.onPrimary }]}>{title}</Text>
       )}
     </Pressable>
   );
@@ -86,5 +85,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  btnLabel: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
+  btnLabel: { fontSize: 17, fontWeight: '700' },
 });

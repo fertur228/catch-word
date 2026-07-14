@@ -8,7 +8,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AuthField, BRAND_BLUE, PrimaryButton } from '@/components/auth-kit';
+import { AuthField, PrimaryButton } from '@/components/auth-kit';
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -69,7 +69,7 @@ export function RegisterScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back} accessibilityLabel={t('Назад')}>
-            <Icon name="chevron.left" size={24} color={BRAND_BLUE} />
+            <Icon name="chevron.left" size={24} color={theme.primary} />
           </Pressable>
 
           <ThemedText type="title" style={styles.h}>
@@ -134,7 +134,7 @@ export function RegisterScreen() {
               {t('Уже есть аккаунт?')}{' '}
             </ThemedText>
             <Pressable onPress={() => router.back()} hitSlop={8}>
-              <ThemedText type="small" style={{ color: BRAND_BLUE, fontWeight: '700' }}>
+              <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
                 {t('Войти')}
               </ThemedText>
             </Pressable>

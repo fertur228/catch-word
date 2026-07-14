@@ -8,7 +8,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AuthField, BRAND_BLUE, PrimaryButton } from '@/components/auth-kit';
+import { AuthField, PrimaryButton } from '@/components/auth-kit';
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -54,11 +54,11 @@ export function ForgotPasswordScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back} accessibilityLabel={t('Назад')}>
-            <Icon name="chevron.left" size={24} color={BRAND_BLUE} />
+            <Icon name="chevron.left" size={24} color={theme.primary} />
           </Pressable>
 
           <View style={[styles.mark, { backgroundColor: theme.primarySoft }]}>
-            <Icon name="lock.fill" size={28} color={BRAND_BLUE} />
+            <Icon name="lock.fill" size={28} color={theme.primary} />
           </View>
           <ThemedText type="subtitle" style={styles.h}>
             {t('Сброс пароля')}

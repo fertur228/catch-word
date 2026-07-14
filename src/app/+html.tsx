@@ -17,7 +17,7 @@ export default function Root({ children }: PropsWithChildren) {
           name="viewport"
           content="width=device-width, initial-scale=1, shrink-to-fit=no"
         />
-        <meta name="theme-color" content="#208AEF" />
+        <meta name="theme-color" content="#1C1C1E" />
 
         {/* Базовые SEO/соц-мета (per-page <Head> переопределяет на клиенте). */}
         <title>TakeWord — учи язык через камеру</title>

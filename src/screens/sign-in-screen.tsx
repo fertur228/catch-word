@@ -13,7 +13,7 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AuthField, BRAND_BLUE, PrimaryButton } from '@/components/auth-kit';
+import { AuthField, PrimaryButton } from '@/components/auth-kit';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Motion, Radius, Spacing } from '@/constants/theme';
@@ -153,7 +153,7 @@ export function SignInScreen() {
             </View>
 
             <Pressable onPress={() => router.push('/forgot-password')} hitSlop={8} style={styles.forgot}>
-              <ThemedText type="small" style={{ color: BRAND_BLUE, fontWeight: '600' }}>
+              <ThemedText type="small" style={{ color: theme.primary, fontWeight: '600' }}>
                 {t('Забыли пароль?')}
               </ThemedText>
             </Pressable>
@@ -206,7 +206,7 @@ export function SignInScreen() {
                 {t('Нет аккаунта?')}{' '}
               </ThemedText>
               <Pressable onPress={() => router.push('/register')} hitSlop={8}>
-                <ThemedText type="small" style={{ color: BRAND_BLUE, fontWeight: '700' }}>
+                <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
                   {t('Зарегистрироваться')}
                 </ThemedText>
               </Pressable>

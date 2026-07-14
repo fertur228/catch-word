@@ -8,7 +8,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AuthField, BRAND_BLUE, PrimaryButton } from '@/components/auth-kit';
+import { AuthField, PrimaryButton } from '@/components/auth-kit';
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -80,12 +80,12 @@ export function ResetPasswordScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back} accessibilityLabel={t('Назад')}>
-            <Icon name="chevron.left" size={24} color={BRAND_BLUE} />
+            <Icon name="chevron.left" size={24} color={theme.primary} />
           </Pressable>
 
           <View style={styles.header}>
             <View style={[styles.mark, { backgroundColor: theme.primarySoft }]}>
-              <Icon name="lock.rotation" size={28} color={BRAND_BLUE} />
+              <Icon name="lock.rotation" size={28} color={theme.primary} />
             </View>
             <ThemedText type="subtitle" style={styles.h}>
               {t('Новый пароль')}
@@ -94,7 +94,7 @@ export function ResetPasswordScreen() {
               {t('Мы отправили 6-значный код на')}
             </ThemedText>
             {mail ? (
-              <ThemedText type="smallBold" style={{ color: BRAND_BLUE }}>
+              <ThemedText type="smallBold" style={{ color: theme.primary }}>
                 {mail}
               </ThemedText>
             ) : null}
@@ -111,7 +111,7 @@ export function ResetPasswordScreen() {
                     styles.cell,
                     {
                       backgroundColor: theme.background,
-                      borderColor: active || code[i] ? BRAND_BLUE : theme.border,
+                      borderColor: active || code[i] ? theme.primary : theme.border,
                     },
                   ]}>
                   <ThemedText type="title" style={styles.cellText}>
@@ -154,7 +154,7 @@ export function ResetPasswordScreen() {
             <ThemedText type="small" themeColor="textSecondary">
               {t('Не получили код?')}{' '}
             </ThemedText>
-            <ThemedText type="small" style={{ color: BRAND_BLUE, fontWeight: '700' }}>
+            <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
               {t('Отправить снова')}
             </ThemedText>
           </Pressable>
