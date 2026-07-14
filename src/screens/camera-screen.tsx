@@ -371,7 +371,11 @@ export function CameraScreen() {
         {/* Низ: переключатель режима + заметка про симулятор + кнопка съёмки */}
         <View style={styles.bottomRow} pointerEvents="box-none">
           <View style={styles.modeToggle} pointerEvents="auto">
-            <CameraModeToggle mode={mode} onChange={(m) => (m === 'scene' && !isPremium ? router.push('/paywall') : setMode(m))} />
+            <CameraModeToggle
+              mode={mode}
+              sceneLocked={!isPremium}
+              onChange={(m) => (m === 'scene' && !isPremium ? router.push('/paywall') : setMode(m))}
+            />
           </View>
 
           <View style={styles.shutterWrap}>

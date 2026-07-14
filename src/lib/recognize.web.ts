@@ -4,6 +4,7 @@
  * /recognize. «Сохранение» (persistImage) — no-op: на вебе картинка живёт как
  * data URL и грузится в Storage при входе (см. sticker-upload.web.ts).
  */
+import { normalizeCategory } from '@/lib/category';
 import { lookupWord } from '@/lib/dictionary';
 import { supabase } from '@/lib/supabase';
 import type { ScanResult, Visor } from '@/lib/scan-job';
@@ -207,7 +208,9 @@ export function toScanResult(obj: RecognizedObject, learningLang: string): ScanR
     word: obj.word,
     translation,
     ipa,
-    category: obj.category,
+    // Нормализуем регистр/пробелы: иначе «АКСЕССУАР» и «Аксессуар» дробят
+    // одну тему на две секции в Коллекции (см. src/lib/category.ts).
+    category: normalizeCategory(obj.category),
     emoji: obj.emoji,
     examples: obj.examples ?? [],
     note: obj.note || undefined,

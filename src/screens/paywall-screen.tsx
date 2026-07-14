@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn as EnterFade } from 'react-native-reanimated';
 import type { PurchasesPackage } from 'react-native-purchases';
@@ -20,6 +19,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useSubscription } from '@/lib/subscription';
 import type { Plan } from '@/types';
 import { PRIVACY_URL, TERMS_URL } from '@/constants/links';
+import { closeModal } from '@/lib/close-modal';
 import { alertAsync } from '@/lib/dialog';
 import { feedbackTap } from '@/lib/feedback';
 import { t, useT, getLang } from '@/lib/i18n';
@@ -137,7 +137,6 @@ export function PaywallScreen() {
   const theme = useTheme();
   const t = useT();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const { user, signInWithGoogle } = useAuth();
   const { refresh } = useSubscription();
   const isWeb = Platform.OS === 'web';
@@ -149,6 +148,17 @@ export function PaywallScreen() {
 
   const [packages, setPackages] = useState<PurchasesPackage[]>([]);
   const [flow, setFlow] = useState<Flow>({ kind: 'idle' });
+
+  // Esc на вебе закрывает пейволл — как нативную модалку свайпом. Крестик в
+  // хедере (см. _layout.tsx) — основной выход; Esc — привычный для десктопа.
+  useEffect(() => {
+    if (!isWeb || typeof window === 'undefined') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeModal();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isWeb]);
 
   // Тарифы из RevenueCat (нативно). Пусто на web и до настройки ключа.
   useEffect(() => {
@@ -249,9 +259,10 @@ export function PaywallScreen() {
   };
 
   // Закрыть оверлей и пейволл после успеха — премиум уже применён стором подписки.
+  // closeModal: на вебе после прямого захода истории нет — уйдём на камеру.
   const finishSuccess = () => {
     setFlow({ kind: 'idle' });
-    router.back();
+    closeModal();
   };
 
   const busy = flow.kind === 'buying' || flow.kind === 'restoring';

@@ -293,7 +293,11 @@ export function CameraScreen() {
         {/* ── НИЗ ── */}
         <View style={styles.bottomRow}>
           <View style={styles.modeToggle}>
-            <CameraModeToggle mode={mode} onChange={(m) => (m === 'scene' && !isPremium ? router.push('/paywall') : setMode(m))} />
+            <CameraModeToggle
+              mode={mode}
+              sceneLocked={!isPremium}
+              onChange={(m) => (m === 'scene' && !isPremium ? router.push('/paywall') : setMode(m))}
+            />
           </View>
 
           {IS_DESKTOP ? (

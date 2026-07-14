@@ -10,16 +10,35 @@
  * Экраны result/paywall/onboarding открываются как модалки поверх вкладок.
  */
 import { useEffect, useState } from 'react';
-import { Platform, useColorScheme } from 'react-native';
+import { Platform, Pressable, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { DarkTheme, DefaultTheme, Redirect, Stack, ThemeProvider, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 
 import { AnimatedSplash } from '@/components/animated-splash';
+import { Icon } from '@/components/icon';
+import { useTheme } from '@/hooks/use-theme';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
+import { closeModal } from '@/lib/close-modal';
 import { CollectionProvider, useCollection } from '@/lib/collection-context';
 import { initLang, useT } from '@/lib/i18n';
+
+/** Крестик в хедере модалки — единственный гарантированный выход на вебе. */
+function HeaderClose() {
+  const theme = useTheme();
+  const t = useT();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t('Закрыть')}
+      hitSlop={12}
+      onPress={closeModal}
+      style={({ pressed }) => ({ padding: 6, opacity: pressed ? 0.6 : 1 })}>
+      <Icon name="xmark" size={18} color={theme.text} />
+    </Pressable>
+  );
+}
 
 // Держим сплеш на экране, пока не загрузим коллекцию/настройки.
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -98,7 +117,16 @@ function RootNavigator() {
         />
         <Stack.Screen name="result" options={{ presentation: 'modal', title: t('Результат') }} />
         <Stack.Screen name="card/[id]" options={{ title: t('Карточка') }} />
-        <Stack.Screen name="paywall" options={{ presentation: 'modal', title: 'TakeWord Premium' }} />
+        <Stack.Screen
+          name="paywall"
+          options={{
+            presentation: 'modal',
+            title: 'TakeWord Premium',
+            // Явный выход обязателен: на вебе у модалки нет back после прямого
+            // захода, и юзер запирался на пейволле (фидбэк тестеров 14.07).
+            headerRight: () => <HeaderClose />,
+          }}
+        />
         {/* Промежуточный экран съёмки: плавный кросс-фейд поверх камеры,
             свайп-закрытие отключено (камера → /scanning → replace на /result). */}
         <Stack.Screen

@@ -123,7 +123,7 @@ function MasteryStars({ mastery }: { mastery: number }) {
     <View style={styles.stars}>
       {[0, 1, 2, 3, 4].map((i) => {
         if (i >= mastery) {
-          return <Icon key={i} name="star" size={24} color={theme.backgroundSelected} />;
+          return <Icon key={i} name="star" size={24} color={theme.iconMuted} />;
         }
         return (
           <Animated.View

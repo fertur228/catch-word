@@ -13,6 +13,7 @@ import { Image } from 'react-native';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 
+import { normalizeCategory } from '@/lib/category';
 import { lookupWord } from '@/lib/dictionary';
 import { supabase } from '@/lib/supabase';
 import type { ScanResult, Visor } from '@/lib/scan-job';
@@ -268,7 +269,9 @@ export function toScanResult(obj: RecognizedObject, learningLang: string): ScanR
     word: obj.word,
     translation,
     ipa,
-    category: obj.category,
+    // Нормализуем регистр/пробелы: иначе «АКСЕССУАР» и «Аксессуар» дробят
+    // одну тему на две секции в Коллекции (см. src/lib/category.ts).
+    category: normalizeCategory(obj.category),
     emoji: obj.emoji,
     examples: obj.examples ?? [],
     note: obj.note || undefined,

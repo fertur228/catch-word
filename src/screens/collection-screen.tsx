@@ -49,6 +49,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { feedbackSelection } from '@/lib/feedback';
 import { useAuth } from '@/lib/auth-context';
+import { normalizeCategory } from '@/lib/category';
 import { useCollection } from '@/lib/collection-context';
 import { groupCardsByDay } from '@/lib/dates';
 import { firstNameOf, greetingByHour } from '@/lib/greeting';
@@ -99,11 +100,15 @@ function toRows(cards: WordCard[]): TileRow[] {
   return rows;
 }
 
-/** Сгруппировать карточки по теме (категории) в порядке CATEGORIES, «Без темы» — в конец. */
+/**
+ * Сгруппировать карточки по теме (категории) в порядке CATEGORIES, «Без темы» — в конец.
+ * Категория нормализуется (регистр/пробелы): старые карточки в БД сохранены как есть,
+ * и без этого «АКСЕССУАР» и «Аксессуар» давали две секции с одним названием.
+ */
 function groupCardsByTheme(cards: WordCard[]): GridSection[] {
   const byCat = new Map<string, WordCard[]>();
   for (const c of cards) {
-    const cat = c.category ?? NO_THEME;
+    const cat = normalizeCategory(c.category) ?? NO_THEME;
     const bucket = byCat.get(cat);
     if (bucket) bucket.push(c);
     else byCat.set(cat, [c]);
@@ -174,18 +179,23 @@ export function CollectionScreen() {
   const [category, setCategory] = useState<string>(ALL);
   const [mode, setMode] = useState<SortMode>('dates');
 
-  // Темы, реально присутствующие в коллекции (в порядке CATEGORIES). Без чипа «Все»:
-  // выбранная тема снимается повторным тапом (тогда снова видно все слова).
+  // Темы, реально присутствующие в коллекции (в порядке CATEGORIES, затем прочие).
+  // Без чипа «Все»: выбранная тема снимается повторным тапом (снова все слова).
+  // Категории нормализованы — иначе чип не находил карточки с другим регистром.
   const categories = useMemo(() => {
-    const present = new Set(cards.map((c) => c.category).filter((c): c is string => !!c));
-    return CATEGORIES.filter((c) => present.has(c));
+    const present = new Set(
+      cards.map((c) => normalizeCategory(c.category)).filter((c): c is string => !!c),
+    );
+    const known = CATEGORIES.filter((c) => present.has(c));
+    const other = [...present].filter((c) => !CATEGORIES.includes(c)).sort();
+    return [...known, ...other];
   }, [cards]);
 
   // Отфильтрованные карточки: тема + поиск по слову/переводу.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return cards.filter((c) => {
-      if (category !== ALL && c.category !== category) return false;
+      if (category !== ALL && normalizeCategory(c.category) !== category) return false;
       if (!q) return true;
       return c.word.toLowerCase().includes(q) || c.translation.toLowerCase().includes(q);
     });

@@ -153,7 +153,7 @@ export function AnimatedTabBar({ state, descriptors, navigation }: TabBarProps) 
       {state.routes.map((route, index) => {
         const { options } = descriptors[route.key];
         const focused = state.index === index;
-        const color = focused ? theme.primary : theme.textSecondary;
+        const color = focused ? theme.primary : theme.iconMuted;
         const label =
           typeof options.tabBarLabel === 'string'
             ? options.tabBarLabel

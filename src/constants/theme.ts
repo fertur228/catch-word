@@ -33,6 +33,8 @@ export const Colors = {
     accentSoft: 'rgba(60,60,67,0.10)',
     accent2: '#8E8E93', // systemGray (вторичный нейтральный)
     accent2Soft: 'rgba(142,142,147,0.14)',
+    /** Приглушённая, но ЧИТАЕМАЯ иконка (таб-бар, пустые звёзды): ≥4.5:1 на фоне. */
+    iconMuted: '#6C6C70',
     /** Янтарный, НЕ равен gold: gold занят Premium/стриком, warning — «почти!»/предупреждения. */
     warning: '#D9A400',
     warningSoft: 'rgba(217,164,0,0.14)',
@@ -65,6 +67,8 @@ export const Colors = {
     accentSoft: 'rgba(235,235,245,0.14)',
     accent2: '#98989F',
     accent2Soft: 'rgba(152,152,159,0.16)',
+    /** Тёмная тема: тёмно-серые иконки терялись на чёрном (фидбэк 14.07). */
+    iconMuted: '#AEAEB2',
     warning: '#FFD60A',
     warningSoft: 'rgba(255,214,10,0.18)',
     successSoft: 'rgba(48,209,88,0.18)',

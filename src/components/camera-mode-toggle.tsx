@@ -26,11 +26,13 @@ function ModeSeg({
   icon,
   label,
   active,
+  locked,
   onPress,
 }: {
   icon: SFSymbol;
   label: string;
   active: boolean;
+  locked?: boolean;
   onPress: () => void;
 }) {
   return (
@@ -41,8 +43,10 @@ function ModeSeg({
       }}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      style={styles.seg}>
-      <Icon name={icon} size={15} color={active ? CAMERA_DARK : ON_CAMERA} />
+      // pressed-отклик обязателен: без него тап по сегменту (особенно по уже
+      // активному) не даёт никакой реакции и тоггл читается как сломанный.
+      style={({ pressed }) => [styles.seg, pressed && styles.segPressed]}>
+      <Icon name={locked ? 'lock.fill' : icon} size={15} color={active ? CAMERA_DARK : ON_CAMERA} />
       <ThemedText type="smallBold" style={{ color: active ? CAMERA_DARK : ON_CAMERA }}>
         {label}
       </ThemedText>
@@ -50,7 +54,16 @@ function ModeSeg({
   );
 }
 
-export function CameraModeToggle({ mode, onChange }: { mode: ScanMode; onChange: (m: ScanMode) => void }) {
+export function CameraModeToggle({
+  mode,
+  onChange,
+  sceneLocked,
+}: {
+  mode: ScanMode;
+  onChange: (m: ScanMode) => void;
+  /** «Вся сцена» доступна только в Premium: замочек предупреждает о пейволле. */
+  sceneLocked?: boolean;
+}) {
   const t = useT();
   const [w, setW] = useState(0);
   const reduceMotion = useReduceMotion();
@@ -70,7 +83,13 @@ export function CameraModeToggle({ mode, onChange }: { mode: ScanMode; onChange:
     <View onLayout={(e) => setW(e.nativeEvent.layout.width)} style={styles.track}>
       {segW > 0 ? <Animated.View pointerEvents="none" style={[styles.thumb, thumbStyle]} /> : null}
       <ModeSeg icon="viewfinder" label={t('Предмет')} active={mode === 'single'} onPress={() => onChange('single')} />
-      <ModeSeg icon="square.grid.2x2" label={t('Вся сцена')} active={mode === 'scene'} onPress={() => onChange('scene')} />
+      <ModeSeg
+        icon="square.grid.2x2"
+        label={t('Вся сцена')}
+        active={mode === 'scene'}
+        locked={sceneLocked}
+        onPress={() => onChange('scene')}
+      />
     </View>
   );
 }
@@ -100,4 +119,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.one + 2,
   },
+  segPressed: { opacity: 0.55 },
 });
