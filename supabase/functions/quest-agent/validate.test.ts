@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'vitest';
 
-import { validateExercises } from './validate.ts';
+import { sanitizeEmoji, validateExercises } from './validate.ts';
 
 const ALLOWED = new Set(['cup', 'table', 'chair']);
 
@@ -193,5 +193,32 @@ describe('validateExercises', () => {
     );
 
     expect(out).toEqual([{ v: 1, word: 'table', kind: 'writeSentence' }]);
+  });
+});
+
+describe('sanitizeEmoji', () => {
+  test('нормальные эмодзи проходят как есть', () => {
+    expect(sanitizeEmoji('🪑')).toBe('🪑');
+    expect(sanitizeEmoji('📚')).toBe('📚');
+    expect(sanitizeEmoji(' ☕ ')).toBe('☕');
+  });
+
+  test('мусор генерации заменяется на заглушку (регресс ночи 14.07)', () => {
+    expect(sanitizeEmoji('getTable')).toBe('❓'); // реальный кейс из daily_quests
+    expect(sanitizeEmoji('getTabl')).toBe('❓');
+    expect(sanitizeEmoji('chair1')).toBe('❓');
+    expect(sanitizeEmoji('🪑 chair')).toBe('❓'); // смесь эмодзи и букв — тоже мусор
+  });
+
+  test('пусто/null/слишком длинное → заглушка', () => {
+    expect(sanitizeEmoji('')).toBe('❓');
+    expect(sanitizeEmoji(null)).toBe('❓');
+    expect(sanitizeEmoji(undefined)).toBe('❓');
+    expect(sanitizeEmoji('🏳️‍🌈🏳️‍🌈🏳️‍🌈')).toBe('❓'); // >8 код-юнитов
+  });
+  test('слова на любых алфавитах — тоже мусор (регресс « میز» из ночи 15.07)', () => {
+    expect(sanitizeEmoji(' میز')).toBe('❓'); // «стол» на фарси вместо эмодзи
+    expect(sanitizeEmoji('стол')).toBe('❓');
+    expect(sanitizeEmoji('椅子')).toBe('❓');
   });
 });

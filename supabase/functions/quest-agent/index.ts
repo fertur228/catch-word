@@ -23,7 +23,7 @@
 //                                       (крон бежит в 22:00 UTC = 03:00 Алматы)
 //   {mode:'debug', user_id, day_index?} — один юзер, по умолчанию текущий день
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { validateExercises, type Exercise } from './validate.ts';
+import { sanitizeEmoji, validateExercises, type Exercise } from './validate.ts';
 
 const BASE_URL = Deno.env.get('RECOGNIZE_BASE_URL') ?? 'https://openrouter.ai/api/v1';
 const MODEL = Deno.env.get('RECOGNIZE_MODEL') ?? 'google/gemini-2.5-flash';
@@ -449,7 +449,6 @@ async function criticReview(
     difficulty: string;
     exercises: Exercise[];
   },
-  recentTargets: string[],
   learningLang: string,
   nativeLang: string,
 ): Promise<{ approved: boolean; issues: string[]; tokensIn: number; tokensOut: number }> {
@@ -458,7 +457,11 @@ async function criticReview(
     'Чеклист (отклоняй ТОЛЬКО за реальные нарушения):',
     `1. Ровно 3 цели, каждая — КОНКРЕТНЫЙ физический предмет на языке ${learningLang}, который реально найти дома/в офисе/на улице за минуту (кружка — да, «свобода»/«погода» — нет).`,
     `2. coach_message — на языке ${nativeLang}, дружелюбный, без воды.`,
-    `3. Цели не повторяют недавние: ${recentTargets.length ? recentTargets.join(', ') : '(истории нет)'}. Повтор — это ТОЛЬКО дословное совпадение одной из 3 целей плана со словом из этого списка; близкие по теме слова повтором НЕ считаются. Прежде чем отклонить за повтор, процитируй в issues совпавшее слово.`,
+    // Повторы целей критику НЕ доверяем: ночи 13–14.07 он галлюцинировал
+    // «повторы» (включая «door повторяет puerta») и зарубал валидные планы —
+    // ⅔ юзеров остались без тренировки. Дословный повтор проверяется КОДОМ
+    // до критика (см. repeats-guard в runAgentForUser).
+    '3. Повторы целей с прошлыми днями УЖЕ проверены кодом до тебя — за повторы/похожесть целей НЕ отклоняй.',
     `4. Упражнения корректны: предложения грамматичны и на ${learningLang}; в cloze пропуск ____ уместен и дистракторы не являются верными ответами; предложение диктанта содержит целевое слово.`,
     'Мелкие стилистические придирки — НЕ повод отклонять. issues — коротко и конкретно.',
   ].join('\n');
@@ -541,6 +544,7 @@ async function runAgentForUser(
   };
   let exercisesNudged = false; // однократный отказ finish без упражнений (квест важнее — второй раз принимаем)
   let criticRetried = false; // у планировщика один ретрай после отказа критика
+  let repeatsNudged = false; // однократный отказ за дословный повтор целей (проверка КОДОМ, не критиком)
   const steps: Array<{ tool: string; args: unknown; result: unknown }> = [];
   let tokensIn = 0;
   let tokensOut = 0;
@@ -581,7 +585,10 @@ async function runAgentForUser(
               ? { type: 'function', function: { name: 'finish' } }
               : 'required',
           temperature: 0, // воспроизводимость: тот же ученик → тот же план (шлюз П3)
-          max_tokens: 1200,
+          // 2200: finish несёт 3 цели + coach_message + 3–6 упражнений с
+          // предложениями/дистракторами + reasoning — в 1200 не влезал, модель
+          // резала хвост (мусор вида emoji:"getTable", потерянные exercises).
+          max_tokens: 2200,
         }),
       });
       if (!resp.ok) {
@@ -591,6 +598,11 @@ async function runAgentForUser(
       const data = await resp.json();
       tokensIn += data.usage?.prompt_tokens ?? 0;
       tokensOut += data.usage?.completion_tokens ?? 0;
+      // Обрезанный ответ — в трейс: это ломает tool-JSON тихо и стоило нам
+      // двух ночей диагностики. Пусть будет видно сразу.
+      if (data.choices?.[0]?.finish_reason === 'length') {
+        steps.push({ tool: '_truncated', args: { step }, result: 'finish_reason=length (max_tokens)' });
+      }
       const msg = data.choices?.[0]?.message;
       const call = msg?.tool_calls?.[0];
       if (!call) {
@@ -645,7 +657,8 @@ async function runAgentForUser(
         }
         const quests: QuestTarget[] = rawQuests.map((q) => ({
           word: String(q.word ?? '').trim(),
-          emoji: String(q.emoji ?? '❓'),
+          // Санитайзер: модель иногда кладёт в emoji мусор вида «getTable».
+          emoji: sanitizeEmoji(q.emoji),
           translation: String(q.translation ?? '').trim(),
           category: q.category != null ? String(q.category) : null,
           ipa: q.ipa != null ? String(q.ipa) : '',
@@ -680,13 +693,37 @@ async function runAgentForUser(
           continue;
         }
 
-        // ── Критик (Э6): второй агент проверяет план до записи ──
+        // ── Повторы целей: проверяем КОДОМ, критику это не доверяем ──
+        // Ночи 13–14.07: критик-LLM галлюцинировал «повторы» (в т.ч. считал
+        // переводы повторами: «door повторяет puerta») и дважды зарубал план →
+        // фолбэк стирал упражнения → «Тренировка от тренера» пустая у ⅔ юзеров.
+        // Повтор = ДОСЛОВНОЕ совпадение слова с целью из истории (7 дней).
         const historyRaw = (await toolGetHistory(ctx, { days: 7 })) as
           | Array<{ targets?: string[] }>
           | { error: string };
-        const recentTargets = Array.isArray(historyRaw)
-          ? historyRaw.flatMap((h) => h.targets ?? [])
-          : [];
+        const recentSet = new Set(
+          (Array.isArray(historyRaw) ? historyRaw.flatMap((h) => h.targets ?? []) : []).map((w) =>
+            String(w).toLowerCase(),
+          ),
+        );
+        const repeats = quests.filter((q) => recentSet.has(q.word.toLowerCase()));
+        if (repeats.length > 0 && !repeatsNudged) {
+          repeatsNudged = true;
+          messages.push(msg, {
+            role: 'tool', tool_call_id: call.id,
+            content: JSON.stringify({
+              error: `Цели уже были в недавних квестах: ${repeats.map((q) => q.word).join(', ')}. Замени их на НОВЫЕ предметы (посмотри дыры в get_vocab_map) и вызови finish снова.`,
+            }),
+          });
+          steps.push({
+            tool: 'finish',
+            args: { reasoning: args.reasoning },
+            result: `guard: rejected — repeats: ${repeats.map((q) => q.word).join(', ')}`,
+          });
+          continue;
+        }
+
+        // ── Критик (Э6): второй агент проверяет КАЧЕСТВО плана до записи ──
         const critic = await criticReview(
           {
             quests,
@@ -694,7 +731,6 @@ async function runAgentForUser(
             difficulty: String(args.difficulty ?? 'normal'),
             exercises,
           },
-          recentTargets,
           learningLang,
           nativeLang,
         );
@@ -702,7 +738,6 @@ async function runAgentForUser(
         tokensOut += critic.tokensOut;
         steps.push({ tool: '_critic', args: {}, result: { approved: critic.approved, issues: critic.issues } });
 
-        let exercisesToWrite = exercises;
         let criticFallback = false;
         if (!critic.approved) {
           if (!criticRetried) {
@@ -715,10 +750,13 @@ async function runAgentForUser(
             });
             continue;
           }
-          // Второй отказ: квест важнее — пишем без упражнений, помечаем фолбэк.
-          exercisesToWrite = [];
+          // Второй отказ: квест важнее доводки — публикуем план КАК ЕСТЬ и
+          // помечаем фолбэк для телеметрии. Упражнения НЕ стираем: они уже
+          // прошли кодовую валидацию (validateExercises), а обнуление здесь
+          // и было причиной пустых тренировок 13–14.07.
           criticFallback = true;
         }
+        const exercisesToWrite = exercises;
 
         if (!dryRun) {
           const { error: upErr } = await admin.from('daily_quests').upsert({
