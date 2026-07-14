@@ -49,8 +49,11 @@ public class SubjectLiftModule: Module {
           )
 
           let ciImage = CIImage(cvPixelBuffer: maskedBuffer)
+          // Стикер-стайл: белая обводка по контуру предмета (запекаем в PNG —
+          // UI просто показывает готовый вырез, без обводки на лету).
+          let sticker = Self.stickerize(ciImage)
           let context = CIContext()
-          guard let outCg = context.createCGImage(ciImage, from: ciImage.extent) else {
+          guard let outCg = context.createCGImage(sticker, from: sticker.extent) else {
             promise.reject("RENDER_FAILED", "Could not render masked image")
             return
           }
@@ -70,6 +73,38 @@ public class SubjectLiftModule: Module {
         }
       }
     }
+  }
+
+  /// Белая обводка по контуру выреза (стикер-стайл, фидбэк тестеров 14.07):
+  /// альфа выреза → дилатация (CIMorphologyMaximum) → мягкое сглаживание краёв
+  /// (лёгкий блюр маски) → белый силуэт → вырез поверх. Толщина ~1.5% от большей
+  /// стороны (мин. 6px) — на любом размере читается одинаково. Если что-то пошло
+  /// не так — возвращаем исходный вырез (обводка не должна ронять вырезку).
+  private static func stickerize(_ image: CIImage) -> CIImage {
+    let extent = image.extent
+    guard !extent.isEmpty, extent.width.isFinite, extent.height.isFinite else { return image }
+
+    let radius = max(6.0, Double(max(extent.width, extent.height)) * 0.015)
+    // Холст с запасом под обводку + мягкий край, чтобы её не срезало по рамке.
+    let pad = CGFloat(radius) + 4
+    let outExtent = extent.insetBy(dx: -pad, dy: -pad)
+
+    // 1) Дилатация: альфа «распухает» наружу на радиус обводки.
+    let dilated = image.applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: radius])
+    // 2) Слегка размываем маску — край обводки сглаженный, а не ступенчатый.
+    let softMask = dilated.applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 1.2])
+
+    // 3) Белый силуэт по альфе маски (фон прозрачный).
+    let white = CIImage(color: CIColor.white).cropped(to: outExtent)
+    let clear = CIImage(color: CIColor.clear).cropped(to: outExtent)
+    let silhouette = white.applyingFilter("CIBlendWithAlphaMask", parameters: [
+      kCIInputBackgroundImageKey: clear,
+      kCIInputMaskImageKey: softMask,
+    ])
+
+    // 4) Вырез поверх силуэта; кроп до расчётного холста.
+    let composed = image.composited(over: silhouette).cropped(to: outExtent)
+    return composed.extent.isEmpty ? image : composed
   }
 
   // UIImage.Orientation → CGImagePropertyOrientation (чтобы маска совпала с кадром).

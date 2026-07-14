@@ -6,7 +6,6 @@
  */
 import { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Image } from 'expo-image';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -23,7 +22,6 @@ import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
-import { useCachedImageUri } from '@/lib/image-cache';
 import { isMastered } from '@/lib/srs';
 import type { WordCard } from '@/types';
 
@@ -43,8 +41,6 @@ export function WordTile({
   const reduce = useReduceMotion();
   const learned = isMastered(card);
   const hasPhoto = Boolean(card.imageUri);
-  // На вебе — локально закэшированный objectURL вместо повторной загрузки из Supabase.
-  const photoUri = useCachedImageUri(card.imageUri);
 
   const scale = useSharedValue(1);
   const glow = useSharedValue(0);
@@ -70,18 +66,10 @@ export function WordTile({
       onPressIn={() => (scale.value = withSpring(0.96, Motion.spring.stiff))}
       onPressOut={() => (scale.value = withSpring(1, Motion.spring.bouncy))}>
       <Animated.View style={[styles.tile, { backgroundColor: theme.card, borderColor: theme.border }, pressStyle]}>
-        {/* Зона изображения — одинаковая для всех тайлов */}
+        {/* Зона изображения — одинаковая для всех тайлов. Фото идёт через Sticker:
+            размытая подложка + вырез с тенью — тот же стикер-стайл, что на Result. */}
         <View style={styles.mediaWrap}>
-          {hasPhoto ? (
-            <Image
-              source={photoUri ? { uri: photoUri } : undefined}
-              style={styles.photo}
-              contentFit="contain"
-              transition={150}
-            />
-          ) : (
-            <Sticker category={card.category} size={80} />
-          )}
+          <Sticker category={card.category} imageUri={card.imageUri} size={hasPhoto ? 96 : 80} />
           {learned ? (
             <Animated.View
               entering={reduce ? undefined : ZoomIn.springify().damping(12).stiffness(200)}
@@ -127,8 +115,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: Spacing.three,
   },
-  // Фото вписывается целиком (contain) с отступом от краёв плитки.
-  photo: { width: '100%', height: '100%' },
   badge: {
     position: 'absolute',
     top: 4,

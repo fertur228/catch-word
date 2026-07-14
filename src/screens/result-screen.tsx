@@ -391,7 +391,14 @@ export function ResultScreen() {
         </Reveal>
 
         {/* Стикер с пружинным «попом» + печать успеха после сохранения. */}
-        <StickerPop category={content.category} imageUri={content.imageUri} saved={saved} shake={alreadyHave} />
+        <StickerPop
+          category={content.category}
+          imageUri={content.imageUri}
+          // Исходный кадр — размытая подложка стикера (вырез «выпрыгивает» из фото).
+          backdropUri={job?.photoUri}
+          saved={saved}
+          shake={alreadyHave}
+        />
 
         {editing ? (
           /* --- Инлайн-редактор слова (фича 2) --- */
@@ -698,11 +705,14 @@ function AutoBadge() {
 function StickerPop({
   category,
   imageUri,
+  backdropUri,
   saved,
   shake,
 }: {
   category?: string | null;
   imageUri?: string | null;
+  /** Исходный кадр скана — для размытой подложки стикера. */
+  backdropUri?: string | null;
   saved: boolean;
   /** Горизонтальная «тряска» — сигнал, что слово уже в коллекции. */
   shake?: boolean;
@@ -741,7 +751,7 @@ function StickerPop({
   return (
     <View style={styles.stickerWrap}>
       <Animated.View style={animStyle}>
-        <Sticker category={category} imageUri={imageUri} size={STICKER_SIZE} />
+        <Sticker category={category} imageUri={imageUri} backdropUri={backdropUri} size={STICKER_SIZE} />
         {/* Разовый световой блик по стикеру (скруглённый оверлей — тень не режем). */}
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, { borderRadius: radius, overflow: 'hidden' }]}>
           <Shine trigger={saved ? 2 : 1} width={STICKER_SIZE} />
