@@ -64,3 +64,6 @@ example
 /*.html
 .i18n-tmp/
 .gstack/
+
+# Claude Code local settings
+.claude/settings.local.json

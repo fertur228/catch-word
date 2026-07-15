@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx tsc --noEmit *)",
+      "Bash(npm run lint)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run test)",
+      "Bash(xcrun devicectl list *)",
+      "Bash(xcrun xctrace list *)",
+      "Bash(xcrun simctl list *)",
+      "Bash(npx wrangler whoami)",
+      "Bash(npx wrangler whoami *)",
+      "Bash(npx wrangler --version)",
+      "Bash(npx supabase --version)",
+      "Bash(npx eas-cli whoami)",
+      "Bash(npx eas-cli build:view *)",
+      "Bash(npx expo config *)",
+      "Bash(npx expo --version)"
+    ]
+  }
+}
