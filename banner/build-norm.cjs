@@ -138,14 +138,11 @@ body{position:relative;overflow:hidden;
 .chip svg{width:74px;height:74px;flex:0 0 74px}
 .chip .t{font-size:66px;font-weight:650;white-space:nowrap}
 
-.daily{position:absolute;left:1580px;top:1130px;display:flex;flex-direction:column;
-  gap:44px;padding:56px 62px;border-radius:64px;transform:rotate(2.5deg);${chipCss}}
-.daily .row{display:flex;align-items:center;gap:30px}
-.daily svg{width:76px;height:76px;flex:0 0 76px}
-.daily .t{font-size:64px;font-weight:650;white-space:nowrap}
+.daily{left:1310px;top:1150px;transform:rotate(2.5deg)}
+.daily .t{font-size:60px}
 
-.point{left:96px;top:3180px;transform:rotate(-3deg);z-index:6}
-.smart{left:1440px;top:3510px;transform:rotate(2deg);z-index:6}
+.point{left:150px;top:3640px;transform:rotate(-3deg);z-index:6}
+.smart{left:1460px;top:3700px;transform:rotate(2deg);z-index:6}
 
 /* QR-карточка внизу по центру */
 .qr{position:absolute;left:50%;top:4210px;transform:translateX(-50%);
@@ -153,7 +150,7 @@ body{position:relative;overflow:hidden;
   background:#fff;border-radius:74px;padding:64px 74px;
   box-shadow:0 70px 130px -30px rgba(3,15,55,.6)}
 .qr img{width:470px;height:470px;flex:0 0 470px}
-.qr .h{font-size:106px;font-weight:800;color:${BLUE};line-height:1.06;letter-spacing:-2px}
+.qr .h{font-size:93px;font-weight:800;color:${BLUE};line-height:1.06;letter-spacing:-2px}
 .qr .s{margin-top:30px;font-size:60px;font-weight:600;color:#5E6470;line-height:1.32}
 .qr .ar{width:190px;height:142px;margin-top:26px;margin-left:270px}
 </style></head><body>
@@ -164,10 +161,7 @@ body{position:relative;overflow:hidden;
   <div class="title">TakeWord</div>
   <div class="sub">Learn languages<br>through <em>your camera.</em></div>
 
-  <div class="daily">
-    <div class="row">${icoFlame}<div class="t">Daily streaks</div></div>
-    <div class="row">${icoTarget}<div class="t">Daily quests</div></div>
-  </div>
+  <div class="chip daily">${icoFlame}<div class="t">Daily streaks &amp; quests</div></div>
 
   <div class="ph cam"><div class="isl"></div><div class="scr"><img src="${CAMERA}"></div></div>
   <div class="ph col"><div class="isl"></div><div class="scr"><img src="${COLLECTION}"><div class="tf"></div></div></div>
@@ -178,7 +172,7 @@ body{position:relative;overflow:hidden;
   <div class="qr">
     <img src="${QR}">
     <div>
-      <div class="h">Try TakeWord<br>now</div>
+      <div class="h">Try TakeWord now</div>
       <div class="s">Scan the QR code to start<br>learning your first word!</div>
       <div class="ar">${arrow}</div>
     </div>
