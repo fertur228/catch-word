@@ -146,10 +146,10 @@ body{position:relative;overflow:hidden;
 
 /* QR-карточка внизу по центру */
 .qr{position:absolute;left:50%;top:4210px;transform:translateX(-50%);
-  width:1500px;display:flex;align-items:center;gap:74px;
+  width:1640px;display:flex;align-items:center;gap:70px;
   background:#fff;border-radius:74px;padding:64px 74px;
   box-shadow:0 70px 130px -30px rgba(3,15,55,.6)}
-.qr img{width:470px;height:470px;flex:0 0 470px}
+.qr img{width:580px;height:580px;flex:0 0 580px}
 .qr .h{font-size:93px;font-weight:800;color:${BLUE};line-height:1.06;letter-spacing:-2px}
 .qr .s{margin-top:30px;font-size:60px;font-weight:600;color:#5E6470;line-height:1.32}
 .qr .ar{width:190px;height:142px;margin-top:26px;margin-left:270px}
