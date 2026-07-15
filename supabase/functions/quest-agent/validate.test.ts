@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'vitest';
 
-import { sanitizeEmoji, validateExercises } from './validate.ts';
+import { clampCoachMessage, sanitizeEmoji, validateExercises } from './validate.ts';
 
 const ALLOWED = new Set(['cup', 'table', 'chair']);
 
@@ -220,5 +220,39 @@ describe('sanitizeEmoji', () => {
     expect(sanitizeEmoji(' میز')).toBe('❓'); // «стол» на фарси вместо эмодзи
     expect(sanitizeEmoji('стол')).toBe('❓');
     expect(sanitizeEmoji('椅子')).toBe('❓');
+  });
+});
+
+describe('clampCoachMessage', () => {
+  test('короткое сообщение проходит как есть', () => {
+    expect(clampCoachMessage('Сегодня три предмета с кухни!')).toBe('Сегодня три предмета с кухни!');
+  });
+
+  test('null/undefined → пустая строка', () => {
+    expect(clampCoachMessage(null)).toBe('');
+    expect(clampCoachMessage(undefined)).toBe('');
+  });
+
+  test('переводы строк и двойные пробелы схлопываются', () => {
+    expect(clampCoachMessage('Привет!\n\nСегодня  кухня.')).toBe('Привет! Сегодня кухня.');
+  });
+
+  test('длинное режется по границе предложения', () => {
+    const first = 'Ты путал слова с кухни, поэтому сегодня закрепим их.';
+    const out = clampCoachMessage(`${first} А ещё добавим два новых предмета из гостиной, чтобы расширить словарь и было интереснее.`);
+
+    expect(out).toBe(first);
+    expect(out.length).toBeLessThanOrEqual(120);
+  });
+
+  test('одно предложение длиннее лимита → жёсткий срез с многоточием', () => {
+    const out = clampCoachMessage('а'.repeat(200));
+
+    expect(out.length).toBeLessThanOrEqual(120);
+    expect(out.endsWith('…')).toBe(true);
+  });
+
+  test('уважает кастомный лимит', () => {
+    expect(clampCoachMessage('Раз. Два. Три.', 9)).toBe('Раз. Два.');
   });
 });

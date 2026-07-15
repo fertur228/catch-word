@@ -1034,8 +1034,9 @@ export function ReviewSessionScreen() {
                   </>
                 ) : (
                   <>
-                    {/* «Почему эти слова» от тренера — 2 строки, НЕ режем в одну (B.1). */}
-                    <ThemedText type="subtitle" style={styles.heroTitle} numberOfLines={2}>
+                    {/* «Почему эти слова» от тренера — до 3 строк; длину гарантирует
+                        сервер (clampCoachMessage ≤120 симв.), это лишь страховка. */}
+                    <ThemedText type="subtitle" style={styles.heroTitle} numberOfLines={3}>
                       {coachMessage ?? t('Тренер собрал упражнения по твоим ответам')}
                     </ThemedText>
                     <ThemedText type="small" themeColor="textSecondary">
@@ -1127,7 +1128,8 @@ export function ReviewSessionScreen() {
                     <Icon name="xmark" size={16} color={theme.textSecondary} />
                   </Pressable>
                 </View>
-                <ThemedText type="small" themeColor="textSecondary" numberOfLines={6}>
+                {/* Дайджест до 550 символов — показываем целиком, карточка растянется. */}
+                <ThemedText type="small" themeColor="textSecondary">
                   {digest.digest}
                 </ThemedText>
               </View>

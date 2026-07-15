@@ -34,7 +34,7 @@ import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { feedbackSelection } from '@/lib/feedback';
-import { useT } from '@/lib/i18n';
+import { syncLangToNative, useT } from '@/lib/i18n';
 import { useCollection } from '@/lib/collection-context';
 import { LANGUAGES, LEARNING_LANG, NATIVE_LANG, getLanguage } from '@/lib/mock-data';
 import type { AppLanguage } from '@/types';
@@ -120,6 +120,8 @@ export function OnboardingScreen() {
     setBusy(true);
     try {
       await setLanguages(learning, native);
+      // Родной русский/английский → интерфейс на нём же (если юзер не выбирал сам).
+      await syncLangToNative(native);
       await completeOnboarding();
       router.replace('/(tabs)');
     } catch {

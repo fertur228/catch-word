@@ -9,6 +9,7 @@
  * Реактивно через useSyncExternalStore — единый стор на всё приложение, смена
  * языка мгновенно перерисовывает все экраны. Язык хранится в prefs (db).
  */
+import { getLocales } from 'expo-localization';
 import { useSyncExternalStore } from 'react';
 
 import * as db from '@/lib/db';
@@ -17,7 +18,16 @@ import { EN } from '@/lib/i18n-en';
 export type Lang = 'en' | 'ru';
 const PREF = 'ui_lang';
 
-let lang: Lang = 'en'; // дефолт — английский
+/** Язык устройства: русская система → ru, всё остальное → en. */
+function deviceLang(): Lang {
+  try {
+    return getLocales()[0]?.languageCode === 'ru' ? 'ru' : 'en';
+  } catch {
+    return 'en';
+  }
+}
+
+let lang: Lang = 'en'; // до initLang — английский; реальный дефолт считается там
 const subs = new Set<() => void>();
 const emit = () => subs.forEach((f) => f());
 const subscribe = (cb: () => void) => {
@@ -30,17 +40,38 @@ const getSnapshot = () => lang;
 
 const translate = (l: Lang, ru: string) => (l === 'en' ? EN[ru] ?? ru : ru);
 
-/** Прочитать сохранённый язык на старте (иначе остаётся дефолт en). */
+/**
+ * Выбрать язык на старте: сохранённый вручную → иначе язык устройства.
+ * Дефолт НЕ сохраняется в prefs — пустой pref означает «юзер язык не выбирал»,
+ * на это опирается syncLangToNative.
+ */
 export async function initLang(): Promise<void> {
+  let next = deviceLang();
   try {
     const v = await db.getPref(PREF);
-    if (v === 'en' || v === 'ru') {
-      lang = v;
-      emit();
-    }
+    if (v === 'en' || v === 'ru') next = v;
   } catch {
-    /* нет доступа к db — остаёмся на дефолте */
+    /* нет доступа к db — берём язык устройства */
   }
+  if (next !== lang) {
+    lang = next;
+    emit();
+  }
+}
+
+/**
+ * После онбординга: если юзер ещё не выбирал язык вручную, подтянуть интерфейс
+ * к родному языку пары ('ru-RU' → ru, 'en-US' → en, остальные — не трогаем).
+ */
+export async function syncLangToNative(nativeCode: string): Promise<void> {
+  const short = nativeCode.slice(0, 2);
+  if (short !== 'en' && short !== 'ru') return;
+  try {
+    if ((await db.getPref(PREF)) != null) return; // выбор юзера важнее
+  } catch {
+    return;
+  }
+  await setLang(short);
 }
 
 export function getLang(): Lang {

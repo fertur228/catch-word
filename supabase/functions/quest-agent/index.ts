@@ -23,7 +23,7 @@
 //                                       (крон бежит в 22:00 UTC = 03:00 Алматы)
 //   {mode:'debug', user_id, day_index?} — один юзер, по умолчанию текущий день
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { sanitizeEmoji, validateExercises, type Exercise } from './validate.ts';
+import { clampCoachMessage, sanitizeEmoji, validateExercises, type Exercise } from './validate.ts';
 
 const BASE_URL = Deno.env.get('RECOGNIZE_BASE_URL') ?? 'https://openrouter.ai/api/v1';
 const MODEL = Deno.env.get('RECOGNIZE_MODEL') ?? 'google/gemini-2.5-flash';
@@ -161,7 +161,7 @@ const TOOLS = [
           },
           coach_message: {
             type: 'string',
-            description: 'Короткое (1-2 предложения) сообщение тренера на РОДНОМ языке ученика: почему сегодня именно эти цели. Конкретно, по-дружески, без воды.',
+            description: 'Короткое (1-2 предложения, НЕ ДЛИННЕЕ 110 символов) сообщение тренера на РОДНОМ языке ученика: почему сегодня именно эти цели. Конкретно, по-дружески, без воды.',
           },
           exercises: {
             type: 'array',
@@ -723,11 +723,14 @@ async function runAgentForUser(
           continue;
         }
 
+        // Кап длины кодом: hero-карточка показывает 3 строки, промпт модель нарушает.
+        const coachMessage = clampCoachMessage(args.coach_message);
+
         // ── Критик (Э6): второй агент проверяет КАЧЕСТВО плана до записи ──
         const critic = await criticReview(
           {
             quests,
-            coach: String(args.coach_message ?? ''),
+            coach: coachMessage,
             difficulty: String(args.difficulty ?? 'normal'),
             exercises,
           },
@@ -763,7 +766,7 @@ async function runAgentForUser(
             user_id: userId,
             day_index: dayIndex,
             quests,
-            coach_message: String(args.coach_message ?? ''),
+            coach_message: coachMessage,
             difficulty: String(args.difficulty ?? 'normal'),
             exercises: exercisesToWrite,
             run_id: runId,

@@ -29,6 +29,25 @@ export function sanitizeEmoji(raw: unknown, fallback = '❓'): string {
 }
 
 /**
+ * Кап длины сообщения тренера: hero-карточка на клиенте показывает максимум
+ * 3 строки (~120 символов), промпт просит ≤110, но модель это нарушает.
+ * Режем по границе предложения, если целое предложение влезает; иначе — жёстко
+ * с многоточием. Схлопываем переводы строк/двойные пробелы.
+ */
+export function clampCoachMessage(raw: unknown, max = 120): string {
+  const s = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  if (s.length <= max) return s;
+  let out = '';
+  for (const m of s.matchAll(/[^.!?…]+[.!?…]+["»)]?(\s|$)/g)) {
+    const candidate = (out ? out + ' ' : '') + m[0].trim();
+    if (candidate.length > max) break;
+    out = candidate;
+  }
+  if (out) return out;
+  return s.slice(0, max - 1).trimEnd() + '…';
+}
+
+/**
  * Невалидное упражнение отбрасывается МОЛЧА (квест важнее тренировки):
  * ≤8 штук, kind из белого списка, слово — только из allowedWords (коллекция +
  * цели квеста), предложения ≤120 символов, cloze обязан содержать пропуск

@@ -135,7 +135,8 @@
           "enableBackgroundPlayback": false
         }
       ],
-      "./plugins/with-clean-release-infoplist"
+      "./plugins/with-clean-release-infoplist",
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": true,
