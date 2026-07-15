@@ -1,0 +1,262 @@
+/* Галерея для Peerlist-запуска TakeWord (1200×630, landscape).
+ * Тот же фирменный стиль, что в build-carousel.cjs: синий #208AEF + чернильный,
+ * рамка-визир, тайловый водяной знак, летающие 3D-карточки слов, скрины в телефоне.
+ *
+ * 4 картинки: обложка → point & catch → make it stick → CTA.
+ * Собрать: node instagram/build-peerlist.cjs
+ * Рендер 2x → 2400×1260 px (лимит Peerlist 15 МБ — с запасом).
+ */
+const { chromium } = require('@playwright/test');
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.resolve(__dirname, '..');
+const SHOTS = path.join(ROOT, 'screen', 'shots');
+const f = (p) => 'file://' + p;
+const ICON = f(path.join(ROOT, 'assets', 'images', 'icon.png'));
+const shot = (n) => f(path.join(SHOTS, n));
+
+const BLUE = '#208AEF';
+const INK = '#0A1830';
+const INK2 = '#0E1116';
+
+// Аппка уже в App Store? true → «Download on the», false → «Coming soon on the»
+const LIVE = false;
+
+const BASE = `
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1200px;height:630px}
+body{position:relative;overflow:hidden;
+  font-family:-apple-system,"SF Pro Display","Helvetica Neue",system-ui,sans-serif;
+  color:#fff;-webkit-font-smoothing:antialiased}
+em{font-style:italic;font-weight:800;font-family:"Avenir Next Condensed","SF Pro Display",sans-serif}
+/* бренд-строка */
+.brand{position:absolute;top:36px;left:52px;display:flex;align-items:center;gap:12px;z-index:9}
+.brand img{width:42px;height:42px;border-radius:11px;box-shadow:0 4px 14px rgba(0,0,0,.28)}
+.brand b{font-size:24px;font-weight:800;letter-spacing:-.4px}
+/* рамка-визир */
+.reticle{position:absolute;pointer-events:none;z-index:2}
+.reticle span{position:absolute;width:52px;height:52px;border:5px solid #fff}
+.reticle .tl{top:0;left:0;border-right:0;border-bottom:0;border-radius:16px 0 0 0}
+.reticle .tr{top:0;right:0;border-left:0;border-bottom:0;border-radius:0 16px 0 0}
+.reticle .bl{bottom:0;left:0;border-right:0;border-top:0;border-radius:0 0 0 16px}
+.reticle .br{bottom:0;right:0;border-left:0;border-top:0;border-radius:0 0 16px 0}
+/* тайловый водяной знак */
+.wm{position:absolute;inset:-45% -10%;transform:rotate(-8deg);opacity:.06;z-index:0;
+  font-weight:900;font-size:84px;line-height:1.12;letter-spacing:-1.5px;
+  white-space:nowrap;overflow:hidden;color:#fff}
+.wm div{overflow:hidden;text-overflow:clip}
+.shard{position:absolute;z-index:0}
+/* телефон */
+.phone{position:absolute;background:#0C0D10;border-radius:44px;padding:11px;z-index:4;
+  box-shadow:0 40px 80px -22px rgba(0,0,0,.62),0 12px 26px rgba(0,0,0,.32)}
+.phone img{display:block;width:100%;border-radius:34px}
+.notch{position:absolute;top:11px;left:50%;transform:translateX(-50%);
+  width:120px;height:17px;background:#0C0D10;border-radius:0 0 10px 10px;z-index:2}
+/* карточка слова */
+.wc{position:absolute;width:250px;background:#fff;border-radius:24px;padding:22px 26px;
+  border:1px solid rgba(10,24,48,.06);color:${INK};transform-style:preserve-3d;
+  box-shadow:0 38px 66px -20px rgba(4,16,40,.58),0 12px 24px rgba(4,16,40,.3)}
+.wc .wtop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.wc .ww{font-size:40px;font-weight:900;letter-spacing:-1.1px;line-height:1}
+.wc .wipa{font-size:18px;font-weight:600;color:#8A93A3}
+.wc .wt{margin-top:11px;padding-top:11px;font-size:26px;font-weight:800;color:${BLUE};
+  border-top:2px solid rgba(10,24,48,.07);display:flex;align-items:center;gap:10px}
+.wc .wt::before{content:"";width:11px;height:11px;border-radius:50%;background:${BLUE};flex:none}
+.wc.hero{width:290px}
+.wc.hero .ww{font-size:47px}
+.wc.hero .wt{font-size:30px}
+.wc.sm{width:206px;padding:17px 21px}
+.wc.sm .ww{font-size:32px}
+.wc.sm .wt{font-size:21px;margin-top:8px;padding-top:8px}
+.wc.sm .wt::before{width:9px;height:9px}
+.wc.dim{opacity:.88}
+.wc.back{background:${BLUE};min-height:120px;border:3px solid rgba(255,255,255,.55);
+  display:flex;align-items:center;justify-content:center}
+.wc.back span{position:absolute;width:30px;height:30px;border:5px solid rgba(255,255,255,.92)}
+.wc.back .tl{top:13px;left:13px;border-right:0;border-bottom:0;border-radius:11px 0 0 0}
+.wc.back .tr{top:13px;right:13px;border-left:0;border-bottom:0;border-radius:0 11px 0 0}
+.wc.back .bl{bottom:13px;left:13px;border-right:0;border-top:0;border-radius:0 0 0 11px}
+.wc.back .br{bottom:13px;right:13px;border-left:0;border-top:0;border-radius:0 0 11px 0}
+.wc.back .bmark{font-size:24px;font-weight:900;color:#fff;letter-spacing:-.4px}
+/* диагональный «шов» перехода: угол в цвете соседнего слайда (как в инста-карусели).
+   Линия среза совпадает по обе стороны стыка → при свайпе складывается в одну диагональ */
+.tseam{position:absolute;inset:0;z-index:1;pointer-events:none}
+/* левая текстовая колонка фич */
+.feat-head{position:absolute;top:150px;left:52px;width:560px;z-index:6}
+.feat-tag{display:inline-block;font-size:19px;font-weight:900;letter-spacing:1.8px;text-transform:uppercase;
+  background:#fff;padding:7px 16px;border-radius:8px;margin-bottom:20px}
+.feat-head h1{font-size:64px;font-weight:900;line-height:.94;letter-spacing:-1.8px}
+.feat-sub{margin-top:20px;font-size:23px;font-weight:600;line-height:1.34;opacity:.95}
+`;
+
+const wm = () => `<div class="wm">${Array.from({ length: 12 }).map(() =>
+  '<div>take word · take word · take word · take word · take word</div>').join('')}</div>`;
+
+const brand = () => `<div class="brand"><img src="${ICON}"><b>TakeWord</b></div>`;
+
+// Швы: левый-нижний угол — цвет предыдущего слайда, правый-верхний — следующего.
+function seams(prev, next) {
+  let h = '';
+  if (prev) h += `<div class="tseam" style="background:${prev};clip-path:polygon(0 50%,0 100%,12% 100%)"></div>`;
+  if (next) h += `<div class="tseam" style="background:${next};clip-path:polygon(88% 0,100% 0,100% 50%)"></div>`;
+  return h;
+}
+
+function phone(src, style) {
+  return `<div class="phone" style="${style}"><div class="notch"></div><img src="${shot(src)}"></div>`;
+}
+
+function wcard(o) {
+  if (o.back) return `<div class="wc back ${o.cls || ''}" style="${o.s}">
+    <span class="tl"></span><span class="tr"></span><span class="bl"></span><span class="br"></span>
+    <div class="bmark">TakeWord</div></div>`;
+  return `<div class="wc ${o.cls || ''}" style="${o.s}">
+    <div class="wtop"><span class="ww">${o.w}</span><span class="wipa">${o.ipa || ''}</span></div>
+    <div class="wt">${o.t}</div></div>`;
+}
+
+// ---- 01: обложка ----
+function cover() {
+  const cards = [
+    wcard({ back: true, cls: 'sm', s: 'left:668px;top:44px;width:206px;transform:rotateY(18deg) rotateZ(-7deg) translateZ(-120px)' }),
+    wcard({ w: 'taza', ipa: "/'tasa/", t: 'cup', cls: 'sm dim',
+      s: 'left:952px;top:30px;transform:rotateY(-22deg) rotateZ(5deg) translateZ(-140px)' }),
+    wcard({ w: 'libro', ipa: "/'liβɾo/", t: 'book', cls: 'sm dim',
+      s: 'left:648px;top:412px;transform:rotateY(16deg) rotateZ(6deg) translateZ(-90px)' }),
+    wcard({ w: 'botella', ipa: "/bo'tela/", t: 'bottle', cls: 'hero',
+      s: 'left:840px;top:196px;transform:rotateY(-14deg) rotateZ(-4deg) translateZ(70px)' }),
+    wcard({ w: 'ventana', ipa: "/ben'tana/", t: 'window',
+      s: 'left:944px;top:430px;transform:rotateY(-16deg) rotateZ(7deg) translateZ(10px)' }),
+  ].join('');
+  return `<body style="background:${BLUE}">
+  ${wm()}
+  ${seams(null, INK)}
+  <div class="shard s1"></div>
+  ${brand()}
+  <div class="cards">${cards}</div>
+  <div class="cover-head">
+    <div class="kicker">point · catch · remember</div>
+    <div class="cover-title"><span class="l1">Learn a language</span><span class="l2"><em>by living it.</em></span></div>
+    <div class="cover-sub">Aim your camera at anything around you —<br>get the word, the translation & a memory hook.</div>
+  </div>
+  <style>
+    .s1{top:-160px;right:-200px;width:640px;height:640px;background:rgba(255,255,255,.10);
+      clip-path:polygon(38% 0,100% 22%,100% 100%,0 78%)}
+    .cover-head{position:absolute;top:158px;left:52px;width:600px;z-index:6}
+    .kicker{font-size:20px;font-weight:800;letter-spacing:2px;opacity:.92;margin-bottom:18px;text-transform:uppercase}
+    .cover-title{display:flex;flex-direction:column;line-height:.9}
+    .cover-title .l1{font-size:63px;font-weight:900;letter-spacing:-1.6px}
+    .cover-title .l2{font-size:86px;font-weight:900;letter-spacing:-2.2px;margin-top:4px}
+    .cover-sub{margin-top:22px;font-size:23px;font-weight:600;line-height:1.34;opacity:.95}
+    .cards{position:absolute;inset:0;z-index:3;perspective:1400px;transform-style:preserve-3d}
+  </style></body>`;
+}
+
+// ---- 02: point & catch (чернильный) ----
+function slidePoint() {
+  return `<body style="background:${INK}">
+  ${wm()}
+  ${seams(BLUE, BLUE)}
+  <div class="shard fs"></div>
+  ${brand()}
+  <div class="feat-head">
+    <div class="feat-tag" style="color:${BLUE}">point &amp; catch</div>
+    <h1>Point at<br><em>anything.</em></h1>
+    <div class="feat-sub">See an object in real life? Aim your camera —<br>TakeWord names it in about a second.</div>
+  </div>
+  ${phone('0.jpg', 'right:170px;top:64px;width:262px;transform:rotate(3deg)')}
+  ${wcard({ w: 'planta', ipa: "/'planta/", t: 'plant',
+    s: 'right:340px;top:352px;z-index:5;transform:rotate(-6deg)' })}
+  <style>
+    .fs{top:-180px;left:-200px;width:640px;height:640px;background:rgba(255,255,255,.07);
+      clip-path:polygon(0 0,100% 26%,64% 100%,0 70%)}
+  </style></body>`;
+}
+
+// ---- 03: make it stick (синий, два телефона) ----
+function slideStick() {
+  return `<body style="background:${BLUE}">
+  ${wm()}
+  ${seams(INK, INK2)}
+  <div class="shard fs"></div>
+  ${brand()}
+  <div class="feat-head" style="width:520px">
+    <div class="feat-tag" style="color:${INK}">remember</div>
+    <h1>Make it<br><em>stick.</em></h1>
+    <div class="feat-sub">Smart daily reviews move every word you catch into long-term memory — your world becomes your vocabulary.</div>
+  </div>
+  ${phone('5.jpg', 'right:330px;top:70px;width:240px;transform:rotate(-3deg);z-index:4')}
+  ${phone('8.jpg', 'right:96px;top:130px;width:240px;transform:rotate(4deg);z-index:5')}
+  <style>
+    .fs{top:-180px;left:-200px;width:640px;height:640px;background:rgba(255,255,255,.08);
+      clip-path:polygon(0 0,100% 26%,64% 100%,0 70%)}
+  </style></body>`;
+}
+
+// ---- 04: CTA (чернильный, визир) ----
+function slideCta() {
+  return `<body style="background:${INK2}">
+  ${wm()}
+  ${seams(BLUE, null)}
+  <div class="shard c1"></div><div class="shard c2"></div>
+  <div class="reticle" style="left:84px;right:84px;top:56px;bottom:56px">
+    <span class="tl"></span><span class="tr"></span><span class="bl"></span><span class="br"></span></div>
+  <div class="cta-wrap">
+    <div class="cta-h"><span>Learn a language</span><span><em>by living it.</em></span></div>
+    <div class="cta-row">
+      <div class="appstore">
+        <svg class="apple" viewBox="0 0 24 24"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.51 4.09l-.02-.01M12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25"/></svg>
+        <div class="as-txt"><span class="as-small">${LIVE ? 'Download on the' : 'Coming soon on the'}</span><span class="as-big">App&nbsp;Store</span></div>
+      </div>
+      <div class="cta-or">or</div>
+      <div class="webstore">
+        <svg class="globe" viewBox="0 0 24 24" fill="none" stroke="${BLUE}" stroke-width="1.7">
+          <circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4.2" ry="9"/>
+          <path d="M3.6 8.6h16.8M3.6 15.4h16.8"/></svg>
+        <div class="as-txt"><span class="as-small" style="color:${INK};opacity:.75">try the web version now</span><span class="as-big" style="color:${INK}">catch-words.com</span></div>
+      </div>
+    </div>
+  </div>
+  <style>
+    .c1{top:-140px;right:-160px;width:560px;height:560px;background:${BLUE};opacity:.9;
+      clip-path:polygon(40% 0,100% 30%,100% 100%,0 66%)}
+    .c2{bottom:-170px;left:-190px;width:480px;height:480px;background:${BLUE};opacity:.24;
+      clip-path:polygon(0 30%,70% 0,100% 100%,16% 100%)}
+    .cta-wrap{position:absolute;left:52px;right:52px;top:50%;transform:translateY(-50%);text-align:center;z-index:5}
+    .cta-h{display:flex;flex-direction:column;line-height:.94}
+    .cta-h span:first-child{font-size:56px;font-weight:800;letter-spacing:-1.3px}
+    .cta-h span:last-child{font-size:88px;font-weight:900;letter-spacing:-2.2px}
+    .cta-h em{color:${BLUE};text-shadow:0 0 1px ${BLUE}}
+    .cta-row{margin-top:36px;display:flex;align-items:center;justify-content:center;gap:30px}
+    .appstore{display:inline-flex;align-items:center;gap:15px;background:#000;padding:15px 32px;border-radius:18px;
+      box-shadow:0 22px 50px -16px rgba(0,0,0,.7)}
+    .appstore .apple{width:40px;height:40px;fill:#fff;flex:none;margin-top:-3px}
+    .as-txt{display:flex;flex-direction:column;line-height:1.04;text-align:left}
+    .as-small{font-size:18px;font-weight:600;letter-spacing:.3px;color:#fff;opacity:.92}
+    .as-big{font-size:33px;font-weight:700;letter-spacing:-.4px;color:#fff}
+    .cta-or{font-size:24px;font-weight:800;opacity:.6;letter-spacing:.5px}
+    .webstore{display:inline-flex;align-items:center;gap:15px;background:#fff;padding:15px 32px;border-radius:18px;
+      box-shadow:0 22px 50px -16px rgba(0,0,0,.55)}
+    .webstore .globe{width:40px;height:40px;flex:none}
+  </style></body>`;
+}
+
+const SLIDES = [cover, slidePoint, slideStick, slideCta];
+
+(async () => {
+  const outDir = path.join(__dirname, 'out', 'peerlist');
+  fs.mkdirSync(outDir, { recursive: true });
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1200, height: 630 }, deviceScaleFactor: 2 });
+  for (let i = 0; i < SLIDES.length; i++) {
+    const html = `<!doctype html><html><head><meta charset="utf-8"><style>${BASE}</style></head>${SLIDES[i]()}</html>`;
+    const htmlPath = path.join(outDir, `${String(i + 1).padStart(2, '0')}.html`);
+    fs.writeFileSync(htmlPath, html);
+    await page.goto('file://' + htmlPath);
+    await page.waitForTimeout(120);
+    await page.screenshot({ path: path.join(outDir, `${String(i + 1).padStart(2, '0')}.png`) });
+    console.log('✓ peerlist', i + 1);
+  }
+  await browser.close();
+})();
