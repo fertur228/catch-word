@@ -257,6 +257,9 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     borderWidth: 1,
   },
-  gMark: { fontSize: 18, fontWeight: '700', color: '#4285F4' },
-  gLabel: { fontWeight: '600' },
+  // Размер шрифта подогнан под нативную кнопку Apple: её текст ≈20pt (cap ~14pt),
+  // а ThemedText default = 17pt читался мельче. Apple-кнопку менять нельзя,
+  // поэтому равняем Google на неё.
+  gMark: { fontSize: 20, fontWeight: '700', color: '#4285F4' },
+  gLabel: { fontSize: 20, fontWeight: '600' },
 });
