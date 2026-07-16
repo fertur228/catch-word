@@ -79,7 +79,18 @@ function RootNavigator() {
     first === 'verify-email' ||
     first === 'forgot-password' ||
     first === 'reset-password';
-  const needsProfile = !!session && !session.user.user_metadata?.profile_completed;
+  // Sign in with Apple / Google уже сообщают имя и email (Authentication
+  // Services / OAuth). Apple Guideline 4 запрещает потом заставлять вводить их
+  // вручную, поэтому для сторонних провайдеров экран complete-profile НЕ
+  // показываем — имя берём из провайдера (см. signInWithApple), пустое допустимо
+  // и его можно дозаполнить позже. Провайдер известен сразу из сессии, поэтому
+  // экран имени не мелькнёт даже на время записи метаданных. complete-profile
+  // остаётся лишь фолбэком для email-аккаунтов без profile_completed.
+  const appMeta = session?.user?.app_metadata;
+  const providerList = [appMeta?.provider, ...((appMeta?.providers as string[] | undefined) ?? [])];
+  const isThirdPartyLogin = providerList.includes('apple') || providerList.includes('google');
+  const needsProfile =
+    !!session && !isThirdPartyLogin && !session.user.user_metadata?.profile_completed;
   let authRedirect: '/' | '/sign-in' | '/welcome' | '/complete-profile' | '/onboarding' | null = null;
   if (!onPublic) {
     if (!session) {

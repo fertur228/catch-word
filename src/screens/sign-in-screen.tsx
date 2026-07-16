@@ -187,7 +187,7 @@ export function SignInScreen() {
               disabled={gbusy}
               style={({ pressed }) => [
                 styles.google,
-                { backgroundColor: theme.card, borderColor: theme.border, opacity: pressed ? 0.9 : 1 },
+                { backgroundColor: theme.backgroundElement, borderColor: theme.border, opacity: pressed ? 0.9 : 1 },
               ]}>
               {gbusy ? (
                 <ActivityIndicator color={theme.text} />
@@ -243,6 +243,10 @@ const styles = StyleSheet.create({
   bottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: Spacing.three, flexWrap: 'wrap' },
   divider: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, marginVertical: Spacing.three },
   line: { flex: 1, height: StyleSheet.hairlineWidth },
+  // Обе соц-кнопки — единый размер: высота 52, на всю ширину, радиус Radius.md.
+  // Apple — нативная сплошная плашка (её стиль менять нельзя, Apple 4.0). Google
+  // держим того же размера, но с ЗАЛИВКОЙ (systemGray6) и чёткой рамкой 1pt,
+  // иначе белая кнопка на белой карточке читалась легче/«меньше» (фидбэк).
   apple: { height: 52, width: '100%', marginBottom: Spacing.two },
   google: {
     flexDirection: 'row',
@@ -251,7 +255,7 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     height: 52,
     borderRadius: Radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
   },
   gMark: { fontSize: 18, fontWeight: '700', color: '#4285F4' },
   gLabel: { fontWeight: '600' },

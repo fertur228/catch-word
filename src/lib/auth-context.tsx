@@ -124,20 +124,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     if (error) throw error;
 
-    // Имя Apple отдаёт ТОЛЬКО при первом входе — сразу кладём в метаданные,
-    // чтобы не переспрашивать (Apple Guideline 4.0). profile_completed НЕ ставим:
-    // экран complete-profile предзаполнится этим именем, юзер подтвердит.
+    // Имя Apple отдаёт ТОЛЬКО при первом входе — сразу сохраняем в метаданные
+    // аккаунта (переживают перезапуск, синхронятся на все устройства), чтобы
+    // переиспользовать и БОЛЬШЕ НЕ спрашивать. Ставим profile_completed: экран
+    // ввода имени после Sign in with Apple запрещён (Apple Guideline 4 — имя и
+    // email уже даны Authentication Services). Email берётся из identityToken
+    // самим Supabase. Гейт в _layout всё равно не гонит Apple/Google на
+    // complete-profile, но флаг держим консистентным.
+    // ВСЕГДА ставим profile_completed: true (даже если Apple не дал имя —
+    // напр. при повторном входе fullName=null). Это второй, независимый от гейта
+    // предохранитель против экрана ввода имени после Sign in with Apple. Имя
+    // добавляем только когда Apple его вернул (первый вход) — пустым не затираем.
     const first = credential.fullName?.givenName?.trim() ?? '';
     const last = credential.fullName?.familyName?.trim() ?? '';
+    const data: Record<string, unknown> = { profile_completed: true };
     if (first || last) {
-      await supabase.auth.updateUser({
-        data: {
-          first_name: first,
-          last_name: last,
-          full_name: [first, last].filter(Boolean).join(' '),
-        },
-      });
+      data.first_name = first;
+      data.last_name = last;
+      data.full_name = [first, last].filter(Boolean).join(' ');
     }
+    await supabase.auth.updateUser({ data });
   };
 
   const signInWithEmail = async (email: string, password: string) => {
