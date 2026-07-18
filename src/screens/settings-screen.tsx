@@ -9,7 +9,7 @@
  *
  * Только моки: реальных покупок и аккаунтов нет (подключим слоями, §11).
  */
-import { Children, Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Children, Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Image, Linking, Modal, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import Animated, { Easing, SlideInDown, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import Constants from 'expo-constants';
@@ -42,6 +42,14 @@ import {
   TERMS_URL,
 } from '@/constants/links';
 import { setGuest } from '@/lib/web-guest';
+import { loadScanDiag, setScanDiag as setScanDiagPref } from '@/lib/scan-diag';
+import {
+  disableNotifications,
+  enableNotifications,
+  getNotifPrefs,
+  setNotifCategory,
+  type NotifPrefs,
+} from '@/lib/notifications';
 
 // --- Палитра «цветных кружков» под иконку строки (мягкий фон + насыщенная иконка) ---
 type Tone = 'primary' | 'accent' | 'accent2' | 'success' | 'warning' | 'gold' | 'danger' | 'neutral';
@@ -234,7 +242,7 @@ export function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const t = useT();
   const { lang, setLang } = useLang();
-  const { prefs, setLanguages, canUsePair, cards, clearCollection, scansLeft, scanLimit } =
+  const { prefs, setLanguages, canUsePair, cards, clearCollection, scansLeft, scanLimit, syncNotifications } =
     useCollection();
   const { user, signInWithGoogle, signOut, deleteAccount } = useAuth();
   const {
@@ -272,6 +280,53 @@ export function SettingsScreen() {
   const [selectedVoice, setSelectedVoice] = useState<string | null>(null); // null = системный по умолчанию
   const [voiceOpen, setVoiceOpen] = useState(false); // открыт ли лист выбора голоса
   const [contactOpen, setContactOpen] = useState(false); // открыт ли лист «Связаться с нами»
+  // Диагностика скана (локальный флаг устройства, см. src/lib/scan-diag.ts).
+  const [scanDiag, setScanDiag] = useState(false);
+  useEffect(() => {
+    void loadScanDiag().then(setScanDiag);
+  }, []);
+  const onToggleScanDiag = useCallback(async () => {
+    const next = !scanDiag;
+    setScanDiag(next);
+    await setScanDiagPref(next);
+  }, [scanDiag]);
+
+  // Пуш-напоминания (локальный флаг устройства, см. src/lib/notifications.ts).
+  const [notif, setNotif] = useState<NotifPrefs>({
+    master: false, review: true, streak: true, quest: true, winback: true,
+  });
+  useEffect(() => {
+    void getNotifPrefs().then(setNotif);
+  }, []);
+  // Мастер-тумблер: включаем → системный запрос разрешения; выключаем → гасим всё.
+  const onToggleNotifMaster = useCallback(async () => {
+    if (notif.master) {
+      await disableNotifications();
+      setNotif((p) => ({ ...p, master: false }));
+      syncNotifications();
+      return;
+    }
+    const granted = await enableNotifications();
+    if (!granted) {
+      await alertAsync(
+        t('Уведомления выключены'),
+        t('Разреши уведомления для TakeWord в Настройках iOS, чтобы получать напоминания.'),
+      );
+      return;
+    }
+    setNotif((p) => ({ ...p, master: true }));
+    syncNotifications();
+  }, [notif.master, syncNotifications, t]);
+  // Переключить одну категорию.
+  const onToggleNotifCat = useCallback(
+    async (cat: 'review' | 'streak' | 'quest' | 'winback') => {
+      const next = !notif[cat];
+      setNotif((p) => ({ ...p, [cat]: next }));
+      await setNotifCategory(cat, next);
+      syncNotifications();
+    },
+    [notif, syncNotifications],
+  );
   const [toast, setToast] = useState<string | null>(null); // короткое подтверждение действий
   const [restoring, setRestoring] = useState(false); // идёт восстановление покупок
 
@@ -605,6 +660,48 @@ export function SettingsScreen() {
           </Section>
         </Reveal>
 
+        {/* УВЕДОМЛЕНИЯ: локальные напоминания (повторение/серия/квест/возврат) */}
+        <Reveal delay={170}>
+          <Section label={t('УВЕДОМЛЕНИЯ')}>
+            <Group>
+              <SettingRow
+                icon="bell.fill"
+                label={t('Напоминания')}
+                sublabel={notif.master ? t('Включены') : t('Выключены — мягкие подсказки учиться')}
+                onPress={onToggleNotifMaster}
+              />
+              {notif.master ? (
+                <>
+                  <SettingRow
+                    icon="arrow.clockwise"
+                    label={t('Повторение слов')}
+                    sublabel={notif.review ? t('Вкл') : t('Выкл')}
+                    onPress={() => onToggleNotifCat('review')}
+                  />
+                  <SettingRow
+                    icon="flame.fill"
+                    label={t('Серия дней')}
+                    sublabel={notif.streak ? t('Вкл') : t('Выкл')}
+                    onPress={() => onToggleNotifCat('streak')}
+                  />
+                  <SettingRow
+                    icon="viewfinder"
+                    label={t('Квест дня')}
+                    sublabel={notif.quest ? t('Вкл') : t('Выкл')}
+                    onPress={() => onToggleNotifCat('quest')}
+                  />
+                  <SettingRow
+                    icon="hand.wave.fill"
+                    label={t('Возвращайся')}
+                    sublabel={notif.winback ? t('Вкл') : t('Выкл')}
+                    onPress={() => onToggleNotifCat('winback')}
+                  />
+                </>
+              ) : null}
+            </Group>
+          </Section>
+        </Reveal>
+
         {/* ДОПОЛНИТЕЛЬНО: данные + информация */}
         <Reveal delay={180}>
           <Section label={t('ДОПОЛНИТЕЛЬНО')}>
@@ -623,6 +720,15 @@ export function SettingsScreen() {
                 icon="envelope.fill"
                 label={t('Связаться с нами')}
                 onPress={() => setContactOpen(true)}
+              />
+              {/* Диагностика скана: показывает разбивку ожидания на Результате.
+                  Нужна, чтобы мерить скорость на реальном телефоне и сети —
+                  в сторовой сборке консоли нет. По умолчанию выключена. */}
+              <SettingRow
+                icon="stopwatch.fill"
+                label={t('Диагностика скана')}
+                sublabel={scanDiag ? t('Включена — время этапов на Результате') : t('Выключена')}
+                onPress={onToggleScanDiag}
               />
             </Group>
           </Section>

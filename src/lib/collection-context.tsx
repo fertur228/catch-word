@@ -17,10 +17,13 @@ import {
   type ReactNode,
 } from 'react';
 
+import { AppState } from 'react-native';
+
 import { useAuth } from '@/lib/auth-context';
 import { useSubscription } from '@/lib/subscription';
 import { supabase } from '@/lib/supabase';
 import * as db from '@/lib/db';
+import { rescheduleAll as rescheduleNotifications, type LearningState } from '@/lib/notifications';
 import {
   clearCloudCardsForPair,
   deleteCloudCard,
@@ -116,6 +119,8 @@ interface CollectionContextValue {
   reviewStreak: number;
   /** Отметить пройденный тест в журнале активности (для хитмапа/стрика). */
   recordTestSession: () => void;
+  /** Пересобрать локальные пуш-напоминания (после смены их настроек). */
+  syncNotifications: () => void;
 
   // --- Настройки пользователя (онбординг/языки) ---
   prefs: UserPrefs;
@@ -726,6 +731,41 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     [scopedCards, dueCards.length],
   );
 
+  // --- Локальные пуш-напоминания ---
+  // Пересобираем расписание при изменении обучающего состояния (пора повторить,
+  // серия, квест, был ли активен сегодня) и при возврате в приложение. Всё
+  // офлайн; на вебе rescheduleNotifications — no-op; если пуши выключены,
+  // функция сама выходит. Fire-and-forget, UI не блокируем.
+  const learningRef = useRef<LearningState>({
+    dueCount: 0, reviewStreak: 0, activeToday: false, questDone: false, everScanned: false,
+  });
+  useEffect(() => {
+    const today = todayIndex();
+    const learning: LearningState = {
+      dueCount: dueCards.length,
+      reviewStreak,
+      activeToday: (activityByDay[today] ?? 0) > 0,
+      questDone: questLastDay === today,
+      everScanned: scopedCards.length > 0,
+    };
+    learningRef.current = learning;
+    void rescheduleNotifications(learning);
+  }, [dueCards.length, reviewStreak, activityByDay, questLastDay, scopedCards.length]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') void rescheduleNotifications(learningRef.current);
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Пересобрать расписание пушей ПОСЛЕ смены настроек уведомлений (включили/
+  // выключили/переключили категорию) — само по себе это не меняет обучающее
+  // состояние, поэтому эффект выше не сработал бы. Читает свежее learningRef.
+  const syncNotifications = useCallback(() => {
+    void rescheduleNotifications(learningRef.current);
+  }, []);
+
   const value = useMemo<CollectionContextValue>(() => {
     const today = todayIndex();
     return {
@@ -748,6 +788,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       activityByDay,
       reviewStreak,
       recordTestSession,
+      syncNotifications,
       prefs,
       setLanguages,
       canUsePair,
@@ -785,6 +826,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     activityByDay,
     reviewStreak,
     recordTestSession,
+    syncNotifications,
     prefs,
     setLanguages,
     canUsePair,

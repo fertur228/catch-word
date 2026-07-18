@@ -9,9 +9,16 @@
 //   RECOGNIZE_MODEL    — модель (дефолт google/gemini-2.5-flash-lite)
 //   RECOGNIZE_API_KEY  — ключ провайдера (секрет функции)
 //
-// Запрос  (POST JSON): { image, learningLang, nativeLang, maxObjects?, wantMasks? }
+// Запрос — два формата тела (оба поддержаны, старые сборки не ломаются):
+//   application/octet-stream — СЫРЫЕ байты JPEG, параметры в query (натив):
+//     base64 в JSON раздувает тело на треть (253КБ против 189КБ), а мобильный
+//     аплинк — самая дорогая часть ожидания пользователя.
+//   application/json — { image, learningLang, nativeLang, maxObjects?, wantMasks? } (веб).
 // Ответ           : { objects: [ { word, translation, ipa, category, emoji, bbox,
 //                     confidence, examples[], note, distractors[], mask?, maskBox? } ] }
+//                   + заголовок x-scan-timings (gate/model/total, мс) — дев-диагностика.
+//                   ВНИМАНИЕ: значение заголовка обязано быть ASCII (latin-1);
+//                   кириллица в нём роняет ВЕСЬ ответ в 500 (наступали).
 //
 // wantMasks (веб): ПАРАЛЛЕЛЬНЫЙ второй вызов модели за масками сегментации в
 // каноническом формате Gemini (box_2d 0..1000 + base64-PNG маска). Отдельный
@@ -61,13 +68,41 @@ const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  // Тайминги этапов должны быть читаемы браузером (веб-клиент), иначе CORS их скроет.
+  'Access-Control-Expose-Headers': 'x-scan-timings',
 };
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS, 'Content-Type': 'application/json' },
-  });
+function json(body: unknown, status = 200, timings?: Record<string, number>): Response {
+  const headers: Record<string, string> = { ...CORS, 'Content-Type': 'application/json' };
+  // Тайминги — диагностика, и она НЕ ИМЕЕТ ПРАВА ронять распознавание: значение
+  // заголовка обязано быть латиницей (ByteString), поэтому ключи только ASCII
+  // (`gate`/`model`/`total` — человекочитаемые подписи рисует клиент), плюс
+  // фильтр и try/catch на случай будущей неаккуратности.
+  if (timings) {
+    try {
+      const v = Object.entries(timings)
+        .map(([k, ms]) => `${k.replace(/[^\x20-\x7E]/g, '')}=${Math.round(ms)}`)
+        .filter((s) => !s.startsWith('='))
+        .join(';');
+      if (v) headers['x-scan-timings'] = v;
+    } catch {
+      // без таймингов, но с результатом
+    }
+  }
+  return new Response(JSON.stringify(body), { status, headers });
+}
+
+/**
+ * Сырые байты → base64 (для data-URI провайдеру). Порциями: одним spread'ом
+ * на ~200КБ можно словить переполнение стека аргументов.
+ */
+function toBase64(bytes: Uint8Array): string {
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
 }
 
 // JSON-схема ответа модели: до 3 предметов, главный — первым.
@@ -145,10 +180,12 @@ async function fetchSegmentation(
   apiKey: string,
   dataUrl: string,
   maxObjects: number,
+  signal?: AbortSignal,
 ): Promise<{ box: number[]; mask: string }[]> {
   try {
     const resp = await fetch(`${BASE_URL}/chat/completions`, {
       method: 'POST',
+      signal,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -241,34 +278,67 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ error: 'server_misconfigured', message: 'RECOGNIZE_API_KEY is not set' }, 500);
   }
 
-  let body: {
-    image?: string; learningLang?: string; nativeLang?: string; maxObjects?: number;
-    questWords?: unknown; wantMasks?: boolean;
-  };
-  try {
-    body = await req.json();
-  } catch {
-    return json({ error: 'bad_request', message: 'invalid JSON body' }, 400);
+  // --- Разбор запроса: два формата тела ---
+  // application/octet-stream — СЫРЫЕ байты JPEG, параметры в query (натив):
+  //   base64 в JSON раздувает тело на треть, а мобильный аплинк — самая дорогая
+  //   часть ожидания пользователя (см. src/lib/recognize.ts).
+  // application/json — прежний формат {image: dataURL|base64, ...} (веб).
+  let image: string | undefined;
+  let learningLang: string;
+  let nativeLang: string;
+  let rawMaxObjects: unknown;
+  let rawQuestWords: unknown;
+  let wantMasks = false;
+
+  const contentType = req.headers.get('content-type') ?? '';
+  if (contentType.includes('application/octet-stream')) {
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await req.arrayBuffer());
+    } catch {
+      return json({ error: 'bad_request', message: 'cannot read binary body' }, 400);
+    }
+    if (bytes.byteLength === 0) {
+      return json({ error: 'bad_request', message: 'empty image body' }, 400);
+    }
+    image = toBase64(bytes);
+    const q = new URL(req.url).searchParams;
+    learningLang = q.get('learningLang') ?? 'en-US';
+    nativeLang = q.get('nativeLang') ?? 'ru-RU';
+    rawMaxObjects = q.get('maxObjects');
+    rawQuestWords = (q.get('questWords') ?? '').split(',');
+    wantMasks = q.get('wantMasks') === 'true';
+  } else {
+    let body: {
+      image?: string; learningLang?: string; nativeLang?: string; maxObjects?: number;
+      questWords?: unknown; wantMasks?: boolean;
+    };
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: 'bad_request', message: 'invalid JSON body' }, 400);
+    }
+    image = body.image;
+    if (!image || typeof image !== 'string') {
+      return json({ error: 'bad_request', message: 'missing "image" (base64 jpeg)' }, 400);
+    }
+    learningLang = body.learningLang ?? 'en-US';
+    nativeLang = body.nativeLang ?? 'ru-RU';
+    rawMaxObjects = body.maxObjects;
+    rawQuestWords = body.questWords;
+    wantMasks = body.wantMasks === true;
   }
 
-  const image = body.image;
-  if (!image || typeof image !== 'string') {
-    return json({ error: 'bad_request', message: 'missing "image" (base64 jpeg)' }, 400);
-  }
-  const learningLang = body.learningLang ?? 'en-US';
-  const nativeLang = body.nativeLang ?? 'ru-RU';
   // Сколько предметов максимум: 1 предмет (single) … до 8 («поймай всю сцену»).
-  const maxObjects = Math.max(1, Math.min(8, Math.round(Number(body.maxObjects) || 3)));
+  const maxObjects = Math.max(1, Math.min(8, Math.round(Number(rawMaxObjects) || 3)));
   // Цели дневного квеста (англ. слова) — модель проверит семантическое совпадение.
-  const questWords: string[] = Array.isArray(body.questWords)
-    ? (body.questWords as unknown[]).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 12)
+  const questWords: string[] = Array.isArray(rawQuestWords)
+    ? (rawQuestWords as unknown[]).map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 12)
     : [];
   const qwLower = questWords.map((w) => w.toLowerCase());
   const dataUrl = image.startsWith('data:') ? image : `data:image/jpeg;base64,${image}`;
 
   // --- Серверный лимит бесплатных сканов (антифрод) ---
-  // Списываем скан ЗАРАНЕЕ (до дорогого вызова модели): превышение → 402 без
-  // обращения к провайдеру. Если модель потом упадёт — возвращаем скан (refund).
   // Гость (anon-токен) → userId=null → серверный лимит не применяется (клиентский).
   const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
   const userId = token ? userIdFromJwt(token) : null;
@@ -276,16 +346,67 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ? createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } })
     : null;
 
+  // Маски (веб): стартуем ПАРАЛЛЕЛЬНО с распознаванием — стена времени не растёт.
+  const segAc = new AbortController();
+  const segP = wantMasks
+    ? fetchSegmentation(apiKey, dataUrl, maxObjects, segAc.signal)
+    : Promise.resolve([] as { box: number[]; mask: string }[]);
+
+  // Гейт лимита и вызов модели стартуют ПАРАЛЛЕЛЬНО. Раньше скан ждал round-trip
+  // в базу, прежде чем модель вообще увидит фото, — а это ожидание пользователя.
+  // Скан по-прежнему списывается ДО выдачи результата, порядок проверки не изменён:
+  // отказ гейта → обрываем вызов модели (abort) и возвращаем 402, как и раньше.
+  const tStart = Date.now();
+  const modelAc = new AbortController();
+  const modelP = fetch(`${BASE_URL}/chat/completions`, {
+    method: 'POST',
+    signal: modelAc.signal,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      // Для OpenRouter (необязательно; другими провайдерами игнорируется).
+      'HTTP-Referer': 'https://catch-words.com',
+      'X-Title': 'TakeWord',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      // Больше предметов и учебного контента → больше места под ответ.
+      max_tokens: Math.min(2400, 500 + maxObjects * 240),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: buildPrompt(learningLang, nativeLang, maxObjects, questWords) },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ],
+        },
+      ],
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'recognition', schema: SCHEMA },
+      },
+    }),
+  });
+  // Отказ гейта обрывает вызов ниже — гасим отказ промиса, чтобы он не всплыл
+  // необработанным и не уронил инстанс функции.
+  modelP.catch(() => {});
+
+  const timings: Record<string, number> = {};
   let scanInfo: { used: number; limit: number; unlimited: boolean } | null = null;
   let consumed = false;
   if (admin && userId) {
+    const tGate = Date.now();
     const { data: gate, error } = await admin.rpc('consume_scan', { p_user: userId });
+    timings['gate'] = Date.now() - tGate;
     if (error) {
       // Не блокируем распознавание из-за сбоя учёта (fail-open) — только логируем.
       console.error('[recognize] consume_scan error:', error.message);
     } else if (gate) {
       scanInfo = { used: gate.used, limit: gate.limit, unlimited: gate.unlimited };
       if (gate.allowed === false) {
+        // Лимит исчерпан: обрываем уже начатые вызовы, чтобы не платить за них.
+        modelAc.abort();
+        segAc.abort();
         // premium=true → это fair-use кап (100/день), а не free-лимит: клиент НЕ
         // показывает пейволл, а сообщает «дневной лимит, вернись завтра».
         return json({ error: 'scan_limit_reached', used: gate.used, limit: gate.limit,
@@ -304,46 +425,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   };
 
-  // Маски (веб): стартуем ПАРАЛЛЕЛЬНО с распознаванием — стена времени не растёт.
-  const wantMasks = body.wantMasks === true;
-  const segP = wantMasks
-    ? fetchSegmentation(apiKey, dataUrl, maxObjects)
-    : Promise.resolve([] as { box: number[]; mask: string }[]);
-
   let resp: Response;
   try {
-    resp = await fetch(`${BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        // Для OpenRouter (необязательно; другими провайдерами игнорируется).
-        'HTTP-Referer': 'https://catch-words.com',
-        'X-Title': 'TakeWord',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        // Больше предметов и учебного контента → больше места под ответ.
-        max_tokens: Math.min(2400, 500 + maxObjects * 240),
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: buildPrompt(learningLang, nativeLang, maxObjects, questWords) },
-              { type: 'image_url', image_url: { url: dataUrl } },
-            ],
-          },
-        ],
-        response_format: {
-          type: 'json_schema',
-          json_schema: { name: 'recognition', schema: SCHEMA },
-        },
-      }),
-    });
+    resp = await modelP;
   } catch (e) {
     await refund();
     return json({ error: 'upstream_unreachable', message: String(e) }, 502);
   }
+  timings['model'] = Date.now() - tStart;
 
   if (!resp.ok) {
     await refund();
@@ -406,6 +495,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // (жадно, сегмент используется один раз). maskBox — регион САМОЙ маски
   // (маска обучена под свой box_2d, он может чуть отличаться от нашего bbox).
   const segs = await segP;
+  timings['total'] = Date.now() - tStart;
   if (segs.length > 0) {
     const used = new Set<number>();
     for (const o of objects as ({ bbox: number[] | null } & Record<string, unknown>)[]) {
@@ -428,5 +518,5 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   }
 
-  return json({ objects, model: MODEL, scan: scanInfo });
+  return json({ objects, model: MODEL, scan: scanInfo }, 200, timings);
 });

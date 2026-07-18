@@ -48,6 +48,11 @@ import { getLang, useT } from '@/lib/i18n';
 import { lookupWord, suggestWords, type DictEntry } from '@/lib/dictionary';
 import { RECOGNIZABLE, getRandomRecognizable } from '@/lib/mock-data';
 import { getScanJob, type SceneItem } from '@/lib/scan-job';
+import { isScanDiagOn } from '@/lib/scan-diag';
+import { TOTAL, type ScanStage } from '@/lib/scan-timing';
+import { confirmAsync } from '@/lib/dialog';
+import { enableNotifications, getNotifPrefs } from '@/lib/notifications';
+import * as db from '@/lib/db';
 import { speakWord } from '@/lib/speech';
 import type { RecognizableWord, WordCard } from '@/types';
 
@@ -115,6 +120,29 @@ function seedRecognized(
   return { ...mock, imageUri: imageUri ?? mock.imageUri ?? null };
 }
 
+/**
+ * Разовый мягкий вопрос про пуш-напоминания — после первого пойманного слова.
+ * Момент удачный: «поймал первое слово — включить напоминания?». Спрашиваем
+ * ОДИН раз (флаг notif_asked); дальше только через Настройки. На вебе enable
+ * вернёт false (пушей нет).
+ */
+async function primeNotificationsOnce(t: (ru: string) => string, sync: () => void): Promise<void> {
+  try {
+    if ((await db.getPref('notif_asked')) === '1') return;
+    await db.setPref('notif_asked', '1');
+    if ((await getNotifPrefs()).master) return; // уже включены
+    const ok = await confirmAsync(
+      t('Напоминать о словах?'),
+      t('Будем мягко напоминать повторять слова и ловить новые, чтобы они не забывались. Выключить можно в Настройках.'),
+      t('Напоминать'),
+    );
+    if (!ok) return;
+    if (await enableNotifications()) sync();
+  } catch {
+    // пуши не критичны — молча пропускаем
+  }
+}
+
 /** Эмодзи по слову: берём из RECOGNIZABLE при точном совпадении, иначе заглушка. */
 function emojiForWord(word: string): string {
   const q = word.trim().toLowerCase();
@@ -126,7 +154,7 @@ export function ResultScreen() {
   const theme = useTheme();
   const t = useT();
   const router = useRouter();
-  const { addCard, prefs, completeQuestForWord, cards, isPremium } = useCollection();
+  const { addCard, prefs, completeQuestForWord, cards, isPremium, syncNotifications } = useCollection();
   const { jobId } = useLocalSearchParams<{ jobId?: string }>();
 
   // Текущий скан (фото + результат распознавания + вырез). Читаем синхронно:
@@ -227,8 +255,10 @@ export function ResultScreen() {
       id: `${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
       createdAt: Date.now(),
     };
+    const firstEver = cards.length === 0; // поймал первое слово вообще
     await addCard(card);
     setSaved(true);
+    if (firstEver) void primeNotificationsOnce(t, syncNotifications); // мягкий разовый вопрос про пуши
     feedbackCorrect(); // радостный «дзынь» + успех-вибрация
     setBurst((b) => b + 1); // ещё один салют на сохранение
     setFlyTs(Date.now()); // стикер «улетает» в коллекцию
@@ -242,7 +272,7 @@ export function ResultScreen() {
     if (q.caught) setQuestMsg(q.completed ? t('Квест дня выполнен!') : (getLang() === 'en' ? `Daily quest: ${q.progress} of ${q.total}` : `Квест дня: ${q.progress} из ${q.total}`));
     // Даём увидеть «печать» успеха (и квест), затем закрываем модалку.
     backTimer.current = setTimeout(() => router.back(), q.caught ? 1900 : 760);
-  }, [saved, content, recognized, addCard, router, completeQuestForWord, cards]);
+  }, [saved, content, recognized, addCard, router, completeQuestForWord, cards, t, syncNotifications]);
 
   // «Переснять» — закрываем результат и возвращаемся к камере снять новый кадр.
   const onRetake = useCallback(() => {
@@ -650,6 +680,9 @@ export function ResultScreen() {
             ) : null}
           </>
         )}
+
+        {/* Диагностика скана — только при включённом переключателе в Настройках. */}
+        <ScanDiagnostics stages={job?.timings} />
       </View>
 
       {/* Действия (прячем во время правки — у редактора свои «Готово/Отмена»). */}
@@ -675,6 +708,42 @@ export function ResultScreen() {
     <Confetti trigger={burst} originTop="30%" count={24} />
     <FlyToTab trigger={flyTs} category={content.category} imageUri={content.imageUri} startTop={0.28} />
     </>
+  );
+}
+
+/**
+ * Разбивка ожидания скана по этапам. Показывается ТОЛЬКО при включённой
+ * диагностике (Настройки → Дополнительно): в TestFlight/сторе консоли нет, а
+ * цифры нужны именно с реального телефона и реальной сети.
+ *
+ * ИТОГО — стена времени от затвора до карточки, а не сумма строк: серверные
+ * тайминги вложены в «сеть + модель», а вырезка Vision идёт параллельно.
+ */
+function ScanDiagnostics({ stages }: { stages?: ScanStage[] }) {
+  const theme = useTheme();
+  if (!isScanDiagOn() || !stages || stages.length === 0) return null;
+  return (
+    <View style={[styles.diagCard, { borderColor: theme.border, backgroundColor: theme.card }]}>
+      <View style={styles.exampleHeader}>
+        <Icon name="stopwatch.fill" size={14} color={theme.textSecondary} />
+        <ThemedText type="smallBold" themeColor="textSecondary">
+          Диагностика скана
+        </ThemedText>
+      </View>
+      {stages.map((s, i) => (
+        <View key={`${s.name}-${i}`} style={styles.diagRow}>
+          <ThemedText
+            type={s.name === TOTAL ? 'smallBold' : 'small'}
+            themeColor={s.name === TOTAL ? 'text' : 'textSecondary'}
+            style={styles.flex}>
+            {s.name}
+          </ThemedText>
+          <ThemedText type={s.name === TOTAL ? 'smallBold' : 'small'} themeColor={s.name === TOTAL ? 'text' : 'textSecondary'}>
+            {s.text ?? `${s.ms} мс`}
+          </ThemedText>
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -909,6 +978,15 @@ function SceneCatch({
 }
 
 const styles = StyleSheet.create({
+  diagCard: {
+    gap: Spacing.one,
+    marginTop: Spacing.three,
+    padding: Spacing.three,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  diagRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   reveal: { gap: Spacing.three },
   questDone: {
     flexDirection: 'row',

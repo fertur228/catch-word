@@ -45,14 +45,16 @@ import { useCollection } from '@/lib/collection-context';
 import { useT } from '@/lib/i18n';
 import { getScanJob, SCAN_FRAME, updateScanJob, type ScanResult, type SceneItem } from '@/lib/scan-job';
 import {
-  cropToFrame,
   cropToSticker,
   isRecognitionConfigured,
   persistImage,
+  prepareScanImage,
   recognizePhoto,
   ScanLimitError,
   toScanResult,
 } from '@/lib/recognize';
+import { isScanDiagOn } from '@/lib/scan-diag';
+import { startScanTimer } from '@/lib/scan-timing';
 import { liftToPNG } from '@/lib/subject-lift';
 import { getDailyQuests } from '@/lib/daily-quest';
 
@@ -139,28 +141,46 @@ export function ScanningScreen() {
 
     (async () => {
       const started = Date.now();
+      // Разбивка ожидания по этапам: в дев-логе всегда, а в сторовой сборке —
+      // только если включена диагностика скана (Настройки → Дополнительно).
+      // Именно она даёт цифры с реального телефона и реальной сети.
+      const timing = startScanTimer(__DEV__ || isScanDiagOn());
       const job = getScanJob(jobId);
       const mode = job?.mode ?? 'single';
       let result: ScanResult | undefined;
       let cutoutUri: string | null = null;
       let items: SceneItem[] | undefined;
 
-      // single — по КВАДРАТУ под визиром (кроп по рамке, см. ниже): предмет крупный
-      // → точнее распознавание и чище нативная вырезка. scene — по всему кадру.
       const photoUri = job?.photoUri;
 
       if (photoUri) {
         const configured = isRecognitionConfigured();
 
+        // Подготовка кадра — ОДНО перекодирование на оба режима.
+        // single — по КВАДРАТУ под визиром: предмет крупный → точнее распознавание
+        // и чище нативная вырезка. Кроп по РЕАЛЬНОМУ положению визира (замерено на
+        // камере); нет замера → центр экрана (прежнее поведение).
+        // scene — весь кадр (визир не применяем).
+        const { width: screenW, height: screenH } = Dimensions.get('window');
+        const visor =
+          mode === 'scene'
+            ? null
+            : (job?.visor ?? { cx: screenW / 2, cy: screenH / 2, side: SCAN_FRAME, screenW, screenH });
+        const prep = await prepareScanImage(photoUri, visor, timing);
+        timing.mark('подготовка кадра');
+        // Подготовка не удалась — работаем сырым кадром (медленнее, но скан не теряем).
+        const prepared = prep ?? { uri: photoUri, width: 0, height: 0 };
+
         if (mode === 'scene') {
           // «Поймай всю сцену»: до 8 предметов, у каждого — свой вырез по bbox.
           let reco: Awaited<ReturnType<typeof recognizePhoto>> = null;
           try {
-            reco = await recognizePhoto(photoUri, prefs.learningLang, prefs.nativeLang, 8);
+            reco = await recognizePhoto(prepared, prefs.learningLang, prefs.nativeLang, 8, [], timing);
           } catch (e) {
             if (e instanceof ScanLimitError) { onLimitReached(e.premium); return; }
             reco = null;
           }
+          timing.mark('сеть + модель');
           if (!active) return;
           if (configured && !reco) {
             fail(t('Не получилось распознать'), t('Проверь интернет и попробуй ещё раз. Скан не списан.'));
@@ -175,9 +195,9 @@ export function ScanningScreen() {
             for (const obj of reco.objects) {
               const cut = obj.bbox || obj.mask
                 ? await cropToSticker(
-                    reco.prepared.uri,
-                    reco.prepared.width,
-                    reco.prepared.height,
+                    prepared.uri,
+                    prepared.width,
+                    prepared.height,
                     obj.bbox,
                     obj.mask,
                     obj.maskBox,
@@ -190,26 +210,11 @@ export function ScanningScreen() {
           } else {
             cutoutUri = await persistImage(photoUri).catch(() => null);
           }
+          timing.mark('вырезка стикеров');
         } else {
-          // single: сначала вырезаем КВАДРАТ ПОД ВИЗИРОМ (рамкой наведения) из кадра.
-          // Его отдаём и в распознавание (предмет крупный → выше точность), и в
-          // нативную вырезку (Vision получает центрированный субъект → чище результат).
-          // Кроп по РЕАЛЬНОМУ положению визира (замерено на камере). Fallback —
-          // центр экрана (прежнее поведение), если замер не пришёл.
-          const { width: screenW, height: screenH } = Dimensions.get('window');
-          const visor = job?.visor ?? {
-            cx: screenW / 2,
-            cy: screenH / 2,
-            side: SCAN_FRAME,
-            screenW,
-            screenH,
-          };
-          const framed = await cropToFrame(photoUri, visor);
-          const scanUri = framed?.uri ?? photoUri;
-
           // Вырезку запускаем параллельно, но распознавание ждём отдельно, чтобы
           // поймать ScanLimitError (402) и уйти на пейволл, не «сжигая» вырезку.
-          const liftP = liftToPNG(scanUri).catch(() => null);
+          const liftP = liftToPNG(prepared.uri).catch(() => null);
           // Мгновенное превью: как только VisionKit вернул вырез — показываем его,
           // не дожидаясь облачного распознавания, и визуально ЗАВЕРШАЕМ прогресс,
           // чтобы ожидание слова читалось как «готово», а не «ждём медленный ИИ».
@@ -221,17 +226,20 @@ export function ScanningScreen() {
           let reco: Awaited<ReturnType<typeof recognizePhoto>> = null;
           try {
             reco = await recognizePhoto(
-              scanUri,
+              prepared,
               prefs.learningLang,
               prefs.nativeLang,
               1,
               getDailyQuests().map((q) => q.word),
+              timing,
             );
           } catch (e) {
             if (e instanceof ScanLimitError) { onLimitReached(e.premium); return; }
             reco = null;
           }
+          timing.mark('сеть + модель');
           const liftedUri = await liftP;
+          timing.mark('вырезка Vision (парал.)');
           if (!active) return;
 
           if (configured && !reco) {
@@ -257,19 +265,21 @@ export function ScanningScreen() {
           } else if (reco && primary && (primary.bbox || primary.mask)) {
             // Веб: с маской сегментации вырез идёт по контуру + белая обводка.
             cutoutUri = await cropToSticker(
-              reco.prepared.uri,
-              reco.prepared.width,
-              reco.prepared.height,
+              prepared.uri,
+              prepared.width,
+              prepared.height,
               primary.bbox,
               primary.mask,
               primary.maskBox,
             );
           }
-          if (!cutoutUri) cutoutUri = await persistImage(scanUri).catch(() => null);
+          if (!cutoutUri) cutoutUri = await persistImage(prepared.uri).catch(() => null);
+          timing.mark('сохранение стикера');
         }
       }
 
-      if (jobId) updateScanJob(jobId, { result, cutoutUri, items });
+      const stages = timing.done(`режим=${mode} слово=${result?.word ?? '—'}`);
+      if (jobId) updateScanJob(jobId, { result, cutoutUri, items, timings: stages });
       const wait = Math.max(0, (reduceMotion ? 300 : 900) - (Date.now() - started));
       setTimeout(goToResult, wait);
     })();

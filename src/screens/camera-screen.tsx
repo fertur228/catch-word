@@ -56,6 +56,7 @@ import { useCollection } from '@/lib/collection-context';
 import { alertAsync } from '@/lib/dialog';
 import { feedbackImpact, feedbackTap } from '@/lib/feedback';
 import { useT } from '@/lib/i18n';
+import { prewarmRecognition } from '@/lib/recognize';
 import { createScanJob, SCAN_FRAME, type ScanMode, type Visor } from '@/lib/scan-job';
 
 /** Цвета элементов поверх живого видео (не зависят от темы — лежат на кадре). */
@@ -112,6 +113,13 @@ export function CameraScreen() {
   const cameraRef = useRef<CameraView>(null);
   // Ref на рамку-визир — меряем её реальное положение на экране, чтобы кроп совпал.
   const frameRef = useRef<View>(null);
+
+  // Открыли камеру — заранее поднимаем соединение с распознаванием (TLS +
+  // инстанс edge-функции). К моменту нажатия затвора рукопожатие уже сделано,
+  // и скан за него не платит.
+  useEffect(() => {
+    if (isFocused) prewarmRecognition();
+  }, [isFocused]);
 
   // Зацикленные анимации крутим только пока вкладка в фокусе (экономия батареи).
   useEffect(() => {

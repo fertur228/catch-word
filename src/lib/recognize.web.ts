@@ -8,6 +8,7 @@ import { normalizeCategory } from '@/lib/category';
 import { lookupWord } from '@/lib/dictionary';
 import { supabase } from '@/lib/supabase';
 import type { ScanResult, Visor } from '@/lib/scan-job';
+import type { ScanTimer } from '@/lib/scan-timing';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -66,7 +67,10 @@ function loadImage(uri: string): Promise<HTMLImageElement> {
   });
 }
 
-/** Нарисовать картинку в canvas с ресайзом до maxEdge по длинной стороне. */
+/**
+ * Нарисовать картинку в canvas, ужав под потолок maxEdge по длинной стороне.
+ * Только вниз: `Math.min(1, …)` не даёт растянуть кадр меньше потолка.
+ */
 function drawResized(img: HTMLImageElement, maxEdge = MAX_EDGE) {
   const w0 = img.naturalWidth || img.width;
   const h0 = img.naturalHeight || img.height;
@@ -80,29 +84,51 @@ function drawResized(img: HTMLImageElement, maxEdge = MAX_EDGE) {
   return { canvas, width: w, height: h };
 }
 
-async function prepare(uri: string) {
+/** Подготовленный к скану кадр (сигнатура совпадает с recognize.ts). */
+export interface PreparedImage {
+  uri: string;
+  width: number;
+  height: number;
+}
+
+/**
+ * Подготовить кадр к скану: ужать под потолок MAX_EDGE → data URL.
+ *
+ * Визир на вебе не используется: пользователь не наводит живую камеру, а
+ * ВЫБИРАЕТ готовое фото (input capture / галерея), поэтому кроп по экранной
+ * рамке вырезал бы случайный квадрат и калечил кадр ещё до распознавания —
+ * отдаём кадр целиком, модель сама найдёт главный предмет. (Аргумент visor
+ * есть только для паритета сигнатуры с recognize.ts.)
+ */
+export async function prepareScanImage(
+  photoUri: string,
+  _visor: Visor | null,
+  _timer?: ScanTimer,
+): Promise<PreparedImage | null> {
   try {
-    const img = await loadImage(uri);
+    const img = await loadImage(photoUri);
     const { canvas, width, height } = drawResized(img);
-    return { dataUrl: canvas.toDataURL('image/jpeg', JPEG_QUALITY), width, height };
-  } catch {
+    return { uri: canvas.toDataURL('image/jpeg', JPEG_QUALITY), width, height };
+  } catch (e) {
+    console.warn('Не удалось подготовить кадр:', e);
     return null;
   }
 }
 
+/**
+ * Позвать /recognize подготовленным кадром. Веб остаётся на JSON+base64: тут
+ * нет ни моста RN, ни мобильного аплинка, ради которых натив ушёл на сырые
+ * байты, а data URL и так уже base64 (см. recognize.ts).
+ */
 export async function recognizePhoto(
-  photoUri: string,
+  prepared: PreparedImage,
   learningLang: string,
   nativeLang: string,
   maxObjects = 1,
   questWords: string[] = [],
-): Promise<{
-  objects: RecognizedObject[];
-  prepared: { uri: string; width: number; height: number };
-} | null> {
+  _timer?: ScanTimer,
+): Promise<{ objects: RecognizedObject[] } | null> {
   if (!isRecognitionConfigured()) return null;
-  const prepared = await prepare(photoUri);
-  if (!prepared) return null;
 
   // Токен вошедшего пользователя — чтобы сервер посчитал лимит именно ему.
   // Гость → anon-ключ (серверный лимит к нему не применяется).
@@ -120,7 +146,7 @@ export async function recognizePhoto(
         Authorization: `Bearer ${token ?? SUPABASE_ANON}`,
       },
       body: JSON.stringify({
-        image: prepared.dataUrl,
+        image: prepared.uri,
         learningLang,
         nativeLang,
         maxObjects,
@@ -139,10 +165,7 @@ export async function recognizePhoto(
       return null;
     }
     const data = (await res.json()) as { objects?: RecognizedObject[] };
-    return {
-      objects: Array.isArray(data.objects) ? data.objects : [],
-      prepared: { uri: prepared.dataUrl, width: prepared.width, height: prepared.height },
-    };
+    return { objects: Array.isArray(data.objects) ? data.objects : [] };
   } catch (e) {
     if (e instanceof ScanLimitError) throw e; // пробрасываем — экран покажет пейволл
     console.warn('recognize failed:', e);
@@ -150,6 +173,12 @@ export async function recognizePhoto(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Прогрев соединения с /recognize (см. recognize.ts). */
+export function prewarmRecognition(): void {
+  if (!isRecognitionConfigured()) return;
+  void fetch(RECOGNIZE_URL, { method: 'OPTIONS', headers: { apikey: SUPABASE_ANON } }).catch(() => {});
 }
 
 /** Кроп региона [x,y,w,h] (доли 0..1) из картинки → canvas. */
@@ -274,28 +303,6 @@ export async function cropToSticker(
     return canvas.toDataURL('image/jpeg', 0.85);
   } catch (e) {
     console.warn('cropToSticker web failed:', e);
-    return null;
-  }
-}
-
-/**
- * На вебе «визира» (рамки наведения) нет — пользователь не наводит живую камеру,
- * а ВЫБИРАЕТ готовое фото (input capture / галерея). Поэтому кроп по экранной
- * рамке тут неуместен: он вырезал бы случайный центральный квадрат и калечил бы
- * фото ещё до распознавания. Возвращаем кадр ЦЕЛИКОМ — распознавание само найдёт
- * главный предмет. (Сигнатура совпадает с recognize.ts; screen-аргументы не нужны.)
- */
-export async function cropToFrame(
-  uri: string,
-  _visor: Visor,
-): Promise<{ uri: string; width: number; height: number } | null> {
-  try {
-    const img = await loadImage(uri);
-    const width = img.naturalWidth || img.width;
-    const height = img.naturalHeight || img.height;
-    return { uri, width, height };
-  } catch (e) {
-    console.warn('cropToFrame web failed:', e);
     return null;
   }
 }

@@ -17,6 +17,8 @@ import { normalizeCategory } from '@/lib/category';
 import { lookupWord } from '@/lib/dictionary';
 import { supabase } from '@/lib/supabase';
 import type { ScanResult, Visor } from '@/lib/scan-job';
+import { frameCropRect, resizeToFit } from '@/lib/scan-geometry';
+import { parseServerTimings, type ScanTimer } from '@/lib/scan-timing';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -35,9 +37,14 @@ export class ScanLimitError extends Error {
 }
 
 /**
- * Длинная сторона при отправке. 1536/0.85 вместо 1024/0.6: агрессивный
+ * Потолок длинной стороны при отправке. 1536/0.85 вместо 1024/0.6: агрессивный
  * препроцессинг резал точность (готча в памяти команды), а Gemini тайлит
  * по 768px — 1536 стоит столько же токенов, деталей заметно больше.
+ *
+ * ВАЖНО: это именно ПОТОЛОК, а не целевой размер — кадр меньше него НЕ растягиваем
+ * (см. prepareScanImage). Квадрат под визиром на iPhone выходит ~1250px, и прежний
+ * безусловный resize раздувал его до 1536: лишние байты в аплоад без единого
+ * лишнего пикселя информации.
  */
 const MAX_EDGE = 1536;
 const JPEG_QUALITY = 0.85;
@@ -75,6 +82,13 @@ export function isRecognitionConfigured(): boolean {
   return Boolean(RECOGNIZE_URL && SUPABASE_ANON);
 }
 
+/** Подготовленный к скану кадр: файл на диске + его реальные размеры. */
+export interface PreparedImage {
+  uri: string;
+  width: number;
+  height: number;
+}
+
 /** Размеры картинки без перекодирования. */
 function getSize(uri: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve) => {
@@ -86,51 +100,178 @@ function getSize(uri: string): Promise<{ width: number; height: number }> {
   });
 }
 
-/** Ужать фото до ~1024px по длинной стороне → JPEG + base64. */
-async function prepareImage(photoUri: string) {
-  const { width, height } = await getSize(photoUri);
-  const landscape = width >= height && width > 0;
-  const action =
-    width === 0 || height === 0
-      ? { resize: { width: MAX_EDGE } }
-      : landscape
-        ? { resize: { width: MAX_EDGE } }
-        : { resize: { height: MAX_EDGE } };
-  return manipulateAsync(photoUri, [action], {
-    compress: JPEG_QUALITY,
-    format: SaveFormat.JPEG,
-    base64: true,
-  });
+/**
+ * Подготовить кадр к скану ОДНИМ перекодированием: кроп по визиру (single) +
+ * ужатие под потолок MAX_EDGE. Результат идёт и в распознавание, и в нативную
+ * вырезку (Vision получает центрированный субъект → чище стикер).
+ *
+ * Почему одним: раньше путь камера→сеть перекодировал 12-мегапиксельный JPEG
+ * ТРИЖДЫ (нормализация EXIF ради размеров → кроп → ресайз+base64). Один
+ * manipulateAsync применяет EXIF-ориентацию сам, а размеры для кропа читаем
+ * getSize'ом (заголовок, без декодирования) — лишние проходы не нужны.
+ *
+ * ВАЖНО (готча с ориентацией): размеры БЕРЁМ ИЗ САМОГО ИЗОБРАЖЕНИЯ (getSize), а
+ * НЕ из takePictureAsync. Камера на iOS отдаёт размеры в сенсорной ориентации
+ * (ландшафт 4032×3024), а manipulateAsync режет уже развёрнутый портретный кадр
+ * (3024×4032) — кроп по «сенсорным» размерам уезжает мимо рамки, и модель видит
+ * не тот предмет. getSize даёт те же ориентированные размеры, что и manipulate.
+ *
+ * visor=null → без кропа (режим «поймай всю сцену»: нужен весь кадр).
+ */
+export async function prepareScanImage(
+  photoUri: string,
+  visor: Visor | null,
+  timer?: ScanTimer,
+): Promise<PreparedImage | null> {
+  try {
+    const size = await getSize(photoUri);
+    const actions: Parameters<typeof manipulateAsync>[1] = [];
+
+    // 1) Кроп по рамке наведения (только single).
+    const crop = visor ? frameCropRect(size.width, size.height, visor) : null;
+    if (crop) actions.push({ crop });
+    // Размеры кадра и регион кропа — в диагностику: если кроп снова уедет,
+    // это будет видно на экране Результата, а не только на словах.
+    timer?.info('кадр px', `${size.width}×${size.height}`);
+    if (crop) timer?.info('кроп px', `${crop.originX},${crop.originY} ${crop.width}²`);
+
+    // 2) Ужатие — ТОЛЬКО вниз (см. resizeToFit).
+    const outW = crop ? crop.width : size.width;
+    const outH = crop ? crop.height : size.height;
+    if (outW <= 0 || outH <= 0) {
+      // Размеры неизвестны (getSize не смог) — страхуемся прежним поведением.
+      actions.push({ resize: { width: MAX_EDGE } });
+    } else {
+      const resize = resizeToFit(outW, outH, MAX_EDGE);
+      if (resize) actions.push({ resize });
+    }
+
+    const out = await manipulateAsync(photoUri, actions, {
+      compress: JPEG_QUALITY,
+      format: SaveFormat.JPEG,
+    });
+    return { uri: out.uri, width: out.width, height: out.height };
+  } catch (e) {
+    console.warn('Не удалось подготовить кадр:', e);
+    return null;
+  }
 }
 
 /**
- * Позвать /recognize. Возвращает объекты + подготовленное (ужатое) фото
- * (его же используем для кропа стикера), либо null при любой проблеме.
+ * Позвать /recognize уже подготовленным кадром. Возвращает объекты либо null
+ * при любой проблеме (кроме исчерпанного лимита — он летит ScanLimitError).
+ *
+ * Кадр уходит СЫРЫМИ БАЙТАМИ (application/octet-stream), а не base64 внутри
+ * JSON: base64 раздувает тело на треть (253КБ вместо 189КБ), а на мобильном
+ * аплинке это самая дорогая часть ожидания. Заодно гигантская base64-строка
+ * больше не гоняется через мост. Параметры — в query. Веб остаётся на JSON
+ * (см. recognize.web.ts): там нет ни моста, ни мобильного аплинка.
  */
 export async function recognizePhoto(
-  photoUri: string,
+  prepared: PreparedImage,
   learningLang: string,
   nativeLang: string,
   maxObjects = 1,
   questWords: string[] = [],
-): Promise<{
-  objects: RecognizedObject[];
-  prepared: { uri: string; width: number; height: number };
-} | null> {
+  timer?: ScanTimer,
+): Promise<{ objects: RecognizedObject[] } | null> {
   if (!isRecognitionConfigured()) return null;
-
-  let prepared;
-  try {
-    prepared = await prepareImage(photoUri);
-  } catch (e) {
-    console.warn('Не удалось подготовить фото:', e);
-    return null;
-  }
-  if (!prepared.base64) return null;
 
   // Токен вошедшего пользователя — чтобы сервер посчитал лимит именно ему.
   // Гость → anon-ключ (серверный лимит к нему не применяется).
   const token = (await supabase.auth.getSession()).data.session?.access_token;
+
+  const qs = new URLSearchParams({
+    learningLang,
+    nativeLang,
+    maxObjects: String(maxObjects),
+  });
+  if (questWords.length > 0) qs.set('questWords', questWords.join(','));
+
+  const task = FileSystem.createUploadTask(`${RECOGNIZE_URL}?${qs.toString()}`, prepared.uri, {
+    httpMethod: 'POST',
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      apikey: SUPABASE_ANON,
+      Authorization: `Bearer ${token ?? SUPABASE_ANON}`,
+    },
+  });
+  // Жёсткий таймаут: у аплоад-задачи нет AbortSignal — отменяем её вручную.
+  let timedOut = false;
+  const killer = setTimeout(() => {
+    timedOut = true;
+    void task.cancelAsync().catch(() => {});
+  }, TIMEOUT_MS);
+
+  try {
+    let res;
+    try {
+      res = await task.uploadAsync();
+    } catch (e) {
+      // Транспортный сбой САМОЙ аплоад-задачи (не HTTP-ответ): значит запрос до
+      // сервера не дошёл — скан не списан, можно честно повторить прежним путём.
+      // Страховка на случай, если BINARY_CONTENT где-то поведёт себя не так:
+      // хуже медленный скан, чем сломанный. Сервер принимает оба формата.
+      if (timedOut) throw e;
+      console.warn('recognize: бинарный аплоад не удался, откат на JSON:', e);
+      timer?.add('откат на JSON', 0);
+      return await recognizeViaJson(prepared, learningLang, nativeLang, maxObjects, questWords, token);
+    }
+    if (!res || timedOut) {
+      console.warn('recognize: таймаут аплоада');
+      return null;
+    }
+    // Серверные тайминги (сколько внутри функции заняли гейт лимита и модель) —
+    // чтобы в дев-логе было видно, что из «сети+модели» чьё.
+    const srv = res.headers?.['x-scan-timings'] ?? res.headers?.['X-Scan-Timings'];
+    for (const s of parseServerTimings(srv)) timer?.add(s.name, s.ms);
+    if (res.status === 402) {
+      // free-лимит или premium fair-use (флаг premium в теле).
+      const body = safeJson(res.body) as { premium?: boolean } | null;
+      throw new ScanLimitError(body?.premium === true);
+    }
+    if (res.status < 200 || res.status >= 300) {
+      console.warn('recognize HTTP', res.status, String(res.body).slice(0, 200));
+      return null;
+    }
+    const data = safeJson(res.body) as { objects?: RecognizedObject[] } | null;
+    return { objects: Array.isArray(data?.objects) ? data.objects : [] };
+  } catch (e) {
+    if (e instanceof ScanLimitError) throw e; // пробрасываем — экран покажет пейволл
+    console.warn('recognize failed:', e);
+    return null;
+  } finally {
+    clearTimeout(killer);
+  }
+}
+
+/** Разобрать JSON, не роняя поток на битом теле. */
+function safeJson(body: string | undefined | null): unknown {
+  try {
+    return body ? JSON.parse(body) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Прежний путь: base64 внутри JSON. Живёт только как страховка, если бинарный
+ * аплоад сорвётся на транспорте (см. recognizePhoto) — тело на треть толще,
+ * поэтому основным его больше не делаем.
+ */
+async function recognizeViaJson(
+  prepared: PreparedImage,
+  learningLang: string,
+  nativeLang: string,
+  maxObjects: number,
+  questWords: string[],
+  token: string | undefined,
+): Promise<{ objects: RecognizedObject[] } | null> {
+  const b64 = await FileSystem.readAsStringAsync(prepared.uri, {
+    encoding: FileSystem.EncodingType.Base64,
+  }).catch(() => null);
+  if (!b64) return null;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -143,29 +284,31 @@ export async function recognizePhoto(
         apikey: SUPABASE_ANON,
         Authorization: `Bearer ${token ?? SUPABASE_ANON}`,
       },
-      body: JSON.stringify({ image: prepared.base64, learningLang, nativeLang, maxObjects, questWords }),
+      body: JSON.stringify({ image: b64, learningLang, nativeLang, maxObjects, questWords }),
     });
     if (res.status === 402) {
-      // free-лимит или premium fair-use (флаг premium в теле).
       const body = (await res.json().catch(() => null)) as { premium?: boolean } | null;
       throw new ScanLimitError(body?.premium === true);
     }
     if (!res.ok) {
-      console.warn('recognize HTTP', res.status, (await res.text()).slice(0, 200));
+      console.warn('recognize (JSON) HTTP', res.status, (await res.text()).slice(0, 200));
       return null;
     }
     const data = (await res.json()) as { objects?: RecognizedObject[] };
-    return {
-      objects: Array.isArray(data.objects) ? data.objects : [],
-      prepared: { uri: prepared.uri, width: prepared.width, height: prepared.height },
-    };
-  } catch (e) {
-    if (e instanceof ScanLimitError) throw e; // пробрасываем — экран покажет пейволл
-    console.warn('recognize failed:', e);
-    return null;
+    return { objects: Array.isArray(data.objects) ? data.objects : [] };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Прогреть соединение с /recognize (TLS + инстанс edge-функции). Зовём при
+ * открытии камеры: к моменту нажатия затвора рукопожатие уже сделано, и скан
+ * не платит за него. Ошибки игнорируем — это чистая оптимизация.
+ */
+export function prewarmRecognition(): void {
+  if (!isRecognitionConfigured()) return;
+  void fetch(RECOGNIZE_URL, { method: 'OPTIONS', headers: { apikey: SUPABASE_ANON } }).catch(() => {});
 }
 
 /**
@@ -205,45 +348,6 @@ export async function cropToSticker(
     return await persistImage(uri);
   } catch (e) {
     console.warn('Не удалось вырезать стикер:', e);
-    return null;
-  }
-}
-
-/**
- * Кроп по «визиру»: вырезает квадрат фото, соответствующий рамке наведения на
- * экране. Превью камеры масштабируется в режиме cover (заполняет экран, лишнее
- * обрезается), поэтому точки экрана переводим в пиксели фото через тот же
- * cover-масштаб и берём квадрат вокруг РЕАЛЬНОГО центра визира (visor.cx/cy) —
- * ровно то, что пользователь видел в рамке (визир НЕ по центру экрана — выше).
- * Возвращает { uri, width, height } или null.
- */
-export async function cropToFrame(
-  uri: string,
-  visor: Visor,
-): Promise<{ uri: string; width: number; height: number } | null> {
-  try {
-    // Пустой список действий нормализует EXIF-ориентацию и даёт реальные пиксели.
-    const base = await manipulateAsync(uri, [], { compress: 1, format: SaveFormat.JPEG });
-    const pw = base.width;
-    const ph = base.height;
-    const { cx, cy, side: frameSidePt, screenW, screenH } = visor;
-    if (!pw || !ph || screenW <= 0 || screenH <= 0) return base;
-    // cover-масштаб превью → сторона квадрата в пикселях фото.
-    const scale = Math.max(screenW / pw, screenH / ph);
-    const side = Math.max(1, Math.min(pw, ph, Math.round(frameSidePt / scale)));
-    // Центр визира (в точках экрана) → пиксели фото через ту же cover-трансформацию.
-    const cxPx = (cx - screenW / 2) / scale + pw / 2;
-    const cyPx = (cy - screenH / 2) / scale + ph / 2;
-    const originX = Math.max(0, Math.min(pw - side, Math.round(cxPx - side / 2)));
-    const originY = Math.max(0, Math.min(ph - side, Math.round(cyPx - side / 2)));
-    const out = await manipulateAsync(
-      base.uri,
-      [{ crop: { originX, originY, width: side, height: side } }],
-      { compress: 0.9, format: SaveFormat.JPEG },
-    );
-    return { uri: out.uri, width: out.width, height: out.height };
-  } catch (e) {
-    console.warn('Не удалось вырезать по рамке:', e);
     return null;
   }
 }

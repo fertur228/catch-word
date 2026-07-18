@@ -14,6 +14,8 @@
  *  - Нет result → Результат честно берёт мок (приложение работает на любой стадии).
  */
 
+import type { ScanStage } from '@/lib/scan-timing';
+
 /** Результат распознавания одного предмета (что вернёт бэкенд /recognize). */
 export interface ScanResult {
   /** Слово на изучаемом языке. */
@@ -76,6 +78,12 @@ export interface ScanJob {
   result?: ScanResult;
   /** Несколько пойманных предметов (режим scene). */
   items?: SceneItem[];
+  /**
+   * Разбивка ожидания по этапам. Заполняется всегда (замер стоит пары Date.now()),
+   * но показывается на Результате только при включённой диагностике скана —
+   * см. src/lib/scan-diag.ts.
+   */
+  timings?: ScanStage[];
 }
 
 /**
@@ -89,7 +97,11 @@ const jobs = new Map<string, ScanJob>();
 let counter = 0;
 
 /** Создать скан с (опциональным) снятым кадром. Возвращает jobId для роута. */
-export function createScanJob(photoUri?: string, mode: ScanMode = 'single', visor?: Visor): string {
+export function createScanJob(
+  photoUri?: string,
+  mode: ScanMode = 'single',
+  visor?: Visor,
+): string {
   const id = `scan-${Date.now()}-${++counter}`;
   jobs.set(id, { id, photoUri, mode, visor });
   // Не копим память: держим только несколько последних сканов.
