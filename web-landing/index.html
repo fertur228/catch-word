@@ -27,6 +27,14 @@
   .btn{display:inline-flex;align-items:center;gap:8px;background:var(--cta);color:var(--ctaText);font-weight:600;font-size:16px;padding:14px 26px;border-radius:999px;border:0;cursor:pointer;transition:transform .18s ease}
   .btn:hover{transform:scale(1.03)}
 
+  /* Бейдж App Store */
+  .appstore{display:inline-flex;align-items:center;gap:11px;background:var(--cta);color:var(--ctaText);padding:11px 22px;border-radius:14px;transition:transform .18s ease}
+  .appstore:hover{transform:scale(1.03)}
+  .appstore svg{width:26px;height:26px;flex:0 0 auto}
+  .appstore .as-t{display:flex;flex-direction:column;text-align:left;line-height:1.12}
+  .appstore .as-t small{font-size:11px;font-weight:600;opacity:.62;letter-spacing:.2px}
+  .appstore .as-t b{font-size:17px;font-weight:700;letter-spacing:-.01em}
+
   /* NAV — оставил только «Как работает» */
   nav{position:sticky;top:16px;z-index:50;margin-top:16px}
   .nav-in{max-width:720px;margin:0 auto;display:flex;align-items:center;gap:18px;padding:9px 9px 9px 16px;border-radius:999px;border:1px solid var(--hair);background:rgba(255,255,255,.06);backdrop-filter:saturate(160%) blur(20px);-webkit-backdrop-filter:saturate(160%) blur(20px)}
@@ -53,7 +61,7 @@
   .hero{padding-top:80px;padding-bottom:40px;display:grid;grid-template-columns:1.06fr .94fr;gap:70px;align-items:center}
   .hero h1{font-size:clamp(40px,5.6vw,64px);line-height:1.02}
   .hero p{color:var(--text2);font-size:19px;line-height:1.55;margin-top:24px;max-width:470px}
-  .hero-cta{display:flex;align-items:center;gap:22px;margin-top:38px}
+  .hero-cta{display:flex;flex-wrap:wrap;align-items:center;gap:22px;margin-top:38px}
   .hero-cta .link{color:var(--text2);font-weight:600;font-size:15px}
   .hero-media{display:flex;justify-content:center}
   @media(max-width:900px){.hero{grid-template-columns:1fr;text-align:center;gap:48px}.hero p{margin-left:auto;margin-right:auto}.hero-cta{justify-content:center}}
@@ -152,7 +160,7 @@
   <div class="hero-text">
     <h1>Учи язык через<br>знакомые вещи.</h1>
     <p>Наведи камеру на любой предмет — и он превращается в слово, перевод, произношение и карточку для повторения.</p>
-    <div class="hero-cta"><a class="btn" href="https://app.catch-words.com/sign-in">Начать бесплатно</a><a class="link" href="https://app.catch-words.com/sign-in">Войти →</a></div>
+    <div class="hero-cta"><a class="appstore" href="https://apps.apple.com/app/id6787075572"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 12.94c-.03-2.6 2.12-3.85 2.22-3.91-1.21-1.77-3.09-2.01-3.76-2.04-1.6-.16-3.12.94-3.93.94-.81 0-2.06-.92-3.39-.89-1.74.03-3.35 1.01-4.25 2.57-1.81 3.14-.46 7.79 1.3 10.34.86 1.25 1.88 2.65 3.22 2.6 1.29-.05 1.78-.83 3.34-.83 1.56 0 2 .83 3.37.81 1.39-.03 2.27-1.27 3.12-2.53.98-1.45 1.39-2.85 1.41-2.92-.03-.01-2.71-1.04-2.74-4.13zM14.53 5.38c.71-.86 1.19-2.06 1.06-3.25-1.02.04-2.26.68-2.99 1.54-.66.76-1.23 1.98-1.08 3.15 1.14.09 2.3-.58 3.01-1.44z"/></svg><span class="as-t"><small>Доступно в</small><b>App Store</b></span></a><a class="link" href="https://app.catch-words.com/sign-in">Открыть в браузере →</a></div>
   </div>
   <div class="hero-media"><div class="phone float"><video src="./demo.mp4" poster="./shots/video-poster.jpg" autoplay muted loop playsinline preload="metadata"></video></div></div>
 </header>
@@ -269,7 +277,7 @@
   <div class="final rise">
     <h2>Начни ловить слова сегодня</h2>
     <p class="lead">Открой камеру — и первое слово уже твоё.</p>
-    <div style="margin-top:30px"><a class="btn" href="https://app.catch-words.com/sign-in">Начать бесплатно</a></div>
+    <div style="margin-top:30px;display:inline-flex;flex-wrap:wrap;gap:16px;justify-content:center;align-items:center"><a class="appstore" href="https://apps.apple.com/app/id6787075572"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 12.94c-.03-2.6 2.12-3.85 2.22-3.91-1.21-1.77-3.09-2.01-3.76-2.04-1.6-.16-3.12.94-3.93.94-.81 0-2.06-.92-3.39-.89-1.74.03-3.35 1.01-4.25 2.57-1.81 3.14-.46 7.79 1.3 10.34.86 1.25 1.88 2.65 3.22 2.6 1.29-.05 1.78-.83 3.34-.83 1.56 0 2 .83 3.37.81 1.39-.03 2.27-1.27 3.12-2.53.98-1.45 1.39-2.85 1.41-2.92-.03-.01-2.71-1.04-2.74-4.13zM14.53 5.38c.71-.86 1.19-2.06 1.06-3.25-1.02.04-2.26.68-2.99 1.54-.66.76-1.23 1.98-1.08 3.15 1.14.09 2.3-.58 3.01-1.44z"/></svg><span class="as-t"><small>Доступно в</small><b>App Store</b></span></a><a class="btn" href="https://app.catch-words.com/sign-in" style="background:var(--tile);color:var(--text)">Начать бесплатно</a></div>
   </div>
   <footer>
     <div class="foot-cols">
@@ -279,7 +287,7 @@
       </div>
       <div class="foot-col">
         <h4>TakeWord</h4>
-        <a href="#">Download App</a>
+        <a href="https://apps.apple.com/app/id6787075572">Download App</a>
         <a href="#">Our Story</a>
         <a href="#">Support</a>
         <a href="#">Contact Us</a>
