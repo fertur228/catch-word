@@ -35,6 +35,13 @@
   .appstore .as-t small{font-size:11px;font-weight:600;opacity:.62;letter-spacing:.2px}
   .appstore .as-t b{font-size:17px;font-weight:700;letter-spacing:-.01em}
 
+  /* Верхняя полоса: видна сразу при заходе (QR) */
+  .topbar{display:flex;align-items:center;justify-content:center;gap:9px;background:var(--accent);color:#fff;font-weight:700;font-size:14.5px;padding:11px 18px;text-align:center;line-height:1.3;transition:filter .18s ease}
+  .topbar svg{width:17px;height:17px;fill:currentColor;flex:0 0 auto}
+  .topbar b{font-weight:800}
+  .topbar:hover{filter:brightness(1.08)}
+  @media(max-width:560px){.topbar{font-size:13.5px;padding:10px 14px}}
+
   /* Липкий призыв «Попробуй прямо сейчас» */
   .sticky-cta{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(180%);z-index:60;display:flex;align-items:center;gap:14px;background:var(--cta);color:var(--ctaText);padding:9px 10px 9px 22px;border-radius:999px;box-shadow:0 22px 55px -14px rgba(0,0,0,.75);transition:transform .45s cubic-bezier(.16,1,.3,1);font-weight:700}
   .sticky-cta.show{transform:translateX(-50%) translateY(0)}
@@ -161,6 +168,8 @@
 </style>
 </head>
 <body>
+
+<a class="topbar" href="https://apps.apple.com/app/id6787075572"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.05 12.94c-.03-2.6 2.12-3.85 2.22-3.91-1.21-1.77-3.09-2.01-3.76-2.04-1.6-.16-3.12.94-3.93.94-.81 0-2.06-.92-3.39-.89-1.74.03-3.35 1.01-4.25 2.57-1.81 3.14-.46 7.79 1.3 10.34.86 1.25 1.88 2.65 3.22 2.6 1.29-.05 1.78-.83 3.34-.83 1.56 0 2 .83 3.37.81 1.39-.03 2.27-1.27 3.12-2.53.98-1.45 1.39-2.85 1.41-2.92-.03-.01-2.71-1.04-2.74-4.13zM14.53 5.38c.71-.86 1.19-2.06 1.06-3.25-1.02.04-2.26.68-2.99 1.54-.66.76-1.23 1.98-1.08 3.15 1.14.09 2.3-.58 3.01-1.44z"/></svg>Скачай TakeWord в App Store — попробуй прямо сейчас <b>→</b></a>
 
 <nav><div class="nav-in">
   <span class="brand"><img src="./icon.png" alt="">TakeWord</span>
